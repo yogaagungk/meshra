@@ -2,6 +2,8 @@
 
 This records observed results, not planned integrations. Platform: Linux x64 in WSL2; Go 1.27.2, Node 24.22.0, npm 11.19.1. Provider credentials were never printed or stored in Meshra's SQLite records.
 
+Agent labels and example paths in this historical report have been generalized. Recorded task IDs, outcomes, and verification limits are unchanged.
+
 ## Deterministic and executable checks
 
 The final implementation passed:

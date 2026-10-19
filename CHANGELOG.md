@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Use neutral example agent identifiers consistently across plans, documentation, routing regressions, and executable smoke scenarios.
+
 ## 0.2.0 — 2026-10-19
 
 ### Reliable communication
