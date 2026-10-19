@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Use neutral example agent identifiers consistently across plans, documentation, routing regressions, and executable smoke scenarios.
+- Split synthetic secret-shaped test literals without changing the redaction cases or bypassing repository push protection.
 
 ## 0.2.0 — 2026-10-19
 
