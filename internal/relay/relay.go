@@ -30,6 +30,12 @@ var migration string
 //go:embed migrations/002.sql
 var migrationV2 string
 
+//go:embed migrations/003.sql
+var migrationV3 string
+
+//go:embed migrations/004.sql
+var migrationV4 string
+
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
 type slot struct {
@@ -381,6 +387,11 @@ func (r *Relay) Remove(p model.Principal, id string) error {
 	defer tx.Rollback()
 	if _, err = tx.Exec("DELETE FROM credentials WHERE agent_id=?", id); err != nil {
 		return err
+	}
+	for _, table := range []string{"conversation_participants", "context_acl"} {
+		if _, err = tx.Exec("DELETE FROM "+table+" WHERE agent_id=?", id); err != nil {
+			return err
+		}
 	}
 	if _, err = tx.Exec("DELETE FROM agents WHERE id=?", id); err != nil {
 		return err

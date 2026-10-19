@@ -4,6 +4,14 @@ A local-first relay for independently named AI coding harness instances. `claude
 
 The v0.2 daemon includes a SQLite WAL registry and bounded durable inbox, persisted claims and offline retry schedules, session/repository serialization, authenticated HTTP/JSON and task SSE, compatible MCP tools, tracing/metrics/diagnostics, configurable retention, and adapters for OMP, Codex App Server, Claude Agent SDK, and OpenCode HTTP. No Redis, cloud service, or paid account is required for deterministic tests.
 
+The v0.3 collaboration extension adds persistent conversations, private immutable
+shared context, pinned references, dependency-aware delegation and result artifacts.
+Existing v0.1/v0.2 messaging remains compatible. Start with the
+[v0.3 runbook](docs/V0.3_RUNBOOK.md), [contracts](docs/V0.3_DESIGN.md),
+[ADR](docs/ADR-v0.3.md) and [test evidence](docs/V0.3_TEST_REPORT.md).
+Real OpenCode/Codex/OMP validation is distinguished from deterministic isolation
+checks; Claude native verification was waived by the operator.
+
 ## Prerequisites and build
 
 - Ubuntu/WSL2 or Linux, **Go 1.25+**. The Go core uses pure-Go SQLite; a C compiler is not required for a normal build.

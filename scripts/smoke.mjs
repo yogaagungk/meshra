@@ -128,6 +128,21 @@ try {
   const traced = replies.find(reply => reply.id === 2).result.structuredContent;
   assert.equal(traced.task.state, 'cancelled');
   assert.equal(traced.task.correlationId, task.correlationId);
+  const conversation = await cli('collaboration', 'conversation.create', JSON.stringify({ title: 'v0.3 CLI smoke', participants: ['claude:exampleone', 'claude:exampletwo', 'codex:reviewer'] }));
+  const published = await cli('collaboration', 'context.publish', JSON.stringify({ title: 'contract', content: 'PINNED_V03_ONE', idempotencyKey: 'cli-context-one' }));
+  await cli('collaboration', 'context.grant', JSON.stringify({ contextId: published.contextId, agentId: 'claude:exampleone' }));
+  await cli('collaboration', 'context.attach', JSON.stringify({ contextId: published.contextId, version: 1, conversationId: conversation.conversationId }));
+  const walletCredential = await cli('agent', 'token', 'claude:exampletwo');
+  const contextDenied = await fetch(`http://${address}/v1/collaboration/context.get`, { method: 'POST', headers: { Authorization: `Bearer ${walletCredential.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ contextId: published.contextId, version: 1 }) });
+  assert.equal(contextDenied.status, 403);
+  await cli('collaboration', 'context.publish', JSON.stringify({ contextId: published.contextId, version: 2, content: 'PINNED_V03_TWO' }));
+  await stop();
+  await start();
+  const pinned = await cli('collaboration', 'context.get', JSON.stringify({ contextId: published.contextId, version: 1 }));
+  assert.equal(pinned.content, 'PINNED_V03_ONE');
+  assert.equal(pinned.sha256, published.sha256);
+  const channel = await cli('collaboration', 'conversation.get', JSON.stringify({ id: conversation.conversationId }));
+  assert.equal(channel.participants.length, 3);
   let providerTurns = 0;
   if (native) {
     const omp = await cli('agent', 'start', 'omp:exampleworker');
@@ -179,7 +194,7 @@ try {
     assert.equal((await cli('agent', 'status', omp.id)).state, 'stopped');
     providerTurns++;
   }
-  console.log(JSON.stringify({ smoke: 'passed', registeredAgents: agents.length, independentClaudeIdentities: 2, queuedRestartRecovery: true, duplicateAdmissionDeduplicated: true, traceCorrelation: true, boundedSynchronousWait: true, metrics: true, doctor: true, mcpStdioTrace: true, unauthorizedStatus: forbidden.status, invalidCredentialStatus: denied.status, providerTurns, liveCrossHarnessReply: native, liveNativeResumeAfterRestart: native }));
+  console.log(JSON.stringify({ smoke: 'passed', collaborationCLI: true, pinnedContextRestart: true, privateContextDenied: contextDenied.status, registeredAgents: agents.length, independentClaudeIdentities: 2, queuedRestartRecovery: true, duplicateAdmissionDeduplicated: true, traceCorrelation: true, boundedSynchronousWait: true, metrics: true, doctor: true, mcpStdioTrace: true, unauthorizedStatus: forbidden.status, invalidCredentialStatus: denied.status, providerTurns, liveCrossHarnessReply: native, liveNativeResumeAfterRestart: native }));
 } finally {
   try { await stop(); } finally { await rm(directory, { recursive: true, force: true }); }
 }

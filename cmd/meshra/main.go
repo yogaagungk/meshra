@@ -36,6 +36,7 @@ Usage: meshra [global flags] <command> [flags]
 Commands:
   serve [--retention DURATION] [--max-delivery-attempts N]
         [--retry-base DURATION] [--retry-cap DURATION]
+        [--context-bytes N] [--artifact-bytes N] [--delegation-fanout N]
   agent create --harness H --name N --cwd DIR
        [--model M] [--provider P] [--display-name N]
        [--allow-to ID,...] [--allow-operation OP,...] [--delegate]
@@ -48,6 +49,7 @@ Commands:
        [--wait]                  Request only; requires explicit --timeout
   task status|cancel|retry|trace ID
   task events ID [--after N] [--follow]
+  collaboration OP JSON_OBJECT   Conversation/context operations
   metrics
   doctor
   mcp stdio                 Agent-only MCP proxy; requires MESHRA_TOKEN
@@ -106,7 +108,7 @@ func globals(args []string) (options, []string, bool, error) {
 		// equal a global flag such as --json or --help.
 		commandValue := false
 		switch name {
-		case "--harness", "--name", "--cwd", "--model", "--provider", "--display-name", "--allow-to", "--allow-operation", "--allow-from", "--allow-inbound-operation", "--from", "--to", "--message", "--idempotency-key", "--timeout", "--parent-task", "--max-hops", "--after", "--retention", "--max-delivery-attempts", "--retry-base", "--retry-cap":
+		case "--harness", "--name", "--cwd", "--model", "--provider", "--display-name", "--allow-to", "--allow-operation", "--allow-from", "--allow-inbound-operation", "--from", "--to", "--message", "--idempotency-key", "--timeout", "--parent-task", "--max-hops", "--after", "--retention", "--max-delivery-attempts", "--retry-base", "--retry-cap", "--context-bytes", "--artifact-bytes", "--delegation-fanout":
 			commandValue = true
 		}
 		if commandValue && !has {
@@ -331,7 +333,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 }
 func serveOptions(args []string) (relay.Options, error) {
 	opts := relay.Options{}
-	f, err := parse(args, map[string]bool{"--retention": false, "--max-delivery-attempts": false, "--retry-base": false, "--retry-cap": false})
+	f, err := parse(args, map[string]bool{"--retention": false, "--max-delivery-attempts": false, "--retry-base": false, "--retry-cap": false, "--context-bytes": false, "--artifact-bytes": false, "--delegation-fanout": false})
 	if err != nil {
 		return opts, err
 	}
@@ -355,6 +357,22 @@ func serveOptions(args []string) (relay.Options, error) {
 			return opts, usage("--max-delivery-attempts must be 1..1000")
 		}
 	}
+	for _, item := range []struct {
+		name string
+		dest *int
+		max  int
+	}{{"--context-bytes", &opts.MaxContextBytes, 32768}, {"--artifact-bytes", &opts.MaxArtifactBytes, 65536}, {"--delegation-fanout", &opts.MaxDelegationFanout, 64}} {
+		if raw, present := f.values[item.name]; present {
+			*item.dest, err = strconv.Atoi(raw[len(raw)-1])
+			min := 1024
+			if item.name == "--delegation-fanout" {
+				min = 1
+			}
+			if err != nil || *item.dest < min || *item.dest > item.max {
+				return opts, usage("invalid %s: allowed %d..%d", item.name, min, item.max)
+			}
+		}
+	}
 	base, cap := opts.RetryBase, opts.RetryCap
 	if base == 0 {
 		base = time.Second
@@ -371,6 +389,20 @@ func serveOptions(args []string) (relay.Options, error) {
 func command(args []string) (method, path string, body any, follow bool, err error) {
 	method = http.MethodGet
 	switch args[0] {
+	case "collaboration":
+		if len(args) != 3 {
+			err = usage("collaboration OP JSON_OBJECT")
+			return
+		}
+		var q model.CollaborationRequest
+		if e := json.Unmarshal([]byte(args[2]), &q); e != nil {
+			err = usage("invalid collaboration JSON: %v", e)
+			return
+		}
+		method = http.MethodPost
+		path = "/v1/collaboration/" + args[1]
+		body = q
+		return
 	case "agent":
 		if len(args) < 2 {
 			err = usage("agent requires a subcommand")

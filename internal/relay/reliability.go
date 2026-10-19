@@ -22,6 +22,10 @@ import (
 
 // Options bound delivery checks and history without changing v0.1 Open callers.
 type Options struct {
+	MaxContextBytes     int
+	MaxArtifactBytes    int
+	MaxDelegationFanout int
+
 	Retention           time.Duration
 	MaxDeliveryAttempts int
 	RetryBase           time.Duration
@@ -29,6 +33,19 @@ type Options struct {
 }
 
 func (o Options) defaults() (Options, error) {
+	if o.MaxContextBytes == 0 {
+		o.MaxContextBytes = 32 * 1024
+	}
+	if o.MaxArtifactBytes == 0 {
+		o.MaxArtifactBytes = 64 * 1024
+	}
+	if o.MaxDelegationFanout == 0 {
+		o.MaxDelegationFanout = 16
+	}
+	if o.MaxContextBytes < 1024 || o.MaxContextBytes > 32*1024 || o.MaxArtifactBytes < 1024 || o.MaxArtifactBytes > 64*1024 || o.MaxDelegationFanout < 1 || o.MaxDelegationFanout > 64 {
+		return o, errors.New("invalid collaboration limits: context 1024..32768, artifact 1024..65536, fan-out 1..64")
+	}
+
 	if o.Retention == 0 {
 		o.Retention = 30 * 24 * time.Hour
 	}
@@ -62,8 +79,8 @@ func migrate(db *sql.DB) error {
 	if err := db.QueryRow("SELECT max(version) FROM schema_version").Scan(&version); err != nil {
 		return err
 	}
-	if version < 1 || version > 2 {
-		return fmt.Errorf("unsupported database schema %d; this executable supports 1..2", version)
+	if version < 1 || version > 4 {
+		return fmt.Errorf("unsupported database schema %d; this executable supports 1..4", version)
 	}
 	if _, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=OFF;"); err != nil {
 		return err
@@ -97,6 +114,32 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	if version < 3 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec(migrationV3); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 4 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec(migrationV4); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	_, err := db.Exec("PRAGMA foreign_keys=ON")
 	return err
 }
@@ -111,6 +154,14 @@ func (r *Relay) SetLogger(logger *slog.Logger) {
 func fingerprint(q model.SendRequest) string {
 	// Compare the original request, not its redacted representation.
 	b, _ := json.Marshal(struct{ To, Text, Type, Parent string }{q.To, q.Text, q.Type, q.ParentTaskID})
+	if q.ConversationID != "" || len(q.ContextRefs) > 0 || len(q.DependsOn) > 0 {
+		b, _ = json.Marshal(struct {
+			Base         string
+			Conversation string
+			Refs         []model.ContextRef
+			Deps         []string
+		}{string(b), q.ConversationID, q.ContextRefs, q.DependsOn})
+	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
@@ -491,7 +542,7 @@ func (r *Relay) prune() error {
 	}
 	cutoff := now().Add(-r.options.Retention).Format(time.RFC3339Nano)
 	for {
-		rows, err := r.db.Query(`SELECT id FROM tasks t WHERE state IN ('completed','failed','cancelled','timed_out') AND json_extract(body,'$.updatedAt')<? AND NOT EXISTS(SELECT 1 FROM tasks child WHERE json_extract(child.body,'$.parentTaskId')=t.id) LIMIT 256`, cutoff)
+		rows, err := r.db.Query(`SELECT id FROM tasks t WHERE state IN ('completed','failed','cancelled','timed_out') AND json_extract(body,'$.updatedAt')<? AND NOT EXISTS(SELECT 1 FROM tasks child WHERE json_extract(child.body,'$.parentTaskId')=t.id OR EXISTS(SELECT 1 FROM json_each(child.body,'$.dependsOn') dep WHERE dep.value=t.id)) LIMIT 256`, cutoff)
 		if err != nil {
 			return err
 		}

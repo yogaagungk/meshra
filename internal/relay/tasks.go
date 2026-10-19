@@ -77,6 +77,11 @@ func (r *Relay) transition(t model.Task, kind, data string) error {
 	if _, err = tx.Exec("UPDATE tasks SET body=?,state=? WHERE id=? AND state=?", string(b), t.State, t.ID, old); err != nil {
 		return err
 	}
+	if t.ConversationID != "" && model.Terminal(t.State) {
+		if _, err = tx.Exec("INSERT INTO conversation_events(conversation_id,actor,operation,resource,time) VALUES(?,?,?,?,?)", t.ConversationID, t.To, "task."+t.State, t.ID, now().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
 	if err = insertEvent(tx, t, kind, data); err != nil {
 		return err
 	}
@@ -185,7 +190,7 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 		}
 		q.ParentTaskID = p.TaskID
 	}
-	t = model.Task{SchemaVersion: 1, ID: randomID(), MessageID: randomID(), CorrelationID: randomID(), OriginAgentID: from, OriginSessionID: session, From: from, FromSessionID: session, To: q.To, HopCount: 1, MaxHops: q.MaxHops, Type: q.Type, Text: redact(q.Text), State: "queued", IdempotencyKey: q.IdempotencyKey, CreatedAt: now(), UpdatedAt: now(), MaxAttempts: 3, RequestHash: fingerprint(q)}
+	t = model.Task{ConversationID: q.ConversationID, ContextRefs: q.ContextRefs, DependsOn: q.DependsOn, SchemaVersion: 1, ID: randomID(), MessageID: randomID(), CorrelationID: randomID(), OriginAgentID: from, OriginSessionID: session, From: from, FromSessionID: session, To: q.To, HopCount: 1, MaxHops: q.MaxHops, Type: q.Type, Text: redact(q.Text), State: "queued", IdempotencyKey: q.IdempotencyKey, CreatedAt: now(), UpdatedAt: now(), MaxAttempts: 3, RequestHash: fingerprint(q)}
 	t.Deadline = t.CreatedAt.Add(time.Duration(q.TimeoutSeconds) * time.Second)
 	if q.ParentTaskID != "" {
 		if !p.Admin && !a.Policy.Delegate {
@@ -258,6 +263,9 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 			return model.Task{}, e
 		}
 	}
+	if err := r.validateCollaboration(p, q); err != nil {
+		return model.Task{}, err
+	}
 	n, total, err := r.inboxDepth(q.To)
 	if err != nil {
 		return model.Task{}, err
@@ -278,6 +286,11 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 	if _, err = tx.Exec("INSERT INTO tasks(id,sender,sender_session,recipient,operation,idempotency_key,state,body) VALUES(?,?,?,?,?,?,?,?)", t.ID, from, session, q.To, q.Type, key, t.State, string(b)); err != nil {
 		return model.Task{}, err
 	}
+	if t.ConversationID != "" {
+		if _, err = tx.Exec("INSERT INTO conversation_events(conversation_id,actor,operation,resource,time) VALUES(?,?,?,?,?)", t.ConversationID, t.From, "task.queued", t.ID, now().Format(time.RFC3339Nano)); err != nil {
+			return model.Task{}, err
+		}
+	}
 	if err = insertEvent(tx, t, "queued", "durably accepted; destination may be offline"); err != nil {
 		return model.Task{}, err
 	}
@@ -297,6 +310,13 @@ func (r *Relay) Task(p model.Principal, id string) (model.Task, error) {
 	}
 	if err = r.access(p, t, "status"); err != nil {
 		return model.Task{}, err
+	}
+	if t.ConversationID != "" && t.State == "queued" {
+		ready, err := r.dependenciesReady(t)
+		t.SchedulingState = "blocked"
+		if ready && err == nil {
+			t.SchedulingState = "ready"
+		}
 	}
 	return t, nil
 }
@@ -410,6 +430,7 @@ func (r *Relay) Retry(p model.Principal, id string) (model.Task, error) {
 	t.LeaseOwner = ""
 	t.LeaseUntil = time.Time{}
 	t.Result = ""
+	t.ResultRef = nil
 	t.Deadline = now().Add(300 * time.Second)
 	err = r.transition(t, "queued", "explicit manual retry; execution may repeat external effects")
 	return t, err
@@ -514,6 +535,19 @@ func (r *Relay) tick() time.Duration {
 		if t.State != "queued" {
 			continue
 		}
+		ready, depErr := r.dependenciesReady(t)
+		if depErr != nil {
+			t.State = "failed"
+			t.ErrorCategory = "dependency_failed"
+			t.Error = "dependency missing or failed; explicit retry required"
+			if r.transition(t, "failed", t.Error) != nil {
+				return time.Second
+			}
+			continue
+		}
+		if !ready {
+			continue
+		}
 		s := r.slots[t.To]
 		if len(r.repos) >= 32 || (s != nil && (s.taskID != "" || r.repos[s.repo])) {
 			continue
@@ -530,6 +564,15 @@ func (r *Relay) tick() time.Duration {
 				return time.Second
 			}
 			// transition signals the scheduler, which observes the persisted retry time.
+			continue
+		}
+		if _, e = r.resolveTaskContext(t); e != nil {
+			t.State = "failed"
+			t.ErrorCategory = "context_denied"
+			t.Error = "context unavailable or authorization revoked"
+			if r.transition(t, "failed", t.Error) != nil {
+				return time.Second
+			}
 			continue
 		}
 		t.State = "dispatching"
@@ -588,6 +631,10 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 			e = r.transition(current, "running", "harness turn started; external effects now possible")
 		}
 	}
+	var injected string
+	if e == nil && !model.Terminal(current.State) {
+		injected, e = r.resolveTaskContext(current)
+	}
 	r.mu.Unlock()
 	var result string
 	var runErr error
@@ -596,7 +643,9 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 	deltaOverflow := false
 	sawDelta := false
 	if e == nil && !model.Terminal(current.State) {
-		result, runErr = s.runtime.Run(ctx, model.Turn{Task: current, Token: token, MCPURL: url}, func(kind, data string) {
+		delivery := current
+		delivery.Text += injected
+		result, runErr = s.runtime.Run(ctx, model.Turn{Task: delivery, Token: token, MCPURL: url}, func(kind, data string) {
 			data = strings.ReplaceAll(data, token, "[REDACTED]")
 			r.mu.Lock()
 			defer r.mu.Unlock()
@@ -696,6 +745,17 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 			}
 			current.State = "completed"
 			current.Result = redact(strings.ReplaceAll(result, token, "[REDACTED]"))
+		}
+		if current.State == "completed" && current.ConversationID != "" && current.Result != "" {
+			ref, err := r.publishTaskResult(current)
+			if err != nil {
+				current.State = "failed"
+				current.ErrorCategory = "result_storage_failed"
+				current.Error = "execution completed but result artifact persistence failed; inspect before retry"
+				current.Ambiguous = true
+			} else {
+				current.ResultRef = &ref
+			}
 		}
 		if sid := s.runtime.SessionID(); sid != "" {
 			current.DestinationSessionID = sid

@@ -52,6 +52,10 @@ type Principal struct {
 	TaskID    string
 }
 type SendRequest struct {
+	ConversationID string       `json:"conversationId,omitempty"`
+	ContextRefs    []ContextRef `json:"contextRefs,omitempty"`
+	DependsOn      []string     `json:"dependsOn,omitempty"`
+
 	From           string `json:"from,omitempty"`
 	To             string `json:"to"`
 	Text           string `json:"text"`
@@ -62,6 +66,12 @@ type SendRequest struct {
 	MaxHops        int    `json:"maxHops,omitempty"`
 }
 type Task struct {
+	SchedulingState string       `json:"schedulingState,omitempty"`
+	ResultRef       *ContextRef  `json:"resultRef,omitempty"`
+	ConversationID  string       `json:"conversationId,omitempty"`
+	ContextRefs     []ContextRef `json:"contextRefs,omitempty"`
+	DependsOn       []string     `json:"dependsOn,omitempty"`
+
 	SchemaVersion        int       `json:"schemaVersion"`
 	ID                   string    `json:"taskId"`
 	MessageID            string    `json:"messageId"`

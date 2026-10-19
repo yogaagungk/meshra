@@ -1,0 +1,10 @@
+ok  	meshra/cmd/meshra	(cached)
+ok  	meshra/internal/adapters/claude	(cached)
+ok  	meshra/internal/adapters/codex	(cached)
+ok  	meshra/internal/adapters/omp	(cached)
+ok  	meshra/internal/adapters/opencode	(cached)
+ok  	meshra/internal/adapters/process	(cached)
+ok  	meshra/internal/api	(cached)
+?   	meshra/internal/model	[no test files]
+ok  	meshra/internal/relay	7.674s
+ok  	meshra/tests	(cached)

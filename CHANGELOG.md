@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add v0.3 persistent conversations, exact-agent membership, filtered context bindings and channel lifecycle events.
+- Add transactional schema migrations 003/004, immutable SHA-256 SQLite artifacts, private context versions, explicit grants/revocation, metadata search and append-only access audit.
+- Extend durable tasks with pinned context refs, immutable dependencies, ready/blocked inspection and immutable result refs; retain v0.1/v0.2 routes and task states.
+- Reauthorize context as the recipient before adapter delivery, enforce configurable byte/fan-out limits, and inject bounded untrusted JSON envelopes across all adapters.
+- Add collaboration HTTP/CLI/MCP operations and authorized immutable MCP resources; preserve repository/session serialization and uncertain-execution manual reconciliation.
+- Add native three-harness validation, transport authorization/restart/migration regressions, WSL2 resource sampling, design/runbook and evidence report. Claude provider verification is waived; no four-harness native claim.
+
 - Use neutral example agent identifiers consistently across plans, documentation, routing regressions, and executable smoke scenarios.
 - Split synthetic secret-shaped test literals without changing the redaction cases or bypassing repository push protection.
 

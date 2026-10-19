@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"meshra/internal/model"
 )
@@ -41,7 +44,7 @@ func tools() []toolDefinition {
 		"inboundOperations": map[string]any{"type": "array", "items": str("Allowed inbound operation")},
 		"worktreeWrites":    map[string]any{"type": "boolean", "description": "Rejected unless adapter can enforce approvals"},
 	})
-	return []toolDefinition{
+	return append(collaborationTools(), []toolDefinition{
 		{"meshra_agents_list", "List agents visible to this authenticated identity", schema(map[string]any{})},
 		{"meshra_agent_status", "Inspect a named agent", schema(map[string]any{"id": str("Canonical agent ID")}, "id")},
 		{"meshra_agent_register", "Administrator: register an agent without starting its runtime; omitted inbound lists preserve legacy access, empty lists deny", schema(map[string]any{"harness": str("Harness name"), "name": str("Instance name"), "displayName": str("Display name"), "cwd": str("Workspace directory"), "config": schema(map[string]any{"model": str("Model"), "provider": str("Provider")}), "policy": policy, "concurrency": map[string]any{"type": "integer", "minimum": 1}}, "harness", "name", "cwd")},
@@ -54,7 +57,7 @@ func tools() []toolDefinition {
 		{"meshra_task_retry", "Administrator: manually retry a terminal task; ambiguous failures may repeat effects", schema(map[string]any{"taskId": str("Task ID")}, "taskId")},
 		{"meshra_metrics", "Administrator: inspect retained task metrics", schema(map[string]any{})},
 		{"meshra_doctor", "Administrator: inspect local relay diagnostics", schema(map[string]any{})},
-	}
+	}...)
 }
 func protocolSupported(version string) bool {
 	return version == "2025-03-26" || version == "2025-06-18" || version == "2025-11-25"
@@ -120,7 +123,49 @@ func (s *server) mcp(w http.ResponseWriter, r *http.Request, p model.Principal) 
 		if !protocolSupported(version) {
 			version = "2025-11-25"
 		}
-		result = map[string]any{"protocolVersion": version, "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]string{"name": "meshra", "version": "0.2.0"}, "instructions": "Requests are asynchronous. Use task status/events/trace to read results. Caller identity comes only from bearer authentication. Registration, retry, metrics and doctor require administrator credentials."}
+		result = map[string]any{"protocolVersion": version, "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}, "resources": map[string]any{}}, "serverInfo": map[string]string{"name": "meshra", "version": "0.2.0"}, "instructions": "Requests are asynchronous. Use task status/events/trace to read results. Caller identity comes only from bearer authentication. Registration, retry, metrics and doctor require administrator credentials."}
+	case "resources/read":
+		var params struct {
+			URI string `json:"uri"`
+		}
+		if err := arguments(req.Params, &params); err != nil {
+			rpcError(-32602, err.Error())
+			return
+		}
+		u, err := url.Parse(params.URI)
+		if err != nil || u.Scheme != "meshra" || u.Host != "contexts" || u.RawQuery != "" || u.Fragment != "" {
+			rpcError(-32602, "expected immutable Meshra context URI")
+			return
+		}
+		parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+		if len(parts) != 3 || parts[1] != "versions" {
+			rpcError(-32602, "expected context/version URI")
+			return
+		}
+		version, err := strconv.Atoi(parts[2])
+		if err != nil || version < 1 {
+			rpcError(-32602, "positive version required")
+			return
+		}
+		svc, ok := s.service.(model.CollaborationService)
+		if !ok {
+			rpcError(-32601, "resources unavailable")
+			return
+		}
+		value, err := svc.Collaborate(p, "context.get", model.CollaborationRequest{ContextID: parts[0], Version: version})
+		if err != nil {
+			rpcError(-32000, err.Error())
+			return
+		}
+		b, err := json.Marshal(value)
+		if err != nil {
+			rpcError(-32603, "encoding failed")
+			return
+		}
+		result = map[string]any{"contents": []any{map[string]any{"uri": params.URI, "mimeType": "application/json", "text": string(b)}}}
+	case "resources/list":
+		// Context search is the metadata discovery surface; no unbounded enumeration.
+		result = map[string]any{"resources": []any{}}
 	case "ping":
 		result = map[string]any{}
 	case "tools/list":
@@ -171,6 +216,17 @@ func arguments(raw json.RawMessage, v any) error {
 	return nil
 }
 func (s *server) callTool(p model.Principal, name string, raw json.RawMessage) (any, error) {
+	if strings.HasPrefix(name, "meshra_collaboration_") {
+		var q model.CollaborationRequest
+		if err := arguments(raw, &q); err != nil {
+			return nil, err
+		}
+		svc, ok := s.service.(model.CollaborationService)
+		if !ok {
+			return nil, model.Err(501, "collaboration unavailable")
+		}
+		return svc.Collaborate(p, strings.Replace(strings.TrimPrefix(name, "meshra_collaboration_"), "_", ".", 1), q)
+	}
 	switch name {
 	case "meshra_agent_register":
 		var args model.CreateAgent
@@ -272,4 +328,12 @@ func (s *server) callTool(p model.Principal, name string, raw json.RawMessage) (
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)
 	}
+}
+
+func collaborationTools() []toolDefinition {
+	out := []toolDefinition{}
+	for _, op := range []string{"conversation.create", "conversation.get", "conversation.list", "conversation.addParticipant", "conversation.events", "context.publish", "context.get", "context.search", "context.attach", "context.grant", "context.revoke", "context.audit", "task.delegate", "task.list"} {
+		out = append(out, toolDefinition{"meshra_collaboration_" + strings.Replace(op, ".", "_", 1), "Authorized durable collaboration operation", schema(map[string]any{"targetTaskId": str("Queued task binding target; mutually exclusive with conversationId"), "contextId": str("Context ID"), "version": map[string]any{"type": "integer"}, "content": str("UTF-8 content, at most 64 KiB; no secrets"), "type": str("Context type"), "scope": str("Metadata scope; not authorization"), "idempotencyKey": str("Deduplication key"), "conversationId": str("Conversation ID"), "keyword": str("Title keyword"), "from": str("Admin only sender; agent identity is authenticated"), "to": str("Recipient"), "instruction": str("Task instruction"), "contextRefs": map[string]any{"type": "array", "items": schema(map[string]any{"contextId": str("ID"), "version": map[string]any{"type": "integer"}}, "contextId", "version")}, "dependsOn": map[string]any{"type": "array", "items": str("Existing task ID")}, "timeoutSeconds": map[string]any{"type": "integer"}, "parentTaskId": str("Parent task"), "id": str("Resource ID"), "title": str("Title"), "agentId": str("Exact agent ID"), "participants": map[string]any{"type": "array", "items": str("Exact ID")}, "after": str("Cursor"), "limit": map[string]any{"type": "integer"}})})
+	}
+	return out
 }

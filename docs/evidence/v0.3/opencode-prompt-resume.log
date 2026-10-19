@@ -1,0 +1,4 @@
+=== RUN   TestAuthenticatedSmoke
+--- PASS: TestAuthenticatedSmoke (18.88s)
+PASS
+ok  	meshra/internal/adapters/opencode	18.881s

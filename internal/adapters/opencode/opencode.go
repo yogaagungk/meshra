@@ -68,7 +68,7 @@ func (r *runtimeSession) Close() error {
 }
 func permissions() []map[string]string {
 	rules := []map[string]string{{"permission": "*", "pattern": "*", "action": "ask"}}
-	for _, name := range []string{"read", "glob", "grep", "meshra_meshra_agents_list", "meshra_meshra_agent_status", "meshra_meshra_send", "meshra_meshra_request", "meshra_meshra_task_status", "meshra_meshra_task_events", "meshra_meshra_task_cancel", "meshra_meshra_task_trace"} {
+	for _, name := range []string{"read", "glob", "grep", "meshra_meshra_agents_list", "meshra_meshra_agent_status", "meshra_meshra_send", "meshra_meshra_request", "meshra_meshra_task_status", "meshra_meshra_task_events", "meshra_meshra_task_cancel", "meshra_meshra_task_trace", "meshra_meshra_collaboration_conversation_create", "meshra_meshra_collaboration_conversation_get", "meshra_meshra_collaboration_conversation_list", "meshra_meshra_collaboration_conversation_addParticipant", "meshra_meshra_collaboration_conversation_events", "meshra_meshra_collaboration_context_publish", "meshra_meshra_collaboration_context_get", "meshra_meshra_collaboration_context_search", "meshra_meshra_collaboration_context_attach", "meshra_meshra_collaboration_context_grant", "meshra_meshra_collaboration_context_revoke", "meshra_meshra_collaboration_context_audit", "meshra_meshra_collaboration_task_delegate", "meshra_meshra_collaboration_task_list"} {
 		rules = append(rules, map[string]string{"permission": name, "pattern": "*", "action": "allow"})
 	}
 	return rules

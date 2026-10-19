@@ -52,6 +52,21 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var result any
 	status := http.StatusOK
 	switch {
+	case len(parts) == 2 && parts[0] == "collaboration":
+		if r.Method != http.MethodPost {
+			method(w, "POST")
+			return
+		}
+		var q model.CollaborationRequest
+		if !decode(w, r, &q) {
+			return
+		}
+		svc, ok := s.service.(model.CollaborationService)
+		if !ok {
+			fail(w, model.Err(501, "collaboration unavailable"))
+			return
+		}
+		result, err = svc.Collaborate(p, parts[1], q)
 	case path == "identity":
 		if r.Method != http.MethodGet {
 			method(w, "GET")

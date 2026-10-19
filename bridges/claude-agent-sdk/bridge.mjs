@@ -10,7 +10,7 @@ process.on('SIGINT', () => abortController.abort());
 let token = '';
 const safeError = (error) => String(error?.message ?? error).replaceAll(token || '\0', '[redacted]').slice(0, 4096);
 const readOnly = new Set(['Read', 'Glob', 'Grep']);
-const meshraTools = new Set(['meshra_agents_list', 'meshra_agent_status', 'meshra_send', 'meshra_request', 'meshra_task_status', 'meshra_task_events', 'meshra_task_cancel', 'meshra_task_trace']);
+const meshraTools = new Set(['meshra_agents_list', 'meshra_agent_status', 'meshra_send', 'meshra_request', 'meshra_task_status', 'meshra_task_events', 'meshra_task_cancel', 'meshra_task_trace', 'meshra_collaboration_conversation_create', 'meshra_collaboration_conversation_get', 'meshra_collaboration_conversation_list', 'meshra_collaboration_conversation_addParticipant', 'meshra_collaboration_conversation_events', 'meshra_collaboration_context_publish', 'meshra_collaboration_context_get', 'meshra_collaboration_context_search', 'meshra_collaboration_context_attach', 'meshra_collaboration_context_grant', 'meshra_collaboration_context_revoke', 'meshra_collaboration_context_audit', 'meshra_collaboration_task_delegate', 'meshra_collaboration_task_list']);
 const allowed = (name) => readOnly.has(name) || (name.startsWith('mcp__meshra__') && meshraTools.has(name.slice('mcp__meshra__'.length)));
 const denied = new Set();
 function deny(name, id) {
