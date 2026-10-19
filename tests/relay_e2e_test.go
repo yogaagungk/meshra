@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,9 +34,10 @@ func (r *echoRuntime) Run(ctx context.Context, turn model.Turn, e model.Emit) (s
 	r.received[r.agent]++
 	r.mu.Unlock()
 	if turn.Task.Text == "stream" {
-		for range 300 {
-			e("delta", "chunk")
+		for i := range 300 {
+			e("progress", fmt.Sprintf("step-%03d", i))
 		}
+		e("delta", "complete streamed text")
 	}
 	return "reply:" + r.agent + ":" + turn.Task.Text, nil
 }
@@ -147,21 +149,40 @@ func TestLocalEndToEndIdentityMCPAndStreamReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.StatusCode != 200 || strings.Count(string(stream), `"type":"delta"`) != 300 {
-		t.Fatalf("SSE lost completed-task pages: status=%d delta=%d", resp.StatusCode, strings.Count(string(stream), `"type":"delta"`))
+	if resp.StatusCode != 200 {
+		t.Fatalf("SSE status=%d", resp.StatusCode)
+	}
+	progress := 0
+	var text strings.Builder
+	terminal := false
+	for _, line := range strings.Split(string(stream), "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event model.Event
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+			t.Fatal(err)
+		}
+		switch event.Type {
+		case "progress":
+			if strings.HasPrefix(event.Data, "step-") {
+				if event.Data != fmt.Sprintf("step-%03d", progress) {
+					t.Fatalf("lost/reordered persisted SSE page: %q after %d steps", event.Data, progress)
+				}
+				progress++
+			}
+		case "delta":
+			text.WriteString(event.Data)
+		case "completed":
+			terminal = true
+		}
+	}
+	if progress != 300 || text.String() != "complete streamed text" || !terminal {
+		t.Fatalf("SSE replay lost progress/text/completion: steps=%d text=%q terminal=%v", progress, text.String(), terminal)
 	}
 	var rpc map[string]any
-	httpJSON(t, client, server.URL, token, "POST", "/mcp", map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": map[string]any{}}, &rpc, 200)
-	result, ok := rpc["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("MCP tools/list failed: %+v", rpc)
-	}
-	tools, ok := result["tools"].([]any)
-	if !ok || len(tools) != 7 {
-		t.Fatalf("MCP tools missing: %+v", result)
-	}
 	httpJSON(t, client, server.URL, token, "POST", "/mcp", map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "meshra_task_status", "arguments": map[string]any{"taskId": task.ID}}}, &rpc, 200)
-	result, ok = rpc["result"].(map[string]any)
+	result, ok := rpc["result"].(map[string]any)
 	if !ok || result["isError"] == true {
 		t.Fatalf("MCP authenticated task lookup failed: %+v", rpc)
 	}

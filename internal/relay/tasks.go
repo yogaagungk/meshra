@@ -50,6 +50,14 @@ func (r *Relay) tasks() ([]model.Task, error) {
 }
 func (r *Relay) transition(t model.Task, kind, data string) error {
 	t.UpdatedAt = now()
+	t.Text = redact(t.Text)
+	t.Result = redact(t.Result)
+	t.Error = redact(t.Error)
+	if model.Terminal(t.State) {
+		t.LeaseOwner = ""
+		t.LeaseUntil = time.Time{}
+		t.NextAttemptAt = time.Time{}
+	}
 	b, err := json.Marshal(t)
 	if err != nil {
 		return err
@@ -59,15 +67,27 @@ func (r *Relay) transition(t model.Task, kind, data string) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec("UPDATE tasks SET body=?,state=? WHERE id=?", string(b), t.State, t.ID); err != nil {
+	var old string
+	if err = tx.QueryRow("SELECT state FROM tasks WHERE id=?", t.ID).Scan(&old); err != nil {
 		return err
 	}
-	if _, err = tx.Exec("INSERT INTO events(task_id,kind,data,time) VALUES(?,?,?,?)", t.ID, kind, data, t.UpdatedAt.Format(time.RFC3339Nano)); err != nil {
+	if !allowedTransition(old, t.State) {
+		return model.Err(409, "invalid task transition: "+old+" -> "+t.State)
+	}
+	if _, err = tx.Exec("UPDATE tasks SET body=?,state=? WHERE id=? AND state=?", string(b), t.State, t.ID, old); err != nil {
+		return err
+	}
+	if err = insertEvent(tx, t, kind, data); err != nil {
 		return err
 	}
 	err = tx.Commit()
-	if err == nil && (t.State == "queued" || model.Terminal(t.State)) {
-		r.signal()
+	if err == nil {
+		if kind == t.State || kind == "retry_scheduled" || kind == "delivered" {
+			r.logTransition(t, kind)
+		}
+		if t.State == "queued" || model.Terminal(t.State) {
+			r.signal()
+		}
 	}
 	return err
 }
@@ -97,19 +117,25 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 		return t, model.Err(400, "type must be send or request")
 	}
 	if err := r.permit(p, q.Type); err != nil {
+		r.auditDenied(p, q.To, q.Type)
 		return t, err
 	}
 	from := p.AgentID
 	if p.Admin {
 		from = q.From
 	} else if q.From != "" && q.From != p.AgentID {
+		r.auditDenied(p, q.To, q.Type)
 		return t, model.Err(403, "cannot impersonate another agent")
 	}
 	a, err := r.agent(from)
 	if err != nil {
 		return t, err
 	}
-	if _, err = r.agent(q.To); err != nil {
+	destination, err := r.agent(q.To)
+	if err != nil {
+		return t, err
+	}
+	if err = r.authorizeRecipient(p, from, destination, q.Type); err != nil {
 		return t, err
 	}
 	session := p.SessionID
@@ -127,6 +153,7 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 		session = parent.DestinationSessionID
 	}
 	if !p.Admin && !contains(a.Policy.Destinations, q.To) {
+		r.auditDenied(p, q.To, q.Type)
 		return t, model.Err(403, "destination not permitted: "+q.To)
 	}
 	if strings.TrimSpace(q.Text) == "" || !utf8.ValidString(q.Text) {
@@ -135,7 +162,7 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 	if len(q.Text) > model.MaxTextBytes {
 		return t, model.Err(413, "message exceeds 65536 bytes")
 	}
-	if len(q.IdempotencyKey) > 200 || strings.ContainsAny(q.IdempotencyKey, "\x00\r\n") {
+	if len(q.IdempotencyKey) > 200 || strings.ContainsAny(q.IdempotencyKey, "\x00\r\n") || redact(q.IdempotencyKey) != q.IdempotencyKey {
 		return t, model.Err(400, "invalid idempotency key")
 	}
 	if q.TimeoutSeconds == 0 {
@@ -153,14 +180,16 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 	}
 	if p.TaskID != "" {
 		if q.ParentTaskID != "" && q.ParentTaskID != p.TaskID {
+			r.auditDenied(p, q.To, q.Type)
 			return t, model.Err(403, "parent task does not match authenticated turn")
 		}
 		q.ParentTaskID = p.TaskID
 	}
-	t = model.Task{SchemaVersion: 1, ID: randomID(), MessageID: randomID(), CorrelationID: randomID(), OriginAgentID: from, OriginSessionID: session, From: from, FromSessionID: session, To: q.To, HopCount: 1, MaxHops: q.MaxHops, Type: q.Type, Text: q.Text, State: "queued", IdempotencyKey: q.IdempotencyKey, CreatedAt: now(), UpdatedAt: now()}
+	t = model.Task{SchemaVersion: 1, ID: randomID(), MessageID: randomID(), CorrelationID: randomID(), OriginAgentID: from, OriginSessionID: session, From: from, FromSessionID: session, To: q.To, HopCount: 1, MaxHops: q.MaxHops, Type: q.Type, Text: redact(q.Text), State: "queued", IdempotencyKey: q.IdempotencyKey, CreatedAt: now(), UpdatedAt: now(), MaxAttempts: 3, RequestHash: fingerprint(q)}
 	t.Deadline = t.CreatedAt.Add(time.Duration(q.TimeoutSeconds) * time.Second)
 	if q.ParentTaskID != "" {
 		if !p.Admin && !a.Policy.Delegate {
+			r.auditDenied(p, q.To, q.Type)
 			return model.Task{}, model.Err(403, "delegation not permitted")
 		}
 		parent, e := r.task(q.ParentTaskID)
@@ -168,6 +197,7 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 			return model.Task{}, e
 		}
 		if parent.To != from || parent.DestinationSessionID != session {
+			r.auditDenied(p, q.To, q.Type)
 			return model.Task{}, model.Err(403, "parent task is not owned by this destination session")
 		}
 		t.ParentTaskID = parent.ID
@@ -176,6 +206,9 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 		t.OriginSessionID = parent.OriginSessionID
 		t.HopCount = parent.HopCount + 1
 		t.MaxHops = parent.MaxHops
+		if parent.Deadline.Before(t.Deadline) {
+			t.Deadline = parent.Deadline
+		}
 		if maxHopsSpecified && q.MaxHops < t.MaxHops {
 			t.MaxHops = q.MaxHops
 		}
@@ -206,13 +239,17 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 	}
 	if q.IdempotencyKey != "" {
 		var b string
-		e := r.db.QueryRow("SELECT body FROM tasks WHERE sender=? AND sender_session=? AND idempotency_key=?", from, session, q.IdempotencyKey).Scan(&b)
+		e := r.db.QueryRow("SELECT body FROM tasks WHERE sender=? AND sender_session=? AND operation=? AND idempotency_key=?", from, session, q.Type, q.IdempotencyKey).Scan(&b)
 		if e == nil {
 			var old model.Task
 			if e = json.Unmarshal([]byte(b), &old); e != nil {
 				return model.Task{}, e
 			}
-			if old.To != t.To || old.Text != t.Text || old.Type != t.Type || old.ParentTaskID != t.ParentTaskID {
+			oldHash := old.RequestHash
+			if oldHash == "" {
+				oldHash = fingerprint(model.SendRequest{To: old.To, Text: old.Text, Type: old.Type, ParentTaskID: old.ParentTaskID})
+			}
+			if oldHash != t.RequestHash {
 				return model.Task{}, model.Err(409, "idempotency key already used for a different request")
 			}
 			return old, nil
@@ -221,18 +258,9 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 			return model.Task{}, e
 		}
 	}
-	all, err := r.tasks()
+	n, total, err := r.inboxDepth(q.To)
 	if err != nil {
 		return model.Task{}, err
-	}
-	n, total := 0, 0
-	for _, old := range all {
-		if !model.Terminal(old.State) {
-			total++
-			if old.To == q.To {
-				n++
-			}
-		}
 	}
 	if n >= queueLimit || total >= globalQueueLimit {
 		return model.Task{}, model.Err(429, "persistent inbox capacity reached")
@@ -247,15 +275,16 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 		return model.Task{}, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec("INSERT INTO tasks(id,sender,sender_session,idempotency_key,state,body) VALUES(?,?,?,?,?,?)", t.ID, from, session, key, t.State, string(b)); err != nil {
+	if _, err = tx.Exec("INSERT INTO tasks(id,sender,sender_session,recipient,operation,idempotency_key,state,body) VALUES(?,?,?,?,?,?,?,?)", t.ID, from, session, q.To, q.Type, key, t.State, string(b)); err != nil {
 		return model.Task{}, err
 	}
-	if _, err = tx.Exec("INSERT INTO events(task_id,kind,data,time) VALUES(?,?,?,?)", t.ID, "queued", "durably accepted; destination may be offline", now().Format(time.RFC3339Nano)); err != nil {
+	if err = insertEvent(tx, t, "queued", "durably accepted; destination may be offline"); err != nil {
 		return model.Task{}, err
 	}
 	if err = tx.Commit(); err != nil {
 		return model.Task{}, err
 	}
+	r.logTransition(t, "queued")
 	r.signal()
 	return t, nil
 }
@@ -281,17 +310,29 @@ func (r *Relay) Events(p model.Principal, id string, after int64) ([]model.Event
 	if err = r.access(p, t, "events"); err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Query("SELECT id,kind,data,time FROM events WHERE task_id=? AND id>? ORDER BY id LIMIT 256", id, after)
+	return r.events(t, after)
+}
+
+func (r *Relay) events(t model.Task, after int64) ([]model.Event, error) {
+	rows, err := r.db.Query("SELECT id,kind,data,time,metadata FROM events WHERE task_id=? AND id>? ORDER BY id LIMIT 256", t.ID, after)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []model.Event{}
 	for rows.Next() {
-		e := model.Event{TaskID: id}
-		var tm string
-		if err = rows.Scan(&e.ID, &e.Type, &e.Data, &tm); err != nil {
+		e := taskEvent(t)
+		var tm, metadata string
+		if err = rows.Scan(&e.ID, &e.Type, &e.Data, &tm, &metadata); err != nil {
 			return nil, err
+		}
+		var meta model.Event
+		if err = json.Unmarshal([]byte(metadata), &meta); err != nil {
+			return nil, err
+		}
+		if meta.TaskID != "" {
+			meta.ID, meta.Type, meta.Data = e.ID, e.Type, e.Data
+			e = meta
 		}
 		e.Time, err = time.Parse(time.RFC3339Nano, tm)
 		if err != nil {
@@ -315,7 +356,12 @@ func (r *Relay) Cancel(p model.Principal, id string) (model.Task, error) {
 		return t, nil
 	}
 	t.State = "cancelled"
+	t.ErrorCategory = "cancelled"
+	t.Ambiguous = t.Attempts > 0
 	t.Error = "cancelled by caller; started execution may have external effects"
+	t.LeaseOwner = ""
+	t.LeaseUntil = time.Time{}
+	t.NextAttemptAt = time.Time{}
 	err = r.transition(t, "cancelled", t.Error)
 	if s := r.slots[t.To]; s != nil && s.taskID == id && s.turnCancel != nil {
 		s.turnCancel()
@@ -335,24 +381,19 @@ func (r *Relay) Retry(p model.Principal, id string) (model.Task, error) {
 	if t.State != "failed" && t.State != "timed_out" && t.State != "cancelled" {
 		return model.Task{}, model.Err(409, "only failed, timed_out or cancelled tasks may be manually retried")
 	}
-	if t.Attempts >= 3 {
+	limit := t.MaxAttempts
+	if limit == 0 {
+		limit = 3
+	}
+	if t.Attempts >= limit {
 		return model.Task{}, model.Err(409, "manual retry limit reached; inspect external effects before creating new work")
 	}
 	if s := r.slots[t.To]; s != nil && s.taskID == id {
 		return model.Task{}, model.Err(409, "previous execution is still stopping")
 	}
-	all, err := r.tasks()
+	n, total, err := r.inboxDepth(t.To)
 	if err != nil {
 		return t, err
-	}
-	n, total := 0, 0
-	for _, v := range all {
-		if !model.Terminal(v.State) {
-			total++
-			if v.To == t.To {
-				n++
-			}
-		}
 	}
 	if n >= queueLimit || total >= globalQueueLimit {
 		return model.Task{}, model.Err(429, "persistent inbox capacity reached")
@@ -362,6 +403,12 @@ func (r *Relay) Retry(p model.Principal, id string) (model.Task, error) {
 	}
 	t.State = "queued"
 	t.Error = ""
+	t.ErrorCategory = ""
+	t.Ambiguous = false
+	t.DeliveryAttempts = 0
+	t.NextAttemptAt = time.Time{}
+	t.LeaseOwner = ""
+	t.LeaseUntil = time.Time{}
 	t.Result = ""
 	t.Deadline = now().Add(300 * time.Second)
 	err = r.transition(t, "queued", "explicit manual retry; execution may repeat external effects")
@@ -389,6 +436,8 @@ func (r *Relay) recover() error {
 		if t.State == "dispatching" || t.State == "running" {
 			t.State = "failed"
 			t.Error = "relay interrupted execution; outcome uncertain; inspect native session then retry manually"
+			t.ErrorCategory = "uncertain_execution"
+			t.Ambiguous = true
 			if err = r.transition(t, "failed", t.Error); err != nil {
 				return err
 			}
@@ -430,6 +479,16 @@ func (r *Relay) tick() time.Duration {
 	if r.closed {
 		return delay
 	}
+	next := now().Add(delay)
+	if !now().Before(r.nextPrune) {
+		if err := r.prune(); err != nil {
+			r.logger.Error("history retention failed", "errorClass", "storage")
+			return time.Second
+		}
+	}
+	if r.nextPrune.Before(next) {
+		next = r.nextPrune
+	}
 	ts, err := r.tasks()
 	if err != nil {
 		return time.Second
@@ -437,6 +496,8 @@ func (r *Relay) tick() time.Duration {
 	for _, t := range ts {
 		remaining := time.Until(t.Deadline)
 		if remaining <= 0 {
+			t.Ambiguous = t.State != "queued"
+			t.ErrorCategory = "deadline_exceeded"
 			t.State = "timed_out"
 			t.Error = "task deadline exceeded (includes time queued/offline)"
 			if r.transition(t, "timed_out", t.Error) != nil {
@@ -447,20 +508,37 @@ func (r *Relay) tick() time.Duration {
 			}
 			continue
 		}
-		delay = min(delay, remaining)
+		if t.Deadline.Before(next) {
+			next = t.Deadline
+		}
 		if t.State != "queued" {
 			continue
 		}
 		s := r.slots[t.To]
-		if s == nil || s.runtime == nil || s.taskID != "" || r.repos[s.repo] {
+		if len(r.repos) >= 32 || (s != nil && (s.taskID != "" || r.repos[s.repo])) {
 			continue
 		}
 		a, e := r.agent(t.To)
-		if e != nil || a.State != "idle" {
+		if e != nil || s == nil || s.runtime == nil || a.State != "idle" {
+			if wait := time.Until(t.NextAttemptAt); wait > 0 {
+				if t.NextAttemptAt.Before(next) {
+					next = t.NextAttemptAt
+				}
+				continue
+			}
+			if e = r.offline(t); e != nil {
+				return time.Second
+			}
+			// transition signals the scheduler, which observes the persisted retry time.
 			continue
 		}
 		t.State = "dispatching"
 		t.Attempts++
+		t.Error = ""
+		t.ErrorCategory = ""
+		t.NextAttemptAt = time.Time{}
+		t.LeaseOwner = r.owner
+		t.LeaseUntil = t.Deadline
 		t.DestinationSessionID = s.runtime.SessionID()
 		if e = r.transition(t, "dispatching", "turn slot and repository lock acquired"); e != nil {
 			return time.Second
@@ -477,6 +555,7 @@ func (r *Relay) tick() time.Duration {
 		if e != nil {
 			cancel()
 			t.State = "failed"
+			t.ErrorCategory = "credential_unavailable"
 			t.Error = "failed to issue turn credential"
 			_ = r.transition(t, "failed", t.Error)
 			s.taskID = ""
@@ -489,7 +568,9 @@ func (r *Relay) tick() time.Duration {
 		r.wg.Add(1)
 		go r.execute(ctx, a, s, t, token, r.mcpURL)
 	}
-	return delay
+	// Persistence/logging may have consumed the remaining time. Never restart a
+	// relative interval measured before that work and thereby extend a deadline.
+	return time.Until(next)
 }
 func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Task, token, url string) {
 	defer r.wg.Done()
@@ -501,19 +582,47 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 		return
 	}
 	if !model.Terminal(current.State) {
-		current.State = "running"
-		e = r.transition(current, "running", "harness turn started")
+		e = r.transition(current, "delivered", "delivered to the owned adapter; execution completion not acknowledged")
+		if e == nil {
+			current.State = "running"
+			e = r.transition(current, "running", "harness turn started; external effects now possible")
+		}
 	}
 	r.mu.Unlock()
 	var result string
 	var runErr error
 	eventCount := 0
+	var deltas strings.Builder
+	deltaOverflow := false
+	sawDelta := false
 	if e == nil && !model.Terminal(current.State) {
 		result, runErr = s.runtime.Run(ctx, model.Turn{Task: current, Token: token, MCPURL: url}, func(kind, data string) {
+			data = strings.ReplaceAll(data, token, "[REDACTED]")
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			task, err := r.task(t.ID)
 			if err != nil || model.Terminal(task.State) {
+				return
+			}
+			if eventCount >= 10000 {
+				if kind == "delta" {
+					deltaOverflow = true
+				}
+				return
+			}
+			eventCount++
+			if kind == "delta" {
+				// Do not persist raw fragments: a credential can span any native
+				// delta boundary. Progress stays immediate; text waits for success.
+				if !sawDelta {
+					sawDelta = true
+					_ = r.transition(task, "progress", "text buffered until completion for credential-safe persistence")
+				}
+				if !deltaOverflow && deltas.Len()+len(data) <= 256*1024 {
+					deltas.WriteString(data)
+				} else {
+					deltaOverflow = true
+				}
 				return
 			}
 			if kind == "session" {
@@ -527,10 +636,6 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 				_, _ = r.db.Exec("UPDATE credentials SET session_id=? WHERE hash=?", data, tokenHash(token))
 				return
 			}
-			if eventCount >= 10000 {
-				return
-			}
-			eventCount++
 			if len(data) > 16384 {
 				data = truncate(data, 16384) + " [event truncated]"
 			}
@@ -552,21 +657,45 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 		case r.closed:
 			current.State = "failed"
 			current.Error = "relay shutdown interrupted execution; outcome uncertain; retry manually"
+			current.ErrorCategory = "uncertain_execution"
+			current.Ambiguous = true
 		case ctxErr == context.DeadlineExceeded:
 			current.State = "timed_out"
 			current.Error = "task deadline exceeded"
+			current.ErrorCategory = "deadline_exceeded"
+			current.Ambiguous = true
 		case ctxErr != nil:
 			current.State = "cancelled"
 			current.Error = "turn cancelled; execution may have external effects"
+			current.ErrorCategory = "cancelled"
+			current.Ambiguous = true
 		case runErr != nil:
 			current.State = "failed"
-			current.Error = "harness turn failed: " + truncate(runErr.Error(), 2048)
+			current.Error = "harness turn failed: " + truncate(strings.ReplaceAll(runErr.Error(), token, "[REDACTED]"), 2048)
+			current.ErrorCategory = "adapter_failure"
+			current.Ambiguous = true
 		case len(result) > 256*1024:
 			current.State = "failed"
 			current.Error = "harness response exceeds 262144 bytes"
+			current.ErrorCategory = "response_too_large"
+			current.Ambiguous = true
 		default:
+			text := deltas.String()
+			if deltaOverflow {
+				text = result
+			}
+			text = redact(strings.ReplaceAll(text, token, "[REDACTED]"))
+			for len(text) > 0 && eventCount < 10000 {
+				chunk := truncate(text, 16384)
+				if err := r.transition(current, "delta", chunk); err != nil {
+					r.logger.Error("sanitized output persistence failed", "requestId", current.ID, "errorClass", "storage")
+					break
+				}
+				text = text[len(chunk):]
+				eventCount++
+			}
 			current.State = "completed"
-			current.Result = result
+			current.Result = redact(strings.ReplaceAll(result, token, "[REDACTED]"))
 		}
 		if sid := s.runtime.SessionID(); sid != "" {
 			current.DestinationSessionID = sid

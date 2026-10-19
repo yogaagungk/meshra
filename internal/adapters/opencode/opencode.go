@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -67,10 +68,25 @@ func (r *runtimeSession) Close() error {
 }
 func permissions() []map[string]string {
 	rules := []map[string]string{{"permission": "*", "pattern": "*", "action": "ask"}}
-	for _, name := range []string{"read", "glob", "grep", "meshra_meshra_agents_list", "meshra_meshra_agent_status", "meshra_meshra_send", "meshra_meshra_request", "meshra_meshra_task_status", "meshra_meshra_task_events", "meshra_meshra_task_cancel"} {
+	for _, name := range []string{"read", "glob", "grep", "meshra_meshra_agents_list", "meshra_meshra_agent_status", "meshra_meshra_send", "meshra_meshra_request", "meshra_meshra_task_status", "meshra_meshra_task_events", "meshra_meshra_task_cancel", "meshra_meshra_task_trace"} {
 		rules = append(rules, map[string]string{"permission": name, "pattern": "*", "action": "allow"})
 	}
 	return rules
+}
+
+// OpenCode 1.19.3 PATCH appends rules; the last matching rule wins.
+// Reinstall only when needed, rather than growing the transcript every turn.
+func hasPermissionTail(current, policy []map[string]string) bool {
+	if len(current) < len(policy) {
+		return false
+	}
+	tail := current[len(current)-len(policy):]
+	for i := range policy {
+		if !maps.Equal(tail[i], policy[i]) {
+			return false
+		}
+	}
+	return true
 }
 func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Emit) (string, error) {
 	r.running.Lock()
@@ -100,11 +116,13 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 	}
 	defer s.stop()
 	var native struct {
-		ID        string `json:"id"`
-		Directory string `json:"directory"`
+		ID         string              `json:"id"`
+		Directory  string              `json:"directory"`
+		Permission []map[string]string `json:"permission"`
 	}
+	policy := permissions()
 	if session == "" {
-		err = s.call(ctx, "POST", "/session", map[string]any{"title": "Meshra " + r.agent.ID, "permission": permissions()}, &native)
+		err = s.call(ctx, "POST", "/session", map[string]any{"title": "Meshra " + r.agent.ID, "permission": policy}, &native)
 	} else {
 		err = s.call(ctx, "GET", "/session/"+url.PathEscape(session), nil, &native)
 	}
@@ -124,8 +142,10 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 	if emit != nil {
 		emit("session", session)
 	}
-	if err = s.call(ctx, "PATCH", "/session/"+url.PathEscape(session), map[string]any{"permission": permissions()}, nil); err != nil {
-		return "", fmt.Errorf("OpenCode session permission policy: %w", err)
+	if !hasPermissionTail(native.Permission, policy) {
+		if err = s.call(ctx, "PATCH", "/session/"+url.PathEscape(session), map[string]any{"permission": policy}, nil); err != nil {
+			return "", fmt.Errorf("OpenCode session permission policy: %w", err)
+		}
 	}
 	// Subscribe before prompting: permission requests must be explicitly rejected,
 	// not left waiting on a terminal that this owned headless server does not have.

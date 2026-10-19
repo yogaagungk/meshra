@@ -22,6 +22,8 @@ type fakeServer struct {
 	http     *httptest.Server
 	mu       sync.Mutex
 	sessions map[string]string
+	policies map[string][]map[string]string
+	patches  int
 	created  int
 	prompts  int
 	starts   atomic.Int32
@@ -37,6 +39,7 @@ type fakeServer struct {
 
 func newFake(t *testing.T) *fakeServer {
 	f := &fakeServer{t: t, sessions: map[string]string{}, aborted: make(chan struct{}, 10), waiting: make(chan struct{}, 10), asks: make(chan string, 10), denied: make(chan struct{}, 10)}
+	f.policies = make(map[string][]map[string]string)
 	f.http = httptest.NewServer(http.HandlerFunc(f.handle))
 	t.Cleanup(f.http.Close)
 	return f
@@ -78,8 +81,9 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		f.created++
 		id := fmt.Sprintf("ses_%d", f.created)
 		f.sessions[id] = r.Header.Get("x-opencode-directory")
+		f.policies[id] = body.Permission
 		f.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": id, "directory": r.Header.Get("x-opencode-directory")})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "directory": r.Header.Get("x-opencode-directory"), "permission": body.Permission})
 	case r.URL.Path == "/event":
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"type\":\"server.connected\",\"properties\":{}}\n\n")
@@ -164,8 +168,15 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 			if len(body.Permission) == 0 || body.Permission[0]["action"] != "ask" {
 				f.t.Error("resume did not reset safe permission rules")
 			}
+			f.mu.Lock()
+			f.policies[id] = append(f.policies[id], body.Permission...)
+			f.patches++
+			f.mu.Unlock()
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": id, "directory": cwd})
+		f.mu.Lock()
+		policy := append([]map[string]string(nil), f.policies[id]...)
+		f.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "directory": cwd, "permission": policy})
 	default:
 		w.WriteHeader(404)
 	}
@@ -214,6 +225,28 @@ func TestSessionOwnershipResumePermissions(t *testing.T) {
 	}
 	if f.starts.Load() != 3 || f.stops.Load() != 3 {
 		t.Fatal("server lifecycle leak")
+	}
+}
+
+func TestResumeRestoresPermissionsWithoutRepeatedAppend(t *testing.T) {
+	f := newFake(t)
+	cwd := t.TempDir()
+	f.sessions["saved"] = cwd
+	f.policies["saved"] = []map[string]string{{"permission": "*", "pattern": "*", "action": "allow"}}
+	r, err := f.adapter().Factory(context.Background(), model.Agent{Cwd: cwd, SessionID: "saved"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for range 3 {
+		if _, err = r.Run(context.Background(), model.Turn{Task: model.Task{Text: "resumed"}}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.patches != 1 || len(f.policies["saved"]) != 1+len(permissions()) || !hasPermissionTail(f.policies["saved"], permissions()) {
+		t.Fatalf("resume must restore safe policy once, not append each turn: patches=%d rules=%d", f.patches, len(f.policies["saved"]))
 	}
 }
 func TestResumeOnlyOwnedSession(t *testing.T) {

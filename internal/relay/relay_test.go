@@ -363,8 +363,12 @@ func TestQueuedRestartAndUncertainRecovery(t *testing.T) {
 	q := sendTest(t, r, source.ID, dest.ID, "preserved")
 	uncertain := sendTest(t, r, source.ID, dest.ID, "uncertain")
 	r.mu.Lock()
-	uncertain.State = "running"
+	uncertain.State = "dispatching"
 	uncertain.Attempts = 1
+	if err := r.transition(uncertain, "dispatching", "simulated durable pre-crash claim"); err != nil {
+		t.Fatal(err)
+	}
+	uncertain.State = "running"
 	if err := r.transition(uncertain, "running", "simulated durable pre-crash state"); err != nil {
 		t.Fatal(err)
 	}
@@ -459,6 +463,9 @@ func TestDelegationCorrelationPermissionsAndCycleSafety(t *testing.T) {
 	if child.CorrelationID != root.CorrelationID || child.ParentTaskID != root.ID || child.HopCount != 2 || child.MaxHops != 8 || child.OriginAgentID != o.ID || child.OriginSessionID != o.SessionID {
 		t.Fatalf("delegation ownership lost: %+v", child)
 	}
+	if child.Deadline.After(root.Deadline) {
+		t.Fatalf("delegation extended the parent deadline: child %s parent %s", child.Deadline, root.Deadline)
+	}
 	p := model.Principal{AgentID: middle.ID, SessionID: child.FromSessionID}
 	_, err = r.Send(p, model.SendRequest{From: o.ID, To: leaf.ID, Text: "impersonate"})
 	requireStatus(t, err, 403)
@@ -473,12 +480,11 @@ func TestDelegationCorrelationPermissionsAndCycleSafety(t *testing.T) {
 	_, err = r.Send(model.Principal{AgentID: restricted.ID}, model.SendRequest{To: leaf.ID, Text: "denied", ParentTaskID: root.ID})
 	requireStatus(t, err, 403)
 }
-func TestEventReplayAndCancellationDuringTurn(t *testing.T) {
+func TestCancellationDiscardsPartialTextAndKeepsReplay(t *testing.T) {
 	entered := make(chan struct{})
 	r, _ := openTest(t, func(ctx context.Context, v model.Turn, e model.Emit) (string, error) {
-		for range 300 {
-			e("delta", "part")
-		}
+		e("delta", "sk-proj-")
+		e("delta", "abcdefghijklmnopqrstuvwxyz0123456789")
 		close(entered)
 		<-ctx.Done()
 		return "", ctx.Err()
@@ -519,8 +525,8 @@ func TestEventReplayAndCancellationDuringTurn(t *testing.T) {
 			}
 		}
 	}
-	if count != 300 {
-		t.Fatalf("lost stream events: %d", count)
+	if count != 0 {
+		t.Fatalf("cancelled turn exposed partial unredacted text: %d events", count)
 	}
 }
 

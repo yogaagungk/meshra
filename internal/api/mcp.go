@@ -33,14 +33,27 @@ func str(description string) map[string]any {
 }
 func tools() []toolDefinition {
 	send := map[string]any{"to": str("Canonical destination agent ID"), "text": str("Message text, at most 64 KiB"), "idempotencyKey": str("Deduplication key"), "timeoutSeconds": map[string]any{"type": "integer", "minimum": 1}, "parentTaskId": str("Parent task, if delegating"), "maxHops": map[string]any{"type": "integer", "minimum": 1}}
+	policy := schema(map[string]any{
+		"destinations":      map[string]any{"type": "array", "items": str("Allowed destination ID")},
+		"operations":        map[string]any{"type": "array", "items": str("Allowed outbound operation")},
+		"delegate":          map[string]any{"type": "boolean"},
+		"senders":           map[string]any{"type": "array", "items": str("Allowed sender ID")},
+		"inboundOperations": map[string]any{"type": "array", "items": str("Allowed inbound operation")},
+		"worktreeWrites":    map[string]any{"type": "boolean", "description": "Rejected unless adapter can enforce approvals"},
+	})
 	return []toolDefinition{
 		{"meshra_agents_list", "List agents visible to this authenticated identity", schema(map[string]any{})},
 		{"meshra_agent_status", "Inspect a named agent", schema(map[string]any{"id": str("Canonical agent ID")}, "id")},
+		{"meshra_agent_register", "Administrator: register an agent without starting its runtime; omitted inbound lists preserve legacy access, empty lists deny", schema(map[string]any{"harness": str("Harness name"), "name": str("Instance name"), "displayName": str("Display name"), "cwd": str("Workspace directory"), "config": schema(map[string]any{"model": str("Model"), "provider": str("Provider")}), "policy": policy, "concurrency": map[string]any{"type": "integer", "minimum": 1}}, "harness", "name", "cwd")},
 		{"meshra_send", "Queue a message; returns a persistent task immediately", schema(send, "to", "text")},
 		{"meshra_request", "Queue a request; poll its task for the reply (never blocks a turn)", schema(send, "to", "text")},
 		{"meshra_task_status", "Inspect a task visible to this identity", schema(map[string]any{"taskId": str("Task ID")}, "taskId")},
 		{"meshra_task_events", "Read persistent events strictly after a cursor", schema(map[string]any{"taskId": str("Task ID"), "after": map[string]any{"type": "integer", "minimum": 0}}, "taskId")},
 		{"meshra_task_cancel", "Cancel an authorized task", schema(map[string]any{"taskId": str("Task ID")}, "taskId")},
+		{"meshra_task_trace", "Read an authorized task and its persistent lifecycle events", schema(map[string]any{"taskId": str("Task ID")}, "taskId")},
+		{"meshra_task_retry", "Administrator: manually retry a terminal task; ambiguous failures may repeat effects", schema(map[string]any{"taskId": str("Task ID")}, "taskId")},
+		{"meshra_metrics", "Administrator: inspect retained task metrics", schema(map[string]any{})},
+		{"meshra_doctor", "Administrator: inspect local relay diagnostics", schema(map[string]any{})},
 	}
 }
 func protocolSupported(version string) bool {
@@ -107,7 +120,7 @@ func (s *server) mcp(w http.ResponseWriter, r *http.Request, p model.Principal) 
 		if !protocolSupported(version) {
 			version = "2025-11-25"
 		}
-		result = map[string]any{"protocolVersion": version, "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]string{"name": "meshra", "version": "0.1.0"}, "instructions": "Requests are asynchronous. Use task status/events to read results. Caller identity comes only from bearer authentication."}
+		result = map[string]any{"protocolVersion": version, "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]string{"name": "meshra", "version": "0.2.0"}, "instructions": "Requests are asynchronous. Use task status/events/trace to read results. Caller identity comes only from bearer authentication. Registration, retry, metrics and doctor require administrator credentials."}
 	case "ping":
 		result = map[string]any{}
 	case "tools/list":
@@ -159,6 +172,27 @@ func arguments(raw json.RawMessage, v any) error {
 }
 func (s *server) callTool(p model.Principal, name string, raw json.RawMessage) (any, error) {
 	switch name {
+	case "meshra_agent_register":
+		var args model.CreateAgent
+		if err := arguments(raw, &args); err != nil {
+			return nil, err
+		}
+		if !p.Admin {
+			return nil, model.Err(403, "administrator required")
+		}
+		return s.service.Create(p, args)
+	case "meshra_metrics", "meshra_doctor":
+		var args struct{}
+		if err := arguments(raw, &args); err != nil {
+			return nil, err
+		}
+		if !p.Admin {
+			return nil, model.Err(403, "administrator required")
+		}
+		if name == "meshra_metrics" {
+			return s.service.Metrics(p)
+		}
+		return s.service.Doctor(p)
 	case "meshra_agents_list":
 		var args struct{}
 		if err := arguments(raw, &args); err != nil {
@@ -198,7 +232,7 @@ func (s *server) callTool(p model.Principal, name string, raw json.RawMessage) (
 			kind = "request"
 		}
 		return s.service.Send(p, model.SendRequest{To: args.To, Text: args.Text, Type: kind, IdempotencyKey: args.IdempotencyKey, TimeoutSeconds: args.TimeoutSeconds, ParentTaskID: args.ParentTaskID, MaxHops: args.MaxHops})
-	case "meshra_task_status", "meshra_task_events", "meshra_task_cancel":
+	case "meshra_task_status", "meshra_task_events", "meshra_task_cancel", "meshra_task_trace", "meshra_task_retry":
 		var args struct {
 			TaskID string `json:"taskId"`
 			After  int64  `json:"after,omitempty"`
@@ -224,6 +258,13 @@ func (s *server) callTool(p model.Principal, name string, raw json.RawMessage) (
 			return s.service.Task(p, args.TaskID)
 		case "meshra_task_cancel":
 			return s.service.Cancel(p, args.TaskID)
+		case "meshra_task_trace":
+			return s.service.Trace(p, args.TaskID)
+		case "meshra_task_retry":
+			if !p.Admin {
+				return nil, model.Err(403, "administrator required")
+			}
+			return s.service.Retry(p, args.TaskID)
 		default:
 			events, err := s.service.Events(p, args.TaskID, args.After)
 			return map[string]any{"events": events}, err

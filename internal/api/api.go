@@ -58,6 +58,20 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result = map[string]any{"admin": p.Admin, "agentId": p.AgentID, "sessionId": p.SessionID, "taskId": p.TaskID}
+	case path == "metrics" || path == "doctor":
+		if r.Method != http.MethodGet {
+			method(w, "GET")
+			return
+		}
+		if !p.Admin {
+			fail(w, model.Err(403, "administrator required"))
+			return
+		}
+		if path == "metrics" {
+			result, err = s.service.Metrics(p)
+		} else {
+			result, err = s.service.Doctor(p)
+		}
 	case path == "agents":
 		switch r.Method {
 		case http.MethodGet:
@@ -110,11 +124,34 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.Type = path
-		if !p.Admin && req.From != "" && req.From != p.AgentID {
-			fail(w, model.Err(403, "cannot impersonate another agent"))
+		wait := false
+		if path == "request" {
+			raw := r.URL.Query().Get("wait")
+			if raw != "" && raw != "true" && raw != "false" {
+				fail(w, model.Err(400, "wait must be true or false"))
+				return
+			}
+			wait = raw == "true"
+			if wait && (req.TimeoutSeconds < 1 || req.TimeoutSeconds > 86400) {
+				fail(w, model.Err(400, "wait requires timeoutSeconds between 1 and 86400"))
+				return
+			}
+		}
+		if wait && !p.Admin {
+			// Polling requires status permission. Check it before durable admission,
+			// rather than enqueueing work and only then reporting forbidden.
+			if _, err = s.service.Agent(p, p.AgentID); err != nil {
+				fail(w, err)
+				return
+			}
+		}
+		var task model.Task
+		task, err = s.service.Send(p, req)
+		if err == nil && wait {
+			s.waitTask(w, r, p, task)
 			return
 		}
-		result, err = s.service.Send(p, req)
+		result = task
 		status = http.StatusAccepted
 	case len(parts) == 2 && parts[0] == "tasks":
 		if r.Method != http.MethodGet {
@@ -123,6 +160,14 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		result, err = s.service.Task(p, parts[1])
 	case len(parts) == 3 && parts[0] == "tasks":
+		if parts[2] == "trace" {
+			if r.Method != http.MethodGet {
+				method(w, "GET")
+				return
+			}
+			result, err = s.service.Trace(p, parts[1])
+			break
+		}
 		if parts[2] == "events" {
 			if r.Method != http.MethodGet {
 				method(w, "GET")
@@ -153,6 +198,44 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, status, result)
+}
+
+// Waiting affects only this transport: admission remains durable and disconnecting
+// never invokes Cancel. A delayed scheduler must not be represented as terminal.
+func (s *server) waitTask(w http.ResponseWriter, r *http.Request, p model.Principal, task model.Task) {
+	deadline := time.NewTimer(time.Until(task.Deadline))
+	defer deadline.Stop()
+	poll := time.NewTicker(100 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		if r.Context().Err() != nil {
+			return
+		}
+		if model.Terminal(task.State) {
+			w.Header().Set("X-Meshra-Wait-Status", "terminal")
+			respond(w, http.StatusOK, task)
+			return
+		}
+		expired := false
+		select {
+		case <-r.Context().Done():
+			return
+		case <-deadline.C:
+			expired = true
+		case <-poll.C:
+		}
+		current, err := s.service.Task(p, task.ID)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		task = current
+		if expired && !model.Terminal(task.State) {
+			w.Header().Set("X-Meshra-Wait-Status", "deadline")
+			respond(w, http.StatusAccepted, task)
+			return
+		}
+	}
 }
 
 func respond(w http.ResponseWriter, status int, v any) {

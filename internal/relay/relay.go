@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,6 +26,9 @@ import (
 
 //go:embed migrations/001.sql
 var migration string
+
+//go:embed migrations/002.sql
+var migrationV2 string
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
@@ -50,6 +54,10 @@ type Relay struct {
 	wg        sync.WaitGroup
 	closed    bool
 	mcpURL    string
+	owner     string
+	options   Options
+	logger    *slog.Logger
+	nextPrune time.Time
 }
 
 func randomID() string {
@@ -62,6 +70,14 @@ func randomID() string {
 func tokenHash(s string) string { b := sha256.Sum256([]byte(s)); return hex.EncodeToString(b[:]) }
 func now() time.Time            { return time.Now().UTC() }
 func Open(dir string, adapters map[string]model.Adapter) (_ *Relay, err error) {
+	return OpenWithOptions(dir, adapters, Options{})
+}
+
+func OpenWithOptions(dir string, adapters map[string]model.Adapter, options Options) (_ *Relay, err error) {
+	options, err = options.defaults()
+	if err != nil {
+		return nil, err
+	}
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
@@ -106,14 +122,14 @@ func Open(dir string, adapters map[string]model.Adapter) (_ *Relay, err error) {
 			db.Close()
 		}
 	}()
-	if _, err = db.Exec(migration); err != nil {
+	if err = migrate(db); err != nil {
 		return nil, err
 	}
 	if err = os.Chmod(filepath.Join(dir, "meshra.db"), 0600); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &Relay{db: db, lock: lock, admin: strings.TrimSpace(string(b)), adapters: adapters, slots: map[string]*slot{}, repos: map[string]bool{}, wake: make(chan struct{}, 1), ctx: ctx, cancel: cancel}
+	r := &Relay{db: db, lock: lock, admin: strings.TrimSpace(string(b)), adapters: adapters, slots: map[string]*slot{}, repos: map[string]bool{}, wake: make(chan struct{}, 1), ctx: ctx, cancel: cancel, owner: randomID(), options: options, logger: slog.New(slog.NewJSONHandler(os.Stderr, nil))}
 	if err = r.recover(); err != nil {
 		cancel()
 		return nil, err
@@ -163,6 +179,7 @@ func (r *Relay) agent(id string) (model.Agent, error) {
 }
 func (r *Relay) saveAgent(a model.Agent) error {
 	a.LastSeen = now()
+	a.Error = redact(a.Error)
 	b, err := json.Marshal(a)
 	if err != nil {
 		return err
@@ -206,35 +223,37 @@ func (r *Relay) Create(p model.Principal, c model.CreateAgent) (model.Agent, err
 	if c.Concurrency != 0 && c.Concurrency != 1 {
 		return a, model.Err(400, "MVP concurrency must be one")
 	}
-	cwd, err := filepath.Abs(c.Cwd)
-	if err != nil || c.Cwd == "" {
-		return a, model.Err(400, "working directory is required")
-	}
-	cwd, err = filepath.EvalSymlinks(cwd)
+	cwd, err := canonicalWorkspace(c.Cwd)
 	if err != nil {
-		return a, model.Err(400, "working directory does not exist")
-	}
-	st, err := os.Stat(cwd)
-	if err != nil || !st.IsDir() {
-		return a, model.Err(400, "working directory is not a directory")
+		return a, err
 	}
 	for _, s := range []string{c.Config.Model, c.Config.Provider} {
-		if len(s) > 200 || strings.ContainsAny(s, "\r\n\x00") || strings.Contains(s, "sk-") {
+		if len(s) > 200 || !safeRegistryText(s) || strings.Contains(s, "sk-") || redact(s) != s {
 			return a, model.Err(400, "model/provider must be identifiers, not credentials")
 		}
 	}
 	for _, op := range c.Policy.Operations {
-		if op != "send" && op != "request" && op != "status" && op != "events" && op != "cancel" && op != "list" {
-			return a, model.Err(400, "invalid permitted operation: "+op)
+		if !validOperation(op) {
+			return a, model.Err(400, "invalid permitted operation")
+		}
+	}
+	for _, op := range c.Policy.InboundOperations {
+		if op != "send" && op != "request" && op != "*" {
+			return a, model.Err(400, "inbound operations must be send, request, or *")
 		}
 	}
 	for _, id := range c.Policy.Destinations {
-		if id != "*" {
-			parts := strings.Split(id, ":")
-			if len(parts) != 2 || !namePattern.MatchString(parts[1]) || (parts[0] != "omp" && parts[0] != "claude" && parts[0] != "codex" && parts[0] != "opencode") {
-				return a, model.Err(400, "invalid allowed destination: "+id)
-			}
+		if id != "*" && !validAgentID(id) {
+			return a, model.Err(400, "invalid allowed destination")
 		}
+	}
+	for _, id := range c.Policy.Senders {
+		if id != "*" && !validAgentID(id) {
+			return a, model.Err(400, "invalid allowed sender")
+		}
+	}
+	if c.Policy.WorktreeWrites {
+		return a, model.Err(400, "worktree writes are not supported by current adapter approval enforcement")
 	}
 	id := c.Harness + ":" + c.Name
 	var exists int
@@ -248,8 +267,8 @@ func (r *Relay) Create(p model.Principal, c model.CreateAgent) (model.Agent, err
 	if display == "" {
 		display = c.Name
 	}
-	if len(display) > 200 {
-		return a, model.Err(400, "display name exceeds 200 bytes")
+	if len(display) > 200 || !safeRegistryText(display) || redact(display) != display {
+		return a, model.Err(400, "display name must be at most 200 bytes without control characters or recognized credentials")
 	}
 	caps := map[string]bool{}
 	if ad, ok := r.adapters[c.Harness]; ok {
@@ -420,6 +439,10 @@ func (r *Relay) Action(p model.Principal, id, action string) (model.Agent, error
 		r.mu.Unlock()
 		return a, model.Err(503, "adapter unavailable: "+a.Harness)
 	}
+	if err = validateWorkspace(a); err != nil {
+		r.mu.Unlock()
+		return a, err
+	}
 	ctx, cancel := context.WithCancel(r.ctx)
 	s := &slot{cancel: cancel, repo: repository(a.Cwd)}
 	r.slots[id] = s
@@ -483,6 +506,8 @@ func (r *Relay) stop(id string) error {
 			t, e := r.task(s.taskID)
 			if e == nil && !model.Terminal(t.State) {
 				t.State = "cancelled"
+				t.ErrorCategory = "cancelled"
+				t.Ambiguous = true
 				t.Error = "agent stopped; execution may have external effects"
 				err = r.transition(t, "cancelled", t.Error)
 			}

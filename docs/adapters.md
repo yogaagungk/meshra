@@ -9,7 +9,7 @@ Adapter support is intentionally asymmetric. A registered identity is durable ev
 | Claude | Agent SDK 0.3.303, bundled Claude Code 2.1.303 | Yes | Yes | SDK native session ID | AbortController and owned process-group cleanup | Yes | Read/search and Meshra tools allowed; unsafe/unknown tools denied visibly |
 | OpenCode | CLI 1.19.3, owned localhost HTTP server | Yes | **No**, final text only | Saved HTTP session ID | HTTP abort and owned process-group cleanup | Yes | Read/search and Meshra tools allowed; permission events explicitly rejected |
 
-“Yes” means implemented capability, not proof that every provider account/configuration has passed a live test. Authenticated outcomes and actual commands are tracked in [verification.md](verification.md), separate from deterministic protocol contracts. Runtime capability metadata makes these differences discoverable.
+“Yes” means implemented capability, not proof that every provider account/configuration has passed a live test. The [v0.2 adapter verification report](V0.2_ADAPTER_VERIFICATION.md) records fresh installed-version, schema, native credential-free protocol evidence, credential prerequisites, and the worktree-write enforcement matrix. Earlier authenticated outcomes remain in [verification.md](verification.md), separate from deterministic protocol contracts. Runtime capability metadata makes these differences discoverable.
 
 ## Verified interface sources
 
@@ -31,7 +31,7 @@ npm ci --prefix bridges/claude-agent-sdk/opencode
 
 Claude's optional platform package includes its native CLI. OpenCode is a separate local installation; review/approve its postinstall with your npm version if required. Override relocated executable discovery only with `MESHRA_CLAUDE_BRIDGE` or `MESHRA_OPENCODE_BIN`; do not add keys to database configuration.
 
-There were no Anthropic/OpenAI API-key environment variables, Claude native credentials, or OpenCode native credentials in the inspected environment. Codex native ChatGPT authentication was present. OMP authentication depends on its native provider/profile stores. No credential values were printed during inspection.
+The current [credential-presence inspection](V0.2_ADAPTER_VERIFICATION.md#credential-presence-not-credential-disclosure) found Codex native auth storage and OMP's default native database, but no checked provider API-key environment variables, Claude login, or OpenCode native auth file. Storage presence is not proof of valid credentials or model access. No credential values were printed.
 
 ## Real smoke procedures
 
@@ -53,3 +53,4 @@ A successful prompt/resume smoke establishes only that exercised native path. It
 - The MVP has no interactive approval console. Denied tools are visible; they are not pending approvals that can later be resumed.
 - Claude/OpenCode start owned processes per turn to avoid stale credentials/heavy stopped runtimes. Native session history survives outside SQLite; protect those stores too.
 - Harnesses are separate memory/CPU/cost consumers. The idle relay measurement excludes them.
+- Read-oriented tool policy is not a universal OS sandbox: Claude uses SDK hooks, OMP disables tools/discovery, and OpenCode inherits trusted native configuration/plugins. Codex requests the native read-only sandbox without an unrestricted fallback. See the [enforcement matrix](V0.2_ADAPTER_VERIFICATION.md#enforcement-matrix-worktreewrites-false); no adapter enables worktree writes or an approval bypass.

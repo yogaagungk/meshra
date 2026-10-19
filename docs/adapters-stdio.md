@@ -4,6 +4,8 @@
 
 Implementation inspection used installed `omp/18.12.1` and `codex-cli 0.163.0`. Commands inspected: `omp --version`, `omp --help`, `codex --version`, and `codex mcp add --help`. Both opt-in authenticated smoke tests passed. Live CLI OMP ↔ Codex routing and Codex resume/queued restart also passed after fixing stale-turn event correlation. Exact outcomes and verification boundaries are recorded in [verification.md](verification.md); destructive-tool cancellation and native MCP are not claimed.
 
+The [v0.2 inspection](V0.2_ADAPTER_VERIFICATION.md) reconfirmed those installed versions and regenerated version-matched schemas without running Go checks or provider turns. It additionally exercised native OMP startup/exact-ID metadata resume and Codex initialization/config/read-only thread creation. An empty unprompted Codex thread did not resume successfully; persisted-thread/provider resume must be evaluated by the opt-in smoke, not inferred from metadata creation.
+
 References consulted before choosing protocol methods:
 
 - [OMP official RPC reference](https://raw.githubusercontent.com/can1357/oh-my-pi/main/docs/rpc.md).
@@ -34,7 +36,7 @@ Native state lives below `os.UserConfigDir()/meshra/runtimes/<harness>/<sha256(c
 
 Stdout physical JSONL frames and stdin commands are bounded to 1 MiB. The transport buffers at most 64 physical frames. OMP logical reassembly is capped at 4 MiB, below OMP's advertised 64 MiB maximum: larger frames fail explicitly, not silently truncate. Meshra text results are bounded to 64 KiB. Invalid JSON, oversized frames, malformed/interleaved chunks, process exit, and EOF fail the active operation.
 
-Each child has its own Unix process group. Shutdown closes stdin while continuing to drain stdout, gives 500 ms for native cleanup, kills the remaining group, and waits/reaps the direct process. `Close` is idempotent. Cancellation attempts the native abort/interrupt with a 200 ms bound and then closes the entire runtime, so no background task can continue into a subsequent Meshra turn. After cancellation or a protocol/turn error, explicitly restart the agent before further execution; restarting resumes its stored native session, not a different session. This process helper targets Linux/macOS Unix process groups; Windows native support is not implemented.
+Each child has its own Unix process group. Shutdown closes stdin while continuing to drain stdout, gives 500 ms for native cleanup, kills the remaining group, and waits/reaps the direct process. `Close` is idempotent. Cancellation attempts the native abort/interrupt with a 200 ms bound and then closes the entire runtime before another Meshra turn can reuse it. This does not guarantee rollback of provider/tool effects, cancellation of remote services, or termination of deliberately detached processes. After cancellation or a protocol/turn error, explicitly restart the agent before further execution; restarting resumes its stored native session, not a different session. This process helper targets Linux/macOS Unix process groups; Windows native support is not implemented.
 
 ## OMP protocol
 

@@ -10,7 +10,7 @@ process.on('SIGINT', () => abortController.abort());
 let token = '';
 const safeError = (error) => String(error?.message ?? error).replaceAll(token || '\0', '[redacted]').slice(0, 4096);
 const readOnly = new Set(['Read', 'Glob', 'Grep']);
-const meshraTools = new Set(['meshra_agents_list', 'meshra_agent_status', 'meshra_send', 'meshra_request', 'meshra_task_status', 'meshra_task_events', 'meshra_task_cancel']);
+const meshraTools = new Set(['meshra_agents_list', 'meshra_agent_status', 'meshra_send', 'meshra_request', 'meshra_task_status', 'meshra_task_events', 'meshra_task_cancel', 'meshra_task_trace']);
 const allowed = (name) => readOnly.has(name) || (name.startsWith('mcp__meshra__') && meshraTools.has(name.slice('mcp__meshra__'.length)));
 const denied = new Set();
 function deny(name, id) {

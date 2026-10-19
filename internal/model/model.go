@@ -9,9 +9,12 @@ const SchemaVersion = 1
 const MaxTextBytes = 64 * 1024
 
 type Policy struct {
-	Destinations []string `json:"destinations"`
-	Operations   []string `json:"operations"`
-	Delegate     bool     `json:"delegate"`
+	Destinations      []string `json:"destinations"`
+	Operations        []string `json:"operations"`
+	Delegate          bool     `json:"delegate"`
+	Senders           []string `json:"senders"`
+	InboundOperations []string `json:"inboundOperations"`
+	WorktreeWrites    bool     `json:"worktreeWrites,omitempty"`
 }
 type Config struct {
 	Model    string `json:"model,omitempty"`
@@ -82,6 +85,14 @@ type Task struct {
 	CreatedAt            time.Time `json:"createdAt"`
 	Deadline             time.Time `json:"deadline"`
 	UpdatedAt            time.Time `json:"updatedAt"`
+	ErrorCategory        string    `json:"errorCategory,omitempty"`
+	Ambiguous            bool      `json:"ambiguous,omitempty"`
+	DeliveryAttempts     int       `json:"deliveryAttempts"`
+	MaxAttempts          int       `json:"maxAttempts"`
+	NextAttemptAt        time.Time `json:"nextAttemptAt"`
+	LeaseOwner           string    `json:"leaseOwner,omitempty"`
+	LeaseUntil           time.Time `json:"leaseUntil"`
+	RequestHash          string    `json:"requestHash,omitempty"`
 }
 
 func Terminal(state string) bool {
@@ -89,11 +100,18 @@ func Terminal(state string) bool {
 }
 
 type Event struct {
-	ID     int64     `json:"id"`
-	TaskID string    `json:"taskId"`
-	Type   string    `json:"type"`
-	Data   string    `json:"data"`
-	Time   time.Time `json:"time"`
+	ID            int64     `json:"id"`
+	TaskID        string    `json:"taskId"`
+	Type          string    `json:"type"`
+	Data          string    `json:"data"`
+	Time          time.Time `json:"time"`
+	MessageID     string    `json:"messageId,omitempty"`
+	CorrelationID string    `json:"correlationId,omitempty"`
+	From          string    `json:"from,omitempty"`
+	To            string    `json:"to,omitempty"`
+	Harness       string    `json:"harness,omitempty"`
+	SessionID     string    `json:"sessionId,omitempty"`
+	Attempt       int       `json:"attempt"`
 }
 type Emit func(kind, data string)
 type Turn struct {
@@ -112,6 +130,32 @@ type Adapter struct {
 	Capabilities map[string]bool
 }
 
+type Trace struct {
+	Task            Task    `json:"task"`
+	Events          []Event `json:"events"`
+	EventsTruncated bool    `json:"eventsTruncated"`
+}
+type Metrics struct {
+	Queued                int64   `json:"queued"`
+	InFlight              int64   `json:"inFlight"`
+	Succeeded             int64   `json:"succeeded"`
+	Failed                int64   `json:"failed"`
+	Retried               int64   `json:"retried"`
+	Expired               int64   `json:"expired"`
+	OfflineAgents         int64   `json:"offlineAgents"`
+	OldestQueueSeconds    float64 `json:"oldestQueueSeconds"`
+	AverageLatencySeconds float64 `json:"averageLatencySeconds"`
+}
+type Diagnostic struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+}
+type Diagnostics struct {
+	Healthy bool         `json:"healthy"`
+	Checks  []Diagnostic `json:"checks"`
+}
+
 // Service is the shared authenticated application boundary used by HTTP and MCP.
 type Service interface {
 	Authenticate(string) (Principal, error)
@@ -126,6 +170,9 @@ type Service interface {
 	Events(Principal, string, int64) ([]Event, error)
 	Cancel(Principal, string) (Task, error)
 	Retry(Principal, string) (Task, error)
+	Trace(Principal, string) (Trace, error)
+	Metrics(Principal) (Metrics, error)
+	Doctor(Principal) (Diagnostics, error)
 }
 type Error struct {
 	Status  int

@@ -34,16 +34,22 @@ const helpText = `Meshra — local named-agent relay
 Usage: meshra [global flags] <command> [flags]
 
 Commands:
-  serve                     Run the authenticated localhost daemon
+  serve [--retention DURATION] [--max-delivery-attempts N]
+        [--retry-base DURATION] [--retry-cap DURATION]
   agent create --harness H --name N --cwd DIR
        [--model M] [--provider P] [--display-name N]
        [--allow-to ID,...] [--allow-operation OP,...] [--delegate]
+       [--allow-from ID,...] [--allow-inbound-operation OP,...]
+       [--worktree-writes]
   agent list
   agent status|start|stop|restart|remove|token ID
   send|request --from ID --to ID --message TEXT
        [--idempotency-key KEY] [--timeout SECONDS|DURATION] [--parent-task ID]
-  task status|cancel|retry ID
+       [--wait]                  Request only; requires explicit --timeout
+  task status|cancel|retry|trace ID
   task events ID [--after N] [--follow]
+  metrics
+  doctor
   mcp stdio                 Agent-only MCP proxy; requires MESHRA_TOKEN
 
 Global flags (accepted anywhere):
@@ -55,14 +61,15 @@ Global flags (accepted anywhere):
 
 Human commands use MESHRA_TOKEN, otherwise DATA_DIR/admin.token.
 Tokens are never included in process arguments. Token output is sensitive.
-Requests return persistent tasks immediately; use task events --follow for replies.
+Requests return persistent tasks immediately unless --wait is explicitly requested.
 Exit codes: 0 success, 1 operation failed, 2 invalid command or configuration.
 `
 
 type options struct {
-	DataDir string `json:"dataDir"`
-	Addr    string `json:"addr"`
-	JSON    bool   `json:"-"`
+	DataDir string        `json:"dataDir"`
+	Addr    string        `json:"addr"`
+	JSON    bool          `json:"-"`
+	Relay   relay.Options `json:"-"`
 }
 type usageError struct{ error }
 
@@ -99,7 +106,7 @@ func globals(args []string) (options, []string, bool, error) {
 		// equal a global flag such as --json or --help.
 		commandValue := false
 		switch name {
-		case "--harness", "--name", "--cwd", "--model", "--provider", "--display-name", "--allow-to", "--allow-operation", "--from", "--to", "--message", "--idempotency-key", "--timeout", "--parent-task", "--max-hops", "--after":
+		case "--harness", "--name", "--cwd", "--model", "--provider", "--display-name", "--allow-to", "--allow-operation", "--allow-from", "--allow-inbound-operation", "--from", "--to", "--message", "--idempotency-key", "--timeout", "--parent-task", "--max-hops", "--after", "--retention", "--max-delivery-attempts", "--retry-base", "--retry-cap":
 			commandValue = true
 		}
 		if commandValue && !has {
@@ -252,6 +259,12 @@ func (f flags) list(name string) []string {
 	}
 	return out
 }
+func (f flags) optionalList(name string) []string {
+	if _, present := f.values[name]; !present {
+		return nil
+	}
+	return f.list(name)
+}
 func (f flags) required(names ...string) error {
 	for _, name := range names {
 		if f.get(name) == "" {
@@ -277,8 +290,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 		return err
 	}
 	if args[0] == "serve" {
-		if len(args) != 1 {
-			return usage("serve accepts only global flags")
+		opts.Relay, err = serveOptions(args[1:])
+		if err != nil {
+			return err
 		}
 		return serve(ctx, opts, errout)
 	}
@@ -297,6 +311,15 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 		return err
 	}
 	client := newClient(opts, token)
+	if path == "/v1/request?wait=true" {
+		timeout := time.Duration(body.(model.SendRequest).TimeoutSeconds)*time.Second + 5*time.Second
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+		// The persisted task deadline bounds server waiting; permit responses after
+		// the normal 30-second header limit while retaining a bounded context.
+		client.http.Transport.(*http.Transport).ResponseHeaderTimeout = 0
+	}
 	if follow {
 		return client.events(ctx, path, opts.JSON, out)
 	}
@@ -306,6 +329,45 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 	}
 	return printResult(out, raw, opts.JSON)
 }
+func serveOptions(args []string) (relay.Options, error) {
+	opts := relay.Options{}
+	f, err := parse(args, map[string]bool{"--retention": false, "--max-delivery-attempts": false, "--retry-base": false, "--retry-cap": false})
+	if err != nil {
+		return opts, err
+	}
+	if len(f.positional) != 0 {
+		return opts, usage("serve accepts flags only")
+	}
+	for _, option := range []struct {
+		name string
+		dest *time.Duration
+	}{{"--retention", &opts.Retention}, {"--retry-base", &opts.RetryBase}, {"--retry-cap", &opts.RetryCap}} {
+		if raw, present := f.values[option.name]; present {
+			*option.dest, err = time.ParseDuration(raw[len(raw)-1])
+			if err != nil || (option.name != "--retention" && *option.dest < 0) {
+				return opts, usage("%s requires a duration (retry durations must be nonnegative)", option.name)
+			}
+		}
+	}
+	if raw, present := f.values["--max-delivery-attempts"]; present {
+		opts.MaxDeliveryAttempts, err = strconv.Atoi(raw[len(raw)-1])
+		if err != nil || opts.MaxDeliveryAttempts < 1 || opts.MaxDeliveryAttempts > 1000 {
+			return opts, usage("--max-delivery-attempts must be 1..1000")
+		}
+	}
+	base, cap := opts.RetryBase, opts.RetryCap
+	if base == 0 {
+		base = time.Second
+	}
+	if cap == 0 {
+		cap = 30 * time.Second
+	}
+	if base < time.Millisecond || cap < base || cap > time.Hour {
+		return opts, usage("effective retry base must be at least 1ms and no greater than retry cap; cap must not exceed 1h")
+	}
+	return opts, nil
+}
+
 func command(args []string) (method, path string, body any, follow bool, err error) {
 	method = http.MethodGet
 	switch args[0] {
@@ -317,7 +379,7 @@ func command(args []string) (method, path string, body any, follow bool, err err
 		sub := args[1]
 		if sub == "create" {
 			var f flags
-			f, err = parse(args[2:], map[string]bool{"--harness": false, "--name": false, "--cwd": false, "--model": false, "--provider": false, "--display-name": false, "--allow-to": false, "--allow-operation": false, "--delegate": true})
+			f, err = parse(args[2:], map[string]bool{"--harness": false, "--name": false, "--cwd": false, "--model": false, "--provider": false, "--display-name": false, "--allow-to": false, "--allow-operation": false, "--allow-from": false, "--allow-inbound-operation": false, "--delegate": true, "--worktree-writes": true})
 			if err != nil {
 				return
 			}
@@ -333,7 +395,7 @@ func command(args []string) (method, path string, body any, follow bool, err err
 			if err != nil {
 				return
 			}
-			body = model.CreateAgent{Harness: f.get("--harness"), Name: f.get("--name"), DisplayName: f.get("--display-name"), Cwd: cwd, Config: model.Config{Model: f.get("--model"), Provider: f.get("--provider")}, Policy: model.Policy{Destinations: f.list("--allow-to"), Operations: f.list("--allow-operation"), Delegate: f.get("--delegate") == "true"}}
+			body = model.CreateAgent{Harness: f.get("--harness"), Name: f.get("--name"), DisplayName: f.get("--display-name"), Cwd: cwd, Config: model.Config{Model: f.get("--model"), Provider: f.get("--provider")}, Policy: model.Policy{Destinations: f.list("--allow-to"), Operations: f.list("--allow-operation"), Delegate: f.get("--delegate") == "true", Senders: f.optionalList("--allow-from"), InboundOperations: f.optionalList("--allow-inbound-operation"), WorktreeWrites: f.get("--worktree-writes") == "true"}}
 			method = http.MethodPost
 			path = "/v1/agents"
 			return
@@ -370,7 +432,11 @@ func command(args []string) (method, path string, body any, follow bool, err err
 		return
 	case "send", "request":
 		var f flags
-		f, err = parse(args[1:], map[string]bool{"--from": false, "--to": false, "--message": false, "--idempotency-key": false, "--timeout": false, "--parent-task": false, "--max-hops": false})
+		spec := map[string]bool{"--from": false, "--to": false, "--message": false, "--idempotency-key": false, "--timeout": false, "--parent-task": false, "--max-hops": false}
+		if args[0] == "request" {
+			spec["--wait"] = true
+		}
+		f, err = parse(args[1:], spec)
 		if err != nil {
 			return
 		}
@@ -397,6 +463,13 @@ func command(args []string) (method, path string, body any, follow bool, err err
 		}
 		method = http.MethodPost
 		path = "/v1/" + args[0]
+		if f.get("--wait") == "true" {
+			if req.TimeoutSeconds < 1 || req.TimeoutSeconds > 86400 {
+				err = usage("request --wait requires --timeout between 1 and 86400 seconds")
+				return
+			}
+			path += "?wait=true"
+		}
 		body = req
 		return
 	case "task":
@@ -425,6 +498,8 @@ func command(args []string) (method, path string, body any, follow bool, err err
 		case "cancel", "retry":
 			method = http.MethodPost
 			path += "/" + sub
+		case "trace":
+			path += "/trace"
 		case "events":
 			after := int64(0)
 			if raw := f.get("--after"); raw != "" {
@@ -442,6 +517,13 @@ func command(args []string) (method, path string, body any, follow bool, err err
 		default:
 			err = usage("unknown task command %q", sub)
 		}
+		return
+	case "metrics", "doctor":
+		if len(args) != 1 {
+			err = usage("%s takes no arguments", args[0])
+			return
+		}
+		path = "/v1/" + args[0]
 		return
 	default:
 		err = usage("unknown command %q; use --help", args[0])
@@ -603,12 +685,13 @@ func serve(ctx context.Context, opts options, errout io.Writer) error {
 		listener.Close()
 		return fmt.Errorf("refusing a non-loopback listener")
 	}
-	core, err := relay.Open(opts.DataDir, map[string]model.Adapter{"omp": omp.New(), "codex": codex.New(), "claude": claude.New(), "opencode": opencode.New()})
+	core, err := relay.OpenWithOptions(opts.DataDir, map[string]model.Adapter{"omp": omp.New(), "codex": codex.New(), "claude": claude.New(), "opencode": opencode.New()}, opts.Relay)
 	if err != nil {
 		listener.Close()
 		return err
 	}
 	logger := slog.New(slog.NewJSONHandler(errout, nil))
+	core.SetLogger(logger)
 	defer func() {
 		if err := core.Close(); err != nil {
 			logger.Error("relay shutdown could not close persistent state")
@@ -686,12 +769,14 @@ func proxy(ctx context.Context, opts options, in io.Reader, out io.Writer) error
 			resp.Body.Close()
 			continue
 		}
-		data, e := io.ReadAll(io.LimitReader(resp.Body, 1024*1024+1))
+		// JSON-escaped Task/Trace is present in both MCP text and structured content.
+		const maxMCPResponse = 32 * 1024 * 1024
+		data, e := io.ReadAll(io.LimitReader(resp.Body, maxMCPResponse+1))
 		resp.Body.Close()
 		if e != nil {
 			return e
 		}
-		if len(data) > 1024*1024 || !json.Valid(data) {
+		if len(data) > maxMCPResponse || !json.Valid(data) {
 			return fmt.Errorf("invalid MCP response")
 		}
 		var compact bytes.Buffer
