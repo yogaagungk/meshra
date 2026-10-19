@@ -31,3 +31,9 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Meshra build and optional local SDK dependencies
+/meshra
+/bin/
+node_modules/
+.meshra-demo/

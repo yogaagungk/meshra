@@ -1,0 +1,5 @@
+{
+  "name": "meshra-opencode-runtime",
+  "private": true,
+  "dependencies": { "opencode-ai": "1.19.3" }
+}
