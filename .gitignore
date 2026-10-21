@@ -37,3 +37,8 @@ go.work.sum
 /bin/
 node_modules/
 .meshra-demo/
+
+# Developer console tooling outputs
+web/test-results/
+web/playwright-report/
+web/*.tsbuildinfo

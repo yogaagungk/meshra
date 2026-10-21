@@ -53,8 +53,14 @@ func TestOMPTransportHelper(t *testing.T) {
 		}
 		id, kind := cmd["id"], cmd["type"]
 		data := any(map[string]any{})
+		if kind == "get_available_models" {
+			data = map[string]any{"models": []map[string]string{{"id": "catalog-model", "name": "Catalog model", "provider": "catalog-provider"}}}
+		}
 		if kind == "get_state" {
 			data = map[string]any{"sessionId": session, "sessionFile": filepath.Join(dir, session+".jsonl")}
+			if mode == "context" {
+				data.(map[string]any)["contextUsage"] = map[string]any{"tokens": 160, "contextWindow": 1000}
+			}
 		}
 		if kind == "prompt" {
 			if mode == "eof" {
@@ -258,5 +264,56 @@ func TestRejectsInterruptedChunkSequence(t *testing.T) {
 	defer rt.Close()
 	if _, err = rt.Run(ctx, model.Turn{Task: model.Task{Text: "hello"}}, nil); err == nil || !strings.Contains(err.Error(), "chunk sequence") {
 		t.Fatalf("expected invalid chunk sequence, got %v", err)
+	}
+}
+
+func TestChatRuntimeAlongsideDurableIdentity(t *testing.T) {
+	mockOMP(t, "success")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	agent := testAgent(t, "chat")
+	durable, err := New().Factory(ctx, agent, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer durable.Close()
+	session := durable.SessionID()
+	agent.Ephemeral = true
+	for i := 0; i < 3; i++ {
+		chat, err := New().Factory(ctx, agent, nil)
+		if err != nil {
+			t.Fatal("fresh chat could not start alongside idle durable session", err)
+		}
+		answer, runErr := chat.Run(ctx, model.Turn{Task: model.Task{ID: "chat-task", Text: "hello"}}, func(string, string) {})
+		closeErr := chat.Close()
+		if runErr != nil || answer != "hello" || closeErr != nil {
+			t.Fatal(answer, runErr, closeErr)
+		}
+	}
+	if durable.SessionID() != session {
+		t.Fatal("chat replaced durable session")
+	}
+	root, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	leftovers, err := filepath.Glob(filepath.Join(root, "meshra", "runtimes", "omp", "chat-*"))
+	if err != nil || len(leftovers) != 0 {
+		t.Fatal("temporary native state retained", leftovers, err)
+	}
+}
+
+func TestNativeModelCatalogProtocol(t *testing.T) {
+	mockOMP(t, "success")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rt, err := New().Factory(ctx, testAgent(t, "catalog"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	items, err := rt.(model.ModelCatalog).Models(ctx)
+	if err != nil || len(items) != 1 || items[0].Provider != "catalog-provider" {
+		t.Fatal(items, err)
 	}
 }

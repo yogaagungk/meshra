@@ -161,6 +161,14 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 			break
 		}
 		switch frame.Type {
+		case "context_usage":
+			if emit != nil {
+				emit("context_usage", frame.Data)
+			}
+		case "usage":
+			if emit != nil {
+				emit("usage", frame.Data)
+			}
 		case "session":
 			if frame.Data == "" {
 				runErr = errors.New("Claude emitted an empty native session")

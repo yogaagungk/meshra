@@ -19,7 +19,7 @@ func (r *Relay) validateCollaboration(p model.Principal, q model.SendRequest) er
 		return err
 	}
 	for _, a := range []string{q.To, q.From} {
-		if a != "" {
+		if a != "" && !(p.Admin && a == "human:operator") {
 			if err := r.member(model.Principal{AgentID: a}, q.ConversationID, false); err != nil {
 				return model.Err(403, "task agents must be conversation participants")
 			}
@@ -125,6 +125,9 @@ func (r *Relay) publishTaskResult(t model.Task) (model.ContextRef, error) {
 	}
 	c := v.(model.SharedContext)
 	for _, id := range []string{t.From, t.OriginAgentID} {
+		if id == "human:operator" {
+			continue
+		}
 		if _, err = r.contextOperation(p, "context.grant", model.CollaborationRequest{ContextID: c.ID, AgentID: id}); err != nil {
 			return model.ContextRef{}, err
 		}

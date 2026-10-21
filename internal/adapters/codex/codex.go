@@ -86,7 +86,7 @@ func isolatedEnv(dir string) ([]string, error) {
 }
 
 func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runtime, err error) {
-	dir, unlock, err := process.StateDir("codex", a.ID)
+	dir, unlock, err := process.RuntimeStateDir("codex", a.ID, a.Ephemeral)
 	if err != nil {
 		return nil, err
 	}
@@ -350,13 +350,22 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 				ID   string `json:"id"`
 				Text string `json:"text"`
 			} `json:"item"`
+			TokenUsage *struct {
+				Last *struct {
+					Input  int64  `json:"inputTokens"`
+					Output int64  `json:"outputTokens"`
+					Cached int64  `json:"cachedInputTokens"`
+					Total  *int64 `json:"totalTokens"`
+				} `json:"last"`
+				Window *int64 `json:"modelContextWindow"`
+			} `json:"tokenUsage"`
 			WillRetry bool `json:"willRetry"`
 			Error     struct {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
 		switch f.Method {
-		case "item/agentMessage/delta", "item/completed", "turn/completed", "error":
+		case "thread/tokenUsage/updated", "item/agentMessage/delta", "item/completed", "turn/completed", "error":
 		default:
 			continue
 		}
@@ -385,6 +394,15 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 			continue
 		}
 		switch f.Method {
+		case "thread/tokenUsage/updated":
+			if emit != nil && event.TokenUsage != nil && event.TokenUsage.Last != nil {
+				data, _ := json.Marshal(map[string]int64{"inputTokens": event.TokenUsage.Last.Input, "outputTokens": event.TokenUsage.Last.Output, "cachedInputTokens": event.TokenUsage.Last.Cached})
+				emit("usage", string(data))
+				if event.TokenUsage.Last.Total != nil && event.TokenUsage.Window != nil && *event.TokenUsage.Window > 0 {
+					context, _ := json.Marshal(model.ContextObservation{UsedTokens: *event.TokenUsage.Last.Total, WindowTokens: *event.TokenUsage.Window, Source: "Codex native token usage"})
+					emit("context_usage", string(context))
+				}
+			}
 		case "item/agentMessage/delta":
 			if event.ItemID == "" {
 				return "", errors.New("Codex delta missing item ID")

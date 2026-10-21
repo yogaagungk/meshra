@@ -1,0 +1,19 @@
+
+> meshra-console@0.4.0 test:e2e
+> playwright test
+
+
+Running 7 tests using 1 worker
+
+(node:238350) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 tests/console.spec.ts:49:1 › chat: exact identities, targeted delivery, safe Markdown, reload/replay, pinned context and trace (6.4s)
+  ✓  2 tests/console.spec.ts:124:1 › keyboard, same-harness picker, theme and mobile without overflow (2.0s)
+  ✓  3 tests/console.spec.ts:185:1 › context denial, honest approvals, queued offline state and retry guardrail (3.1s)
+  ✓  4 tests/console.spec.ts:251:1 › operations use live records, publish context, and remain accessible in both themes (4.7s)
+  ✓  5 tests/console.spec.ts:318:1 › keyboard-only creation and IME-safe multiline composer (2.8s)
+  ✓  6 tests/console.spec.ts:369:1 › touch viewport keeps chat composer and back navigation usable (943ms)
+  -  7 tests/native.spec.ts:5:1 › real browser chat with OMP, Codex and OpenCode
+
+  1 skipped
+  6 passed (21.6s)

@@ -735,6 +735,7 @@ func serve(ctx context.Context, opts options, errout io.Writer) error {
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(listener) }()
 	logger.Info("relay listening", "address", listener.Addr().String())
+	logger.Info("developer console", "url", "http://"+listener.Addr().String()+"/console/")
 	select {
 	case err = <-done:
 		if errors.Is(err, http.ErrServerClosed) {

@@ -9,6 +9,7 @@ type ContextRef struct {
 	Version   int    `json:"version"`
 }
 type CollaborationRequest struct {
+	Mode           string       `json:"mode,omitempty"`
 	TargetTaskID   string       `json:"targetTaskId,omitempty"`
 	From           string       `json:"from,omitempty"`
 	To             string       `json:"to,omitempty"`
@@ -35,12 +36,14 @@ type CollaborationRequest struct {
 	Limit        int      `json:"limit,omitempty"`
 }
 type Conversation struct {
-	ContextRefs  []ContextRef `json:"contextRefs"`
-	ID           string       `json:"conversationId"`
-	Title        string       `json:"title"`
-	Owner        string       `json:"owner"`
-	CreatedAt    string       `json:"createdAt"`
-	Participants []string     `json:"participants"`
+	ChatSettings *ChatSettings `json:"chatSettings,omitempty"`
+	Mode         string        `json:"mode,omitempty"`
+	ContextRefs  []ContextRef  `json:"contextRefs"`
+	ID           string        `json:"conversationId"`
+	Title        string        `json:"title"`
+	Owner        string        `json:"owner"`
+	CreatedAt    string        `json:"createdAt"`
+	Participants []string      `json:"participants"`
 }
 
 type SharedContext struct {

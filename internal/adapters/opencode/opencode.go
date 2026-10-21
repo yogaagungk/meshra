@@ -184,6 +184,14 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 	}
 	var reply struct {
 		Info struct {
+			Tokens *struct {
+				Input  int64 `json:"input"`
+				Output int64 `json:"output"`
+				Cache  struct {
+					Read  int64 `json:"read"`
+					Write int64 `json:"write"`
+				} `json:"cache"`
+			} `json:"tokens"`
 			SessionID string `json:"sessionID"`
 			Error     *struct {
 				Name string `json:"name"`
@@ -230,6 +238,11 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 	}
 	if reply.Info.Error != nil {
 		return "", fmt.Errorf("OpenCode prompt failed: %s (check native provider authentication and model configuration)", reply.Info.Error.Name)
+	}
+	if emit != nil && reply.Info.Tokens != nil {
+		v := reply.Info.Tokens
+		data, _ := json.Marshal(map[string]int64{"inputTokens": v.Input + v.Cache.Read + v.Cache.Write, "outputTokens": v.Output, "cachedInputTokens": v.Cache.Read + v.Cache.Write})
+		emit("usage", string(data))
 	}
 	var text strings.Builder
 	for _, part := range reply.Parts {

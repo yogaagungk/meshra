@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Developer Console (v0.4)
+
+- Add a production-embedded React/TypeScript/Vite console with Tailwind tokens, locally owned shadcn/ui Radix primitives, Lucide icons and TanStack Query.
+- Make Chat the default: named-agent selection, exact recipients, durable task timelines, SSE replay/resync, saved drafts/send keys, bounded history, context attachments and execution provenance.
+- Add a localhost-only human-operator session with HttpOnly/SameSite cookies, absolute expiry, CSRF protection, strict Host/Origin/Fetch Metadata checks and CSP; retain legacy bearer API browser restrictions.
+- Route human messages through existing admission, idempotency, scheduler and context ACLs without registering a fake harness. Report partial multi-recipient admission explicitly.
+- Add searchable Agents/Tasks/Contexts/Activity, real lifecycle controls, context publication/grants, task deep links, denial-only approval evidence and explicit retry confirmation.
+- Add owner-checked conversation rename/participant removal and schema-5 query indexes; preserve v0.1–v0.3 messaging/session/recovery contracts.
+- Validate desktop/mobile/light/dark accessibility, keyboard/IME behavior, 1,005-message pagination, authentication boundaries, and real OMP/Codex/OpenCode browser chat; publish measured WSL2 evidence and screenshots.
+
+### Agent collaboration (v0.3)
+
 - Add v0.3 persistent conversations, exact-agent membership, filtered context bindings and channel lifecycle events.
 - Add transactional schema migrations 003/004, immutable SHA-256 SQLite artifacts, private context versions, explicit grants/revocation, metadata search and append-only access audit.
 - Extend durable tasks with pinned context refs, immutable dependencies, ready/blocked inspection and immutable result refs; retain v0.1/v0.2 routes and task states.

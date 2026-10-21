@@ -67,6 +67,8 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case r.URL.Path == "/config/providers":
+		fmt.Fprint(w, `{"providers":[{"id":"test-provider","apiKey":"never expose this","models":{"test-model":{"id":"test-model","name":"Test model"}}}]}`)
 	case r.Method == "POST" && r.URL.Path == "/session":
 		var body struct {
 			Permission []map[string]string `json:"permission"`
@@ -407,5 +409,21 @@ func TestResumeRejectsDifferentDirectory(t *testing.T) {
 	defer f.mu.Unlock()
 	if f.created != 0 || f.prompts != 0 {
 		t.Fatal("directory mismatch performed work")
+	}
+}
+
+func TestNativeModelCatalogProtocol(t *testing.T) {
+	f := newFake(t)
+	rt, err := f.adapter().Factory(context.Background(), model.Agent{ID: "opencode:catalog", Cwd: t.TempDir()}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	items, err := rt.(model.ModelCatalog).Models(context.Background())
+	if err != nil || len(items) != 1 || items[0].Provider != "test-provider" || items[0].ID != "test-model" {
+		t.Fatal(items, err)
+	}
+	if f.created != 0 || f.prompts != 0 {
+		t.Fatal("catalog discovery created a generation")
 	}
 }

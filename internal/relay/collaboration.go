@@ -43,6 +43,18 @@ func (r *Relay) conversation(p model.Principal, id string) (model.Conversation, 
 	if err != nil {
 		return c, err
 	}
+	chat, err := r.isChat(id)
+	if err != nil {
+		return c, err
+	}
+	if chat {
+		c.Mode = "chat"
+		settings, e := r.chatSettings(id)
+		if e != nil {
+			return c, e
+		}
+		c.ChatSettings = &settings
+	}
 	rows, err := r.db.Query("SELECT agent_id FROM conversation_participants WHERE conversation_id=? ORDER BY agent_id", id)
 	if err != nil {
 		return c, err
@@ -99,6 +111,12 @@ func (r *Relay) Collaborate(p model.Principal, op string, q model.CollaborationR
 	}
 	switch op {
 	case "conversation.create":
+		if q.Mode != "" && q.Mode != "chat" {
+			return nil, model.Err(400, "invalid conversation mode")
+		}
+		if q.Mode == "chat" && (!p.Admin || len(q.Participants) != 1) {
+			return nil, model.Err(400, "chat requires the human operator and one AI")
+		}
 		if strings.TrimSpace(q.Title) == "" || len(q.Title) > 512 || redact(q.Title) != q.Title {
 			return nil, model.Err(400, "invalid title")
 		}
@@ -126,6 +144,11 @@ func (r *Relay) Collaborate(p model.Principal, op string, q model.CollaborationR
 		if _, err = tx.Exec("INSERT INTO conversations VALUES(?,?,?,?)", id, q.Title, actor(p), now().Format(time.RFC3339Nano)); err != nil {
 			return nil, err
 		}
+		if q.Mode == "chat" {
+			if _, err = tx.Exec("INSERT INTO chat_conversations VALUES(?)", id); err != nil {
+				return nil, err
+			}
+		}
 		for a := range ids {
 			if _, err = tx.Exec("INSERT INTO conversation_participants VALUES(?,?)", id, a); err != nil {
 				return nil, err
@@ -138,7 +161,57 @@ func (r *Relay) Collaborate(p model.Principal, op string, q model.CollaborationR
 			return nil, err
 		}
 		return r.conversation(p, id)
+	case "conversation.rename", "conversation.removeParticipant":
+		if op == "conversation.removeParticipant" {
+			chat, err := r.isChat(q.ID)
+			if err != nil {
+				return nil, err
+			}
+			if chat {
+				return nil, model.Err(409, "start a new chat to change the AI")
+			}
+		}
+		if err := r.member(p, q.ID, true); err != nil {
+			return nil, err
+		}
+		tx, err := r.db.Begin()
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		if op == "conversation.rename" {
+			if strings.TrimSpace(q.Title) == "" || len(q.Title) > 512 || redact(q.Title) != q.Title {
+				return nil, model.Err(400, "invalid title")
+			}
+			_, err = tx.Exec("UPDATE conversations SET title=? WHERE id=?", q.Title, q.ID)
+		} else {
+			var active int
+			if err = tx.QueryRow("SELECT count(*) FROM tasks WHERE json_extract(body,'$.conversationId')=? AND state IN ('queued','dispatching','running') AND (sender=? OR recipient=?)", q.ID, q.AgentID, q.AgentID).Scan(&active); err != nil {
+				return nil, err
+			}
+			if active > 0 {
+				return nil, model.Err(409, "cancel or finish active tasks before removing participant")
+			}
+			_, err = tx.Exec("DELETE FROM conversation_participants WHERE conversation_id=? AND agent_id=?", q.ID, q.AgentID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if _, err = tx.Exec("INSERT INTO conversation_events(conversation_id,actor,operation,resource,time) VALUES(?,?,?,?,?)", q.ID, actor(p), op, q.AgentID, now().Format(time.RFC3339Nano)); err != nil {
+			return nil, err
+		}
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return r.conversation(p, q.ID)
 	case "conversation.addParticipant":
+		chat, err := r.isChat(q.ID)
+		if err != nil {
+			return nil, err
+		}
+		if chat {
+			return nil, model.Err(409, "start a new chat to change the AI")
+		}
 		if err := r.member(p, q.ID, true); err != nil {
 			return nil, err
 		}

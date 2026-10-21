@@ -79,8 +79,8 @@ func migrate(db *sql.DB) error {
 	if err := db.QueryRow("SELECT max(version) FROM schema_version").Scan(&version); err != nil {
 		return err
 	}
-	if version < 1 || version > 4 {
-		return fmt.Errorf("unsupported database schema %d; this executable supports 1..4", version)
+	if version < 1 || version > 9 {
+		return fmt.Errorf("unsupported database schema %d; this executable supports 1..9", version)
 	}
 	if _, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=OFF;"); err != nil {
 		return err
@@ -138,6 +138,99 @@ func migrate(db *sql.DB) error {
 		}
 		if err = tx.Commit(); err != nil {
 			return err
+		}
+	}
+	if version < 5 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec(migrationV5); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 6 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec(migrationV6); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 7 {
+		tx, e := db.Begin()
+		if e != nil {
+			return e
+		}
+		defer tx.Rollback()
+		if _, e = tx.Exec(migrationV7); e != nil {
+			return e
+		}
+		if e = tx.Commit(); e != nil {
+			return e
+		}
+	}
+	if version < 8 {
+		tx, e := db.Begin()
+		if e != nil {
+			return e
+		}
+		defer tx.Rollback()
+		rows, e := tx.Query("PRAGMA table_info(run_usage)")
+		if e != nil {
+			return e
+		}
+		exists := false
+		for rows.Next() {
+			var cid, notnull, pk int
+			var name, typ string
+			var def any
+			if e = rows.Scan(&cid, &name, &typ, &notnull, &def, &pk); e != nil {
+				rows.Close()
+				return e
+			}
+			if name == "context_used_tokens" {
+				exists = true
+			}
+		}
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return e
+		}
+		if !exists {
+			if _, e = tx.Exec(migrationV8); e != nil {
+				return e
+			}
+		} else {
+			if _, e = tx.Exec("UPDATE schema_version SET version=8"); e != nil {
+				return e
+			}
+		}
+		if e = tx.Commit(); e != nil {
+			return e
+		}
+	}
+	if version < 9 {
+		tx, e := db.Begin()
+		if e != nil {
+			return e
+		}
+		defer tx.Rollback()
+		if _, e = tx.Exec(migrationV9); e != nil {
+			return e
+		}
+		if e = tx.Commit(); e != nil {
+			return e
 		}
 	}
 	_, err := db.Exec("PRAGMA foreign_keys=ON")
@@ -537,6 +630,9 @@ func localAsset(relative, override string) string {
 // work and terminal tasks whose Run has not returned are never removed.
 func (r *Relay) prune() error {
 	r.nextPrune = now().Add(time.Hour)
+	if _, err := r.db.Exec("DELETE FROM run_usage WHERE started_at<?", now().Add(-30*24*time.Hour).Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
 	if r.options.Retention < 0 {
 		return nil
 	}

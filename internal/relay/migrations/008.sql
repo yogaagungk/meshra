@@ -1,0 +1,10 @@
+ALTER TABLE run_usage ADD COLUMN conversation_id TEXT NOT NULL DEFAULT '';
+UPDATE run_usage SET conversation_id=coalesce((SELECT json_extract(t.body,'$.conversationId') FROM tasks t WHERE t.id=run_usage.task_id),'');
+CREATE INDEX usage_conversation ON run_usage(conversation_id,started_at);
+ALTER TABLE run_usage ADD COLUMN cached_input_tokens INTEGER;
+ALTER TABLE run_usage ADD COLUMN context_used_tokens INTEGER;
+ALTER TABLE run_usage ADD COLUMN context_window_tokens INTEGER;
+ALTER TABLE run_usage ADD COLUMN context_estimated INTEGER;
+ALTER TABLE run_usage ADD COLUMN context_source TEXT;
+ALTER TABLE run_usage ADD COLUMN observed_at TEXT;
+UPDATE schema_version SET version=8;

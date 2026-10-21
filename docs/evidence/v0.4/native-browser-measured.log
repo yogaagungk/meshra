@@ -1,0 +1,15 @@
+
+> meshra-console@0.4.0 test:e2e
+> playwright test tests/native.spec.ts
+
+
+Running 1 test using 1 worker
+
+(node:232561) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"browserMetrics":true,"heapUsedBytes":15557408,"domNodes":592}
+{"realNativeConsole":true,"harnesses":["omp","codex","opencode"],"conversationId":"01e175607cc1b257ab67c0daed11d81c","tasks":[{"taskId":"b4f4125b01d5f23a2e5fdd1037fc8a60","to":"opencode:uiarchitect-mvfadvsx","state":"completed"},{"taskId":"9685340d54f404233c6317ad7f124c2a","to":"codex:uiimplementer-mvfadvsx","state":"completed"},{"taskId":"6c28d26622b00f116da3b683340d7b97","to":"omp:uireviewer-mvfadvsx","state":"completed"}],"pinnedContext":true,"reloadDuringResponse":true}
+  ✓  1 tests/native.spec.ts:5:1 › real browser chat with OMP, Codex and OpenCode (37.3s)
+
+  1 passed (38.3s)
+{"exitCode": 0, "elapsedSeconds": 39.447, "peakProcessTreeRSSKiB": 2285352, "kernel": "6.18.54.1-microsoft-standard-WSL2", "measurement": "100ms sampled sum of command and supplied daemon process trees; shared pages counted per process; compilation excluded when prebuilt"}

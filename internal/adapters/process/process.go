@@ -57,6 +57,28 @@ func StateDir(harness, identity string) (string, func(), error) {
 	return dir, func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); _ = f.Close() }, nil
 }
 
+// RuntimeStateDir uses disposable state for chat turns, so they can run alongside
+// an identity's idle durable runtime without competing for its ownership lock.
+func RuntimeStateDir(harness, identity string, ephemeral bool) (string, func(), error) {
+	if !ephemeral {
+		return StateDir(harness, identity)
+	}
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", nil, err
+	}
+	parent := filepath.Join(base, "meshra", "runtimes", harness)
+	if err = os.MkdirAll(parent, 0700); err != nil {
+		return "", nil, err
+	}
+	dir, err := os.MkdirTemp(parent, "chat-")
+	if err != nil {
+		return "", nil, err
+	}
+	var once sync.Once
+	return dir, func() { once.Do(func() { _ = os.RemoveAll(dir) }) }, nil
+}
+
 func Start(ctx context.Context, binary string, args []string, cwd string, env []string) (*Process, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

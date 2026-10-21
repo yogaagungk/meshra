@@ -36,9 +36,25 @@ var migrationV3 string
 //go:embed migrations/004.sql
 var migrationV4 string
 
+//go:embed migrations/005.sql
+var migrationV5 string
+
+//go:embed migrations/006.sql
+var migrationV6 string
+
+//go:embed migrations/007.sql
+var migrationV7 string
+
+//go:embed migrations/008.sql
+var migrationV8 string
+
+//go:embed migrations/009.sql
+var migrationV9 string
+
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
 type slot struct {
+	lastUsed   time.Time
 	runtime    model.Runtime
 	cancel     context.CancelFunc
 	turnCancel context.CancelFunc
@@ -46,24 +62,28 @@ type slot struct {
 	repo       string
 }
 type Relay struct {
-	mu        sync.Mutex
-	lifecycle sync.Mutex
-	db        *sql.DB
-	lock      *os.File
-	admin     string
-	adapters  map[string]model.Adapter
-	slots     map[string]*slot
-	repos     map[string]bool
-	wake      chan struct{}
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	closed    bool
-	mcpURL    string
-	owner     string
-	options   Options
-	logger    *slog.Logger
-	nextPrune time.Time
+	accountMu  sync.Mutex
+	mu         sync.Mutex
+	lifecycle  sync.Mutex
+	db         *sql.DB
+	lock       *os.File
+	admin      string
+	adapters   map[string]model.Adapter
+	slots      map[string]*slot
+	repos      map[string]bool
+	wake       chan struct{}
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	closed     bool
+	mcpURL     string
+	owner      string
+	options    Options
+	settings   model.PersonalSettings
+	catalogMu  sync.Mutex
+	quotaCache map[string]model.QuotaSnapshot
+	logger     *slog.Logger
+	nextPrune  time.Time
 }
 
 func randomID() string {
@@ -135,13 +155,23 @@ func OpenWithOptions(dir string, adapters map[string]model.Adapter, options Opti
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &Relay{db: db, lock: lock, admin: strings.TrimSpace(string(b)), adapters: adapters, slots: map[string]*slot{}, repos: map[string]bool{}, wake: make(chan struct{}, 1), ctx: ctx, cancel: cancel, owner: randomID(), options: options, logger: slog.New(slog.NewJSONHandler(os.Stderr, nil))}
+	r := &Relay{db: db, lock: lock, admin: strings.TrimSpace(string(b)), adapters: adapters, slots: map[string]*slot{}, quotaCache: map[string]model.QuotaSnapshot{}, repos: map[string]bool{}, wake: make(chan struct{}, 1), ctx: ctx, cancel: cancel, owner: randomID(), options: options, logger: slog.New(slog.NewJSONHandler(os.Stderr, nil))}
+	if err = r.loadPersonalSettings(); err != nil {
+		cancel()
+		return nil, err
+	}
 	if err = r.recover(); err != nil {
+		cancel()
+		return nil, err
+	}
+	if _, err = r.db.Exec("UPDATE run_usage SET state='interrupted' WHERE state='running'"); err != nil {
 		cancel()
 		return nil, err
 	}
 	r.wg.Add(1)
 	go r.schedule()
+	r.wg.Add(1)
+	go r.reapIdle()
 	return r, nil
 }
 func (r *Relay) SetMCPURL(url string) { r.mu.Lock(); defer r.mu.Unlock(); r.mcpURL = url }
@@ -216,6 +246,12 @@ func (r *Relay) agents() ([]model.Agent, error) {
 func (r *Relay) Create(p model.Principal, c model.CreateAgent) (model.Agent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.createLocked(p, c)
+}
+func (r *Relay) createLocked(p model.Principal, c model.CreateAgent) (model.Agent, error) {
+	if r.closed {
+		return model.Agent{}, model.Err(503, "relay is stopping")
+	}
 	var a model.Agent
 	if err := requireAdmin(p); err != nil {
 		return a, err
@@ -282,7 +318,7 @@ func (r *Relay) Create(p model.Principal, c model.CreateAgent) (model.Agent, err
 			caps[k] = v
 		}
 	}
-	a = model.Agent{SchemaVersion: 1, ID: id, Harness: c.Harness, Name: c.Name, DisplayName: display, Cwd: cwd, Config: c.Config, Policy: c.Policy, Concurrency: 1, State: "registered", LastSeen: now(), Capabilities: caps}
+	a = model.Agent{ManagedChat: c.ManagedChat, SchemaVersion: 1, ID: id, Harness: c.Harness, Name: c.Name, DisplayName: display, Cwd: cwd, Config: c.Config, Policy: c.Policy, Concurrency: 1, State: "registered", LastSeen: now(), Capabilities: caps}
 	b, _ := json.Marshal(a)
 	_, err = r.db.Exec("INSERT INTO agents(id,body) VALUES(?,?)", id, string(b))
 	if err != nil {
@@ -445,6 +481,10 @@ func (r *Relay) Action(p model.Principal, id, action string) (model.Agent, error
 		r.mu.Unlock()
 		return a, nil
 	}
+	if len(r.slots) >= r.settings.MaxStartedAgents {
+		r.mu.Unlock()
+		return a, model.Err(429, "started agent limit reached; stop an idle agent or raise the limit in Settings")
+	}
 	ad, ok := r.adapters[a.Harness]
 	if !ok || ad.Factory == nil {
 		r.mu.Unlock()
@@ -454,8 +494,14 @@ func (r *Relay) Action(p model.Principal, id, action string) (model.Agent, error
 		r.mu.Unlock()
 		return a, err
 	}
+	if a.ManagedChat {
+		// Managed identities are readiness slots, not durable model histories.
+		// Idle Codex threads may have no rollout to resume after a restart.
+		a.SessionID = ""
+		a.Ephemeral = true
+	}
 	ctx, cancel := context.WithCancel(r.ctx)
-	s := &slot{cancel: cancel, repo: repository(a.Cwd)}
+	s := &slot{cancel: cancel, repo: repository(a.Cwd), lastUsed: now()}
 	r.slots[id] = s
 	a.State = "starting"
 	a.Error = ""

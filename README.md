@@ -1,6 +1,6 @@
 # Meshra
 
-A local-first relay for independently named AI coding harness instances. `claude:exampleone` and `claude:exampletwo` are separate durable identities, not interchangeable aliases for a model. Routing uses exact canonical IDs and persists replies against their original identity/session.
+A local-first developer console and relay for independently named AI coding harness instances. Chat with your agents, share pinned context, and inspect durable task execution from one workspace. `claude:exampleone` and `claude:exampletwo` are separate durable identities, not interchangeable aliases for a model. Routing uses exact canonical IDs and persists replies against their original identity/session.
 
 The v0.2 daemon includes a SQLite WAL registry and bounded durable inbox, persisted claims and offline retry schedules, session/repository serialization, authenticated HTTP/JSON and task SSE, compatible MCP tools, tracing/metrics/diagnostics, configurable retention, and adapters for OMP, Codex App Server, Claude Agent SDK, and OpenCode HTTP. No Redis, cloud service, or paid account is required for deterministic tests.
 
@@ -12,10 +12,42 @@ Existing v0.1/v0.2 messaging remains compatible. Start with the
 Real OpenCode/Codex/OMP validation is distinguished from deterministic isolation
 checks; Claude native verification was waived by the operator.
 
+## Developer Console (v0.4)
+
+Run `./meshra serve` and open **http://127.0.0.1:7331/console/**. Connect with your
+local `admin.token`, register/start named agents in **Agents**, then create a
+conversation in **Chat**. Select recipients explicitly; nothing broadcasts by
+default. Publish/grant immutable context in **Contexts**, attach a version in chat,
+and use **Inspect execution** for task state, correlation, native session and trace.
+
+**Username and password:** sign in once with your local administrator token,
+then open **Settings → Personal access → Username and password**. Choose a
+username (3–64 letters, numbers, dots, underscores or hyphens) and a password
+of at least 15 characters. After setup, the login screen defaults to username
+and password. Credentials persist as a salted PBKDF2-HMAC-SHA-256 hash
+(600,000 iterations); plaintext passwords are never stored. Updating credentials
+requires your current password or administrator recovery token and signs out
+other browser sessions. Keep `admin.token` private for CLI access and browser
+account recovery. Password sign-in uses the existing session, CSRF, origin and
+login rate-limit protections. Use HTTPS for remote access.
+
+The responsive React/TypeScript console is embedded in the Go executable, with
+light/dark/system themes, durable replay, saved drafts and guarded retries.
+Rebuild UI changes with `npm ci --prefix web && npm run build --prefix web` before
+`go build`. Native OMP/Codex/OpenCode browser chat was exercised; Claude native
+verification remains waived. [Console guide/demo](docs/V0.4_CONSOLE.md),
+[API/UI contract](docs/API_UI_CONTRACT.md), and [test report/screenshots](docs/V0.4_TEST_REPORT.md).
+
+**One-to-one AI chat:** choose **Chat with an AI** when creating a conversation for
+a simpler chat view, contextual follow-ups, stop/regenerate controls, and bounded
+history loading. Each turn uses a fresh native session with a limited recent-history
+window. Replies appear after completion and credential checks. See the
+[chat mode guide](docs/CHAT_MODE.md) for memory limits and delivery behavior.
+
 ## Prerequisites and build
 
 - Ubuntu/WSL2 or Linux, **Go 1.25+**. The Go core uses pure-Go SQLite; a C compiler is not required for a normal build.
-- **Node 20+** and npm for the optional Claude SDK bridge. Native harness requirements still apply.
+- **Node 20.19+ or 22.12+** and npm to rebuild the console; no frontend Node process is needed in production. **Node 20+** is also required for the optional Claude SDK bridge. Native harness requirements still apply.
 - OMP **18.12.1** and Codex CLI **0.163.0** are the inspected stdio versions. OpenCode adapter pins **1.19.3**. Claude SDK pins **0.3.303**, bundling Claude Code **2.1.303**.
 - Native harness authentication or provider environment credentials for real model turns. Do not put API keys in relay configuration.
 
@@ -175,3 +207,15 @@ Optional model/provider overrides are documented in [adapters.md](docs/adapters.
 No arbitrary interactive-session attach, autonomous planning, cloud/remote relay, model-based routing, web UI, or identical tool capabilities across harnesses. Current adapters are read-oriented; native permissions are not universal OS filesystem containment. Native harness sessions live outside SQLite. No interactive approval UI, remote security boundary, or coordination with external writers. MCP delegation is automatic only where verified adapter configuration supports it. Claude/OpenCode authenticated provider turns remain dependent on unavailable native credentials in the inspected environment.
 
 Design and evidence: [v0.2 design](docs/V0.2_DESIGN.md), [operations/migration/recovery](docs/V0.2_OPERATIONS.md), [test report](docs/V0.2_TEST_REPORT.md), [adapter verification](docs/V0.2_ADAPTER_VERIFICATION.md), [architecture](docs/architecture.md), [protocol](docs/protocol.md), [security](docs/security.md), [CLI/API/MCP](docs/cli.md), [changelog](CHANGELOG.md).
+
+### Personal workspace controls
+
+Use **Workspaces** to browse existing projects and review Git changes, then start
+a project-specific AI chat with a discovered model. **Settings** now includes
+personal browser sessions, persistent resource limits, and model/usage controls.
+See [Personal workspace controls](docs/PERSONAL_WORKSPACE.md) for the supported
+workflow, bounds, and native usage limitations. Remote access remains deferred.
+
+**AI status** in Settings and AI chats adds supported native quota windows, reset
+countdowns, context snapshots and recorded usage history. See [AI Status](docs/AI_STATUS.md)
+for supported harnesses, freshness limits, and reported-versus-estimated values.

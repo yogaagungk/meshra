@@ -21,6 +21,7 @@ type Config struct {
 	Provider string `json:"provider,omitempty"`
 }
 type CreateAgent struct {
+	ManagedChat bool   `json:"-"`
 	Harness     string `json:"harness"`
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName,omitempty"`
@@ -30,6 +31,9 @@ type CreateAgent struct {
 	Concurrency int    `json:"concurrency,omitempty"`
 }
 type Agent struct {
+	ManagedChat bool `json:"managedChat,omitempty"`
+	// Ephemeral selects disposable native state for a single chat turn; never persisted.
+	Ephemeral     bool            `json:"-"`
 	SchemaVersion int             `json:"schemaVersion"`
 	ID            string          `json:"id"`
 	Harness       string          `json:"harness"`
@@ -83,6 +87,7 @@ type Task struct {
 	FromSessionID        string    `json:"fromSessionId"`
 	To                   string    `json:"to"`
 	DestinationSessionID string    `json:"destinationSessionId,omitempty"`
+	Chat                 bool      `json:"chat,omitempty"`
 	HopCount             int       `json:"hopCount"`
 	MaxHops              int       `json:"maxHops"`
 	Type                 string    `json:"type"`
@@ -136,6 +141,8 @@ type Runtime interface {
 }
 type Factory func(context.Context, Agent, Emit) (Runtime, error)
 type Adapter struct {
+	Quotas       func(context.Context) ([]QuotaWindow, error)
+	Models       func(context.Context) ([]ModelOption, error)
 	Factory      Factory
 	Capabilities map[string]bool
 }

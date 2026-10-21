@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -108,5 +109,37 @@ func TestLifetimeCancellation(t *testing.T) {
 	case <-p.done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("lifetime cancellation did not reap process")
+	}
+}
+
+func TestEphemeralRuntimeStateDoesNotCompeteWithDurableIdentity(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	durable, release, err := RuntimeStateDir("codex", "codex:assistant", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, _, err = RuntimeStateDir("codex", "codex:assistant", false); err == nil {
+		t.Fatal("durable identity lost exclusive ownership")
+	}
+	for i := 0; i < 10; i++ {
+		dir, cleanup, err := RuntimeStateDir("codex", "codex:assistant", true)
+		if err != nil {
+			t.Fatal("chat collided with durable identity", err)
+		}
+		if dir == durable {
+			t.Fatal("chat reused durable state")
+		}
+		if err = os.WriteFile(filepath.Join(dir, "session.json"), []byte("temporary state"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cleanup()
+		cleanup()
+		if _, err = os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatal("temporary native state retained", err)
+		}
+	}
+	if _, err = os.Stat(durable); err != nil {
+		t.Fatal("chat cleanup removed durable state", err)
 	}
 }

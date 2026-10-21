@@ -1,0 +1,14 @@
+
+> meshra-console@0.4.0 test
+> vitest run
+
+
+ RUN  v3.2.7 /home/yogaagungg/Workingspace/meshra/web
+
+ ✓ src/state.test.ts (4 tests) 8ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  20:30:20
+   Duration  400ms (transform 60ms, setup 0ms, collect 56ms, tests 8ms, environment 0ms, prepare 104ms)
+

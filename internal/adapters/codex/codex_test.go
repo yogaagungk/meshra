@@ -47,6 +47,10 @@ func TestCodexTransportHelper(t *testing.T) {
 			response(cmd.ID, map[string]any{"userAgent": "mock"})
 		case "initialized":
 			initialized = true
+		case "account/rateLimits/read":
+			response(cmd.ID, map[string]any{"rateLimits": map[string]any{"primary": map[string]any{"usedPercent": 25, "resetsAt": 1792434700}}})
+		case "model/list":
+			response(cmd.ID, map[string]any{"data": []map[string]any{{"id": "native-id", "model": "catalog-model", "displayName": "Catalog model"}, {"id": "hidden", "hidden": true}}})
 		case "config/read":
 			config := map[string]any{}
 			if mode == "unsafe-config" {
@@ -124,6 +128,9 @@ func TestCodexTransportHelper(t *testing.T) {
 				var permissions map[string]any
 				if json.Unmarshal(cmd.Result["permissions"], &permissions) != nil || len(permissions) != 0 {
 					os.Exit(27)
+				}
+				if mode == "usage" {
+					notify("thread/tokenUsage/updated", map[string]any{"threadId": session, "turnId": "turn-1", "tokenUsage": map[string]any{"modelContextWindow": 1000, "last": map[string]any{"inputTokens": 120, "outputTokens": 40, "cachedInputTokens": 80, "totalTokens": 160}}})
 				}
 				// A different thread's data is never attributed to this agent.
 				notify("item/agentMessage/delta", map[string]any{"threadId": "unowned-thread", "turnId": "turn-1", "itemId": "other", "delta": "must not appear"})
@@ -306,5 +313,56 @@ func TestFactoryStartupCancellation(t *testing.T) {
 	if rt, err := New().Factory(ctx, testAgent(t, "one"), nil); err == nil {
 		rt.Close()
 		t.Fatal("startup without initialize response succeeded")
+	}
+}
+
+func TestChatRuntimeAlongsideDurableIdentity(t *testing.T) {
+	mockCodex(t, "success")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	agent := testAgent(t, "chat")
+	durable, err := New().Factory(ctx, agent, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer durable.Close()
+	session := durable.SessionID()
+	agent.Ephemeral = true
+	for i := 0; i < 3; i++ {
+		chat, err := New().Factory(ctx, agent, nil)
+		if err != nil {
+			t.Fatal("fresh chat could not start alongside idle durable session", err)
+		}
+		answer, runErr := chat.Run(ctx, model.Turn{Task: model.Task{ID: "chat-task", Text: "hello"}}, func(string, string) {})
+		closeErr := chat.Close()
+		if runErr != nil || answer != "hello" || closeErr != nil {
+			t.Fatal(answer, runErr, closeErr)
+		}
+	}
+	if durable.SessionID() != session {
+		t.Fatal("chat replaced durable session")
+	}
+	root, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	leftovers, err := filepath.Glob(filepath.Join(root, "meshra", "runtimes", "codex", "chat-*"))
+	if err != nil || len(leftovers) != 0 {
+		t.Fatal("temporary native state retained", leftovers, err)
+	}
+}
+
+func TestNativeModelCatalogProtocol(t *testing.T) {
+	mockCodex(t, "success")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rt, err := New().Factory(ctx, testAgent(t, "catalog"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	items, err := rt.(model.ModelCatalog).Models(ctx)
+	if err != nil || len(items) != 1 || items[0].ID != "catalog-model" {
+		t.Fatal(items, err)
 	}
 }

@@ -21,7 +21,7 @@ import (
 )
 
 func New() model.Adapter {
-	return model.Adapter{Factory: factory, Capabilities: map[string]bool{"prompt": true, "stream": true, "resume": true, "cancel": true, "tools": false, "mcp": false}}
+	return model.Adapter{Quotas: readQuotas, Factory: factory, Capabilities: map[string]bool{"prompt": true, "stream": true, "resume": true, "cancel": true, "tools": false, "mcp": false}}
 }
 
 type frame struct {
@@ -59,7 +59,7 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 	if a.SessionID != "" && !nativeID.MatchString(a.SessionID) {
 		return nil, errors.New("OMP persisted session ID is invalid")
 	}
-	dir, unlock, err := process.StateDir("omp", a.ID)
+	dir, unlock, err := process.RuntimeStateDir("omp", a.ID, a.Ephemeral)
 	if err != nil {
 		return nil, err
 	}
@@ -260,6 +260,11 @@ func (r *runtime) command(ctx context.Context, kind string, fields map[string]an
 func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (result string, err error) {
 	r.run.Lock()
 	defer r.run.Unlock()
+	defer func() {
+		if err == nil && emit != nil {
+			r.emitContext(ctx, emit)
+		}
+	}()
 	if err = ctx.Err(); err != nil {
 		return "", err
 	}
@@ -345,4 +350,24 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 			}
 		}
 	}
+}
+
+func (r *runtime) emitContext(ctx context.Context, emit model.Emit) {
+	probe, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	data, err := r.command(probe, "get_state", nil)
+	if err != nil {
+		return
+	}
+	var state struct {
+		Context *struct {
+			Tokens int64 `json:"tokens"`
+			Window int64 `json:"contextWindow"`
+		} `json:"contextUsage"`
+	}
+	if json.Unmarshal(data, &state) != nil || state.Context == nil || state.Context.Window <= 0 {
+		return
+	}
+	raw, _ := json.Marshal(model.ContextObservation{UsedTokens: state.Context.Tokens, WindowTokens: state.Context.Window, Estimated: true, Source: "OMP native context estimate"})
+	emit("context_usage", string(raw))
 }

@@ -30,6 +30,17 @@ try {
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
   let input;
   for await (const line of lines) { input = JSON.parse(line); lines.close(); break; }
+  if (input?.discoverModels) {
+    async function* noMessages() {
+      await new Promise(resolve => abortController.signal.addEventListener('abort', resolve, { once: true }));
+    }
+    const catalog = query({ prompt: noMessages(), options: { cwd: input.cwd, abortController, settingSources: [], strictMcpConfig: true, mcpServers: {}, tools: [], persistSession: false } });
+    try {
+      const models = await catalog.supportedModels();
+      emit('models', JSON.stringify(models.slice(0, 200).map(m => ({ id: m.value, name: m.displayName, provider: 'anthropic' }))));
+    } finally { catalog.close(); abortController.abort(); }
+    process.exit(0);
+  }
   if (!input || typeof input.prompt !== 'string') throw new Error('Missing bridge prompt');
   token = input.token || '';
   const options = {
@@ -60,14 +71,22 @@ try {
   if (input.sessionId) options.resume = input.sessionId;
   if (input.model) options.model = input.model;
   let resultSeen = false;
+  let latestAssistant; 
   const conversation = query({ prompt: input.prompt, options });
   try {
     for await (const message of conversation) {
+      if (message.type === 'assistant' && message.message?.usage) latestAssistant = message.message;
       if (message.type === 'system' && message.subtype === 'init') session(message.session_id);
       if (message.type === 'stream_event' && message.event?.type === 'content_block_delta' && message.event.delta?.type === 'text_delta') emit('delta', message.event.delta.text);
       if (message.type === 'system' && message.subtype === 'permission_denied') deny(message.tool_name, message.tool_use_id);
       if (message.type === 'result') {
         session(message.session_id);
+        if (message.usage) emit('usage', JSON.stringify({ inputTokens: message.usage.input_tokens + (message.usage.cache_read_input_tokens || 0) + (message.usage.cache_creation_input_tokens || 0), outputTokens: message.usage.output_tokens, cachedInputTokens: (message.usage.cache_read_input_tokens || 0) + (message.usage.cache_creation_input_tokens || 0) }));
+        const modelInfo = latestAssistant && message.modelUsage?.[latestAssistant.model];
+        if (latestAssistant && modelInfo?.contextWindow > 0) {
+          const u = latestAssistant.usage;
+          emit('context_usage', JSON.stringify({ usedTokens: u.input_tokens + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + u.output_tokens, windowTokens: modelInfo.contextWindow, estimated: false, source: 'Claude latest assistant message' }));
+        }
         for (const deniedTool of message.permission_denials || []) deny(deniedTool.tool_name, deniedTool.tool_use_id);
         resultSeen = true;
         if (message.subtype !== 'success' || message.is_error) throw new Error(`${message.subtype}: ${(message.errors || [message.result || 'Claude query failed']).join('; ')}`);

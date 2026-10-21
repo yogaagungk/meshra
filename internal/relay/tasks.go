@@ -71,7 +71,7 @@ func (r *Relay) transition(t model.Task, kind, data string) error {
 	if err = tx.QueryRow("SELECT state FROM tasks WHERE id=?", t.ID).Scan(&old); err != nil {
 		return err
 	}
-	if !allowedTransition(old, t.State) {
+	if !allowedTransition(old, t.State) && !(t.Chat && kind == "regenerated" && old == "completed" && t.State == "queued") {
 		return model.Err(409, "invalid task transition: "+old+" -> "+t.State)
 	}
 	if _, err = tx.Exec("UPDATE tasks SET body=?,state=? WHERE id=? AND state=?", string(b), t.State, t.ID, old); err != nil {
@@ -111,6 +111,9 @@ func (r *Relay) access(p model.Principal, t model.Task, op string) error {
 func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.sendLocked(p, q)
+}
+func (r *Relay) sendLocked(p model.Principal, q model.SendRequest) (model.Task, error) {
 	var t model.Task
 	if r.closed {
 		return t, model.Err(503, "relay is shutting down")
@@ -133,6 +136,10 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 		return t, model.Err(403, "cannot impersonate another agent")
 	}
 	a, err := r.agent(from)
+	if p.Admin && from == "human:operator" {
+		a = model.Agent{ID: from, SessionID: "console"}
+		err = nil
+	}
 	if err != nil {
 		return t, err
 	}
@@ -201,6 +208,9 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 		if e != nil {
 			return model.Task{}, e
 		}
+		if parent.Chat {
+			return model.Task{}, model.Err(403, "chat turns cannot delegate")
+		}
 		if parent.To != from || parent.DestinationSessionID != session {
 			r.auditDenied(p, q.To, q.Type)
 			return model.Task{}, model.Err(403, "parent task is not owned by this destination session")
@@ -265,6 +275,24 @@ func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error)
 	}
 	if err := r.validateCollaboration(p, q); err != nil {
 		return model.Task{}, err
+	}
+	if q.ConversationID != "" {
+		t.Chat, err = r.isChat(q.ConversationID)
+		if err != nil {
+			return model.Task{}, err
+		}
+		if t.Chat {
+			if !p.Admin || from != "human:operator" || q.ParentTaskID != "" {
+				return model.Task{}, model.Err(403, "chat accepts only direct human messages")
+			}
+			var active int
+			if err = r.db.QueryRow(`SELECT count(*) FROM tasks WHERE json_extract(body,'$.conversationId')=? AND state IN ('queued','dispatching','running')`, q.ConversationID).Scan(&active); err != nil {
+				return model.Task{}, err
+			}
+			if active > 0 {
+				return model.Task{}, model.Err(409, "wait for the reply or stop it before sending another message")
+			}
+		}
 	}
 	n, total, err := r.inboxDepth(q.To)
 	if err != nil {
@@ -411,6 +439,15 @@ func (r *Relay) Retry(p model.Principal, id string) (model.Task, error) {
 	if s := r.slots[t.To]; s != nil && s.taskID == id {
 		return model.Task{}, model.Err(409, "previous execution is still stopping")
 	}
+	if t.Chat {
+		var active int
+		if err = r.db.QueryRow(`SELECT count(*) FROM tasks WHERE json_extract(body,'$.conversationId')=? AND state IN ('queued','dispatching','running')`, t.ConversationID).Scan(&active); err != nil {
+			return t, err
+		}
+		if active > 0 {
+			return t, model.Err(409, "another chat reply is active")
+		}
+	}
 	n, total, err := r.inboxDepth(t.To)
 	if err != nil {
 		return t, err
@@ -549,7 +586,7 @@ func (r *Relay) tick() time.Duration {
 			continue
 		}
 		s := r.slots[t.To]
-		if len(r.repos) >= 32 || (s != nil && (s.taskID != "" || r.repos[s.repo])) {
+		if len(r.repos) >= r.settings.MaxParallelTurns || (s != nil && s.taskID != "") {
 			continue
 		}
 		a, e := r.agent(t.To)
@@ -566,6 +603,18 @@ func (r *Relay) tick() time.Duration {
 			// transition signals the scheduler, which observes the persisted retry time.
 			continue
 		}
+		a, e = r.chatAgent(t, a)
+		if e != nil {
+			t.State = "failed"
+			t.ErrorCategory = "workspace_unavailable"
+			t.Error = "workspace is unavailable; check the project directory"
+			_ = r.transition(t, "failed", t.Error)
+			continue
+		}
+		repo := repository(a.Cwd)
+		if r.repos[repo] {
+			continue
+		}
 		if _, e = r.resolveTaskContext(t); e != nil {
 			t.State = "failed"
 			t.ErrorCategory = "context_denied"
@@ -577,12 +626,28 @@ func (r *Relay) tick() time.Duration {
 		}
 		t.State = "dispatching"
 		t.Attempts++
+		reserved, reserveErr := r.reserveRun(t, a)
+		if reserveErr != nil {
+			return time.Second
+		}
+		if !reserved {
+			reset := now().Truncate(24 * time.Hour).Add(24 * time.Hour)
+			if reset.Before(next) {
+				next = reset
+			}
+			continue
+		}
+		s.repo = repo
 		t.Error = ""
 		t.ErrorCategory = ""
 		t.NextAttemptAt = time.Time{}
 		t.LeaseOwner = r.owner
 		t.LeaseUntil = t.Deadline
-		t.DestinationSessionID = s.runtime.SessionID()
+		if !t.Chat {
+			t.DestinationSessionID = s.runtime.SessionID()
+		} else {
+			t.DestinationSessionID = ""
+		}
 		if e = r.transition(t, "dispatching", "turn slot and repository lock acquired"); e != nil {
 			return time.Second
 		}
@@ -618,6 +683,7 @@ func (r *Relay) tick() time.Duration {
 func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Task, token, url string) {
 	defer r.wg.Done()
 	defer r.signal()
+	startedAt := time.Now()
 	r.mu.Lock()
 	current, e := r.task(t.ID)
 	if e != nil {
@@ -635,7 +701,32 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 	if e == nil && !model.Terminal(current.State) {
 		injected, e = r.resolveTaskContext(current)
 	}
+	if e == nil && current.Chat && !model.Terminal(current.State) {
+		injected, e = r.chatPrompt(current, injected)
+	}
 	r.mu.Unlock()
+	runtime := s.runtime
+	if current.Chat {
+		runtime = nil
+	}
+	if e == nil && current.Chat && !model.Terminal(current.State) {
+		fresh := a
+		fresh.SessionID = ""
+		fresh.Ephemeral = true
+		runtime, e = r.adapters[a.Harness].Factory(ctx, fresh, nil)
+		if e == nil {
+			r.mu.Lock()
+			current, e = r.task(t.ID)
+			if e == nil && !model.Terminal(current.State) {
+				current.DestinationSessionID = runtime.SessionID()
+				_, e = r.db.Exec("UPDATE credentials SET session_id=? WHERE hash=?", current.DestinationSessionID, tokenHash(token))
+				if e == nil {
+					e = r.transition(current, "session", current.DestinationSessionID)
+				}
+			}
+			r.mu.Unlock()
+		}
+	}
 	var result string
 	var runErr error
 	eventCount := 0
@@ -643,9 +734,18 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 	deltaOverflow := false
 	sawDelta := false
 	if e == nil && !model.Terminal(current.State) {
+		inputBytes := len(injected)
+		if !current.Chat {
+			inputBytes += len(current.Text)
+		}
+		_, _ = r.db.Exec("UPDATE run_usage SET input_bytes=? WHERE task_id=? AND attempt=?", inputBytes, t.ID, t.Attempts)
 		delivery := current
-		delivery.Text += injected
-		result, runErr = s.runtime.Run(ctx, model.Turn{Task: delivery, Token: token, MCPURL: url}, func(kind, data string) {
+		if current.Chat {
+			delivery.Text = injected
+		} else {
+			delivery.Text += injected
+		}
+		result, runErr = runtime.Run(ctx, model.Turn{Task: delivery, Token: token, MCPURL: url}, func(kind, data string) {
 			data = strings.ReplaceAll(data, token, "[REDACTED]")
 			r.mu.Lock()
 			defer r.mu.Unlock()
@@ -674,9 +774,17 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 				}
 				return
 			}
+			if kind == "context_usage" {
+				r.recordContext(task, data)
+				return
+			}
+			if kind == "usage" {
+				r.recordUsage(task, data)
+				return
+			}
 			if kind == "session" {
 				a, err := r.agent(t.To)
-				if err == nil {
+				if err == nil && !t.Chat {
 					a.SessionID = data
 					_ = r.saveAgent(a)
 				}
@@ -692,6 +800,9 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 		})
 	} else {
 		runErr = e
+	}
+	if current.Chat && runtime != nil {
+		_ = runtime.Close()
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -746,7 +857,7 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 			current.State = "completed"
 			current.Result = redact(strings.ReplaceAll(result, token, "[REDACTED]"))
 		}
-		if current.State == "completed" && current.ConversationID != "" && current.Result != "" {
+		if current.State == "completed" && !current.Chat && current.ConversationID != "" && current.Result != "" {
 			ref, err := r.publishTaskResult(current)
 			if err != nil {
 				current.State = "failed"
@@ -757,20 +868,24 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 				current.ResultRef = &ref
 			}
 		}
-		if sid := s.runtime.SessionID(); sid != "" {
+		if sid := runtimeSessionID(runtime); sid != "" {
 			current.DestinationSessionID = sid
 		}
 		_ = r.transition(current, current.State, current.Error)
 	}
 	_, _ = r.db.Exec("DELETE FROM credentials WHERE hash=?", tokenHash(token))
+	s.lastUsed = now()
+	_, _ = r.db.Exec("UPDATE run_usage SET state=?,output_bytes=?,duration_ms=? WHERE task_id=? AND attempt=?", current.State, len(result), time.Since(startedAt).Milliseconds(), t.ID, t.Attempts)
 	s.taskID = ""
 	s.turnCancel = nil
 	if r.slots[a.ID] == s {
 		latest, err := r.agent(a.ID)
 		if err == nil {
-			latest.SessionID = s.runtime.SessionID()
+			if !t.Chat {
+				latest.SessionID = s.runtime.SessionID()
+			}
 			if latest.State == "busy" {
-				if runErr != nil || ctxErr != nil {
+				if !t.Chat && (runErr != nil || ctxErr != nil) {
 					latest.State = "error"
 					latest.Error = "harness turn failed or was interrupted; inspect task status and restart agent before dispatching more work"
 				} else {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"meshra/internal/model"
@@ -17,13 +18,26 @@ import (
 
 const maxBody = 128 * 1024
 
-type server struct{ service model.Service }
+type server struct {
+	service       model.Service
+	consoleMu     sync.Mutex
+	consoleAuthMu sync.Mutex
+	sessions      map[string]consoleSession
+	loginWindow   time.Time
+	loginAttempts int
+}
 
-func New(service model.Service) http.Handler { return &server{service: service} }
+func New(service model.Service) http.Handler {
+	return &server{service: service, sessions: map[string]consoleSession{}}
+}
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.URL.Path == "/" || r.URL.Path == "/console" || strings.HasPrefix(r.URL.Path, "/console/") {
+		s.console(w, r)
+		return
+	}
 	if _, present := r.Header["Origin"]; present {
 		fail(w, model.Err(403, "browser origins are not permitted"))
 		return

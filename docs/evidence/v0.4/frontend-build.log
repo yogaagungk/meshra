@@ -1,0 +1,17 @@
+
+> meshra-console@0.4.0 build
+> tsc -b && vite build
+
+vite v7.3.7 building client environment for production...
+transforming...
+✓ 1957 modules transformed.
+rendering chunks...
+computing gzip size...
+../internal/consoleui/dist/index.html                       0.72 kB │ gzip:  0.38 kB
+../internal/consoleui/dist/assets/index-CMoX_K9v.css       54.01 kB │ gzip: 11.27 kB
+../internal/consoleui/dist/assets/query-DLtUS1sY.js        43.26 kB │ gzip: 13.40 kB
+../internal/consoleui/dist/assets/primitives-BVaPiAe_.js   43.50 kB │ gzip: 14.77 kB
+../internal/consoleui/dist/assets/highlight-ZI9zQqL1.js    44.41 kB │ gzip: 14.52 kB
+../internal/consoleui/dist/assets/markdown-B5vYwlzs.js    158.41 kB │ gzip: 48.19 kB
+../internal/consoleui/dist/assets/index-BC6NjGWj.js       313.68 kB │ gzip: 96.45 kB
+✓ built in 2.78s

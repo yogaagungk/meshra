@@ -1,0 +1,380 @@
+/* The inbox has a warm identity; mint remains the action color elsewhere. */
+.inbox {
+  --list-accent: #efbd9f;
+  --list-accent-strong: #ffdac3;
+  --list-accent-bg: #342b27;
+  --list-accent-border: #705447;
+  --list-hover: #242220;
+  background: #191918;
+}
+[data-theme="light"] .inbox {
+  --list-accent: #87462e;
+  --list-accent-strong: #68331f;
+  --list-accent-bg: #faede4;
+  --list-accent-border: #c3a28f;
+  --list-hover: #f3eee9;
+  background: #fbf9f6;
+}
+.conversation-list-header {
+  padding: 16px 16px 12px;
+  flex-shrink: 0;
+}
+.conversation-list-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.conversation-list-heading h1 {
+  font-size: var(--font-section);
+  line-height: 1.3;
+  letter-spacing: -0.025em;
+}
+.conversation-count {
+  font-size: var(--font-meta);
+  color: var(--list-accent);
+  background: var(--list-accent-bg);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-variant-numeric: tabular-nums;
+}
+.conversation-list-header > p {
+  margin-top: 8px;
+  font-size: var(--font-label);
+  line-height: 1.6;
+  color: var(--muted);
+}
+.new-conversation-button {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-block: 12px 8px;
+  min-height: 36px;
+}
+.conversation-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 12px;
+  background: var(--bg);
+  color: var(--muted);
+}
+.conversation-search:focus-within {
+  border-color: var(--list-accent-border);
+  outline: 2px solid var(--list-accent);
+  outline-offset: 2px;
+}
+.conversation-search input {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 0;
+  font-size: var(--font-label);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+.conversation-search input:focus-visible {
+  outline: none;
+}
+.conversation-search > button {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  min-height: 32px;
+  color: var(--muted);
+  border-radius: 5px;
+}
+.conversation-search > button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.conversation-filters {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin-top: 8px;
+  border-radius: 10px;
+  background: var(--bg);
+}
+.conversation-filters > button {
+  flex: 1;
+  min-height: 32px;
+  padding: 6px 4px;
+  border-radius: 7px;
+  font-size: var(--font-meta);
+  font-weight: var(--weight-label);
+  color: var(--muted);
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.conversation-filters > button:hover {
+  color: var(--text);
+}
+.conversation-filters > button[aria-pressed="true"] {
+  color: var(--list-accent);
+  border-color: var(--list-accent-border);
+  background: var(--list-accent-bg);
+}
+.inbox .conversation-list {
+  padding: 0 8px 16px;
+  overscroll-behavior: contain;
+}
+.conversation-group + .conversation-group {
+  margin-top: 16px;
+}
+.conversation-group > h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 6px;
+  font-size: var(--font-meta);
+  line-height: 1.5;
+  letter-spacing: 0;
+  font-weight: var(--weight-label);
+  color: var(--muted);
+  text-wrap: nowrap;
+}
+.conversation-group-count {
+  margin-left: auto;
+  font-weight: 450;
+  font-variant-numeric: tabular-nums;
+}
+.conversation-group > ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.inbox .conversation-item {
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+}
+.inbox .conversation-item:hover {
+  background: var(--list-hover);
+}
+.inbox .conversation-item.selected {
+  background: var(--list-accent-bg);
+  border-color: var(--list-accent-border);
+}
+.inbox .conversation-item > a {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  min-width: 0;
+  border-radius: 11px;
+  text-decoration: none;
+}
+.conversation-avatar {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--list-accent);
+  background: var(--surface-2);
+  border-radius: 9px;
+  margin-top: 1px;
+}
+.conversation-avatar .harness {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+}
+.conversation-avatar .harness-logo {
+  width: 18px;
+  height: 18px;
+}
+.conversation-item-content {
+  flex: 1;
+  min-width: 0;
+}
+.inbox .conversation-item-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 21px;
+  padding: 0 30px 0 0;
+}
+.inbox .conversation-item-title strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: var(--font-ui);
+  line-height: 1.5;
+  font-weight: var(--weight-label);
+}
+.inbox .conversation-item.unread strong,
+.inbox .conversation-item.selected strong {
+  font-weight: var(--weight-heading);
+}
+.inbox .conversation-item p {
+  margin: 2px 0 0;
+  font-size: var(--font-label);
+  line-height: 1.5;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox .conversation-item-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: 1.5;
+}
+.conversation-item-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.conversation-item-meta time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.inbox .conversation-item.selected p,
+.inbox .conversation-item.selected .conversation-item-meta {
+  color: var(--list-accent);
+}
+.conversation-unread {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  margin-top: 8px;
+  border-radius: 50%;
+  background: var(--list-accent);
+}
+.conversation-pin {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 32px;
+  border-radius: 7px;
+  color: var(--muted);
+}
+.conversation-pin:hover,
+.conversation-pin:focus-visible {
+  color: var(--list-accent);
+  background: var(--surface);
+}
+.conversation-pin.is-pinned {
+  color: var(--list-accent);
+}
+.inbox .conversation-item.selected .conversation-pin {
+  color: var(--list-accent);
+}
+.conversation-search-summary {
+  font-size: var(--font-meta);
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0 8px 12px;
+  overflow-wrap: anywhere;
+}
+.conversation-list-status {
+  color: var(--muted);
+  font-size: var(--font-label);
+  padding: 24px 8px;
+}
+.conversation-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 28px 12px;
+}
+.conversation-list-empty > svg {
+  color: var(--list-accent);
+}
+.conversation-list-empty strong {
+  font-size: var(--font-ui);
+  font-weight: var(--weight-heading);
+}
+.conversation-list-empty p {
+  color: var(--muted);
+  font-size: var(--font-label);
+  line-height: 1.65;
+}
+.inbox .inbox-footer {
+  padding: 10px 16px;
+  gap: 8px;
+  font-size: var(--font-meta);
+  line-height: 1.6;
+  background: inherit;
+}
+.inbox .inbox-footer svg {
+  color: var(--list-accent);
+}
+.inbox .inbox-resizer:hover {
+  background: var(--list-accent);
+}
+:root[data-density="compact"] .inbox .conversation-item > a {
+  padding-block: 6px;
+}
+@media (min-width: 761px) and (max-width: 960px) {
+  .conversation-list-header {
+    padding-inline: 12px;
+  }
+  .inbox .conversation-list {
+    padding-inline: 6px;
+  }
+  .inbox .conversation-item > a {
+    gap: 8px;
+    padding-inline: 8px;
+  }
+  .conversation-avatar,
+  .conversation-avatar .harness {
+    width: 24px;
+    height: 28px;
+  }
+}
+@media (max-width: 760px) {
+  .conversation-list-header {
+    padding: 16px 16px 12px;
+  }
+  .conversation-list-heading h1 {
+    font-size: var(--font-section);
+  }
+  .new-conversation-button {
+    min-height: 44px;
+  }
+  .conversation-filters > button {
+    min-height: 40px;
+    font-size: var(--font-label);
+  }
+  .inbox .conversation-list {
+    padding: 0 8px 16px;
+  }
+  .inbox .conversation-item > a {
+    padding: 10px;
+    gap: 10px;
+  }
+  .inbox .conversation-item-title {
+    padding-right: 40px;
+  }
+  .inbox .conversation-item-title strong {
+    font-size: 0.9375rem;
+  }
+  .conversation-pin {
+    width: 40px;
+    height: 44px;
+    top: 1px;
+    right: 5px;
+  }
+}

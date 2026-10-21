@@ -1,0 +1,11 @@
+ok  	meshra/cmd/meshra	1.851s
+ok  	meshra/internal/adapters/claude	0.075s
+ok  	meshra/internal/adapters/codex	(cached)
+ok  	meshra/internal/adapters/omp	0.830s
+ok  	meshra/internal/adapters/opencode	0.045s
+ok  	meshra/internal/adapters/process	(cached)
+ok  	meshra/internal/api	0.121s
+?   	meshra/internal/consoleui	[no test files]
+?   	meshra/internal/model	[no test files]
+ok  	meshra/internal/relay	9.402s
+ok  	meshra/tests	1.924s
