@@ -8,6 +8,7 @@ import "./conversation-list.css";
 import "./personal.css";
 import "./ai-status.css";
 import "./automation.css";
+import "./glass.css";
 const client = new QueryClient({
   defaultOptions: {
     queries: {
