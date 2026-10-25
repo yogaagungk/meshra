@@ -17,12 +17,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"meshra/internal/adapters/acp"
 	"meshra/internal/adapters/claude"
 	"meshra/internal/adapters/codex"
 	"meshra/internal/adapters/omp"
+	"meshra/internal/adapters/openai"
 	"meshra/internal/adapters/opencode"
 	"meshra/internal/api"
 	"meshra/internal/model"
@@ -50,6 +53,8 @@ Commands:
   task status|cancel|retry|trace ID
   task events ID [--after N] [--follow]
   collaboration OP JSON_OBJECT   Conversation/context operations
+  automation OP JSON_OBJECT      Automation service operations
+  automation runtime-status      Confined runtime readiness
   metrics
   doctor
   mcp stdio                 Agent-only MCP proxy; requires MESHRA_TOKEN
@@ -389,6 +394,30 @@ func serveOptions(args []string) (relay.Options, error) {
 func command(args []string) (method, path string, body any, follow bool, err error) {
 	method = http.MethodGet
 	switch args[0] {
+	case "automation":
+		if len(args) == 2 && args[1] == "runtime-status" {
+			method = http.MethodPost
+			path = "/v1/automation/runtime.status"
+			body = map[string]any{}
+			return
+		}
+		if len(args) != 3 {
+			err = usage("automation OP JSON_OBJECT")
+			return
+		}
+		if !validAutomationOperation(args[1]) {
+			err = usage("unknown automation operation %q", args[1])
+			return
+		}
+		payload := json.RawMessage(strings.TrimSpace(args[2]))
+		if !json.Valid(payload) || len(payload) == 0 || payload[0] != '{' {
+			err = usage("automation payload must be one JSON object")
+			return
+		}
+		method = http.MethodPost
+		path = "/v1/automation/" + args[1]
+		body = payload
+		return
 	case "collaboration":
 		if len(args) != 3 {
 			err = usage("collaboration OP JSON_OBJECT")
@@ -717,11 +746,32 @@ func serve(ctx context.Context, opts options, errout io.Writer) error {
 		listener.Close()
 		return fmt.Errorf("refusing a non-loopback listener")
 	}
-	core, err := relay.OpenWithOptions(opts.DataDir, map[string]model.Adapter{"omp": omp.New(), "codex": codex.New(), "claude": claude.New(), "opencode": opencode.New()}, opts.Relay)
+	// The endpoint resolver reads stored connection configuration, so it is
+	// bound to the relay instance created below.
+	var coreRef atomic.Pointer[relay.Relay]
+	resolveEndpoint := func(ctx context.Context, id string) (openai.Config, error) {
+		core := coreRef.Load()
+		if core == nil {
+			return openai.Config{}, fmt.Errorf("the relay is not ready")
+		}
+		return core.EndpointRuntimeConfig(ctx, id)
+	}
+	acpAdapter := acp.New(acp.Options{})
+	acpAdapter.Factory = func(ctx context.Context, agent model.Agent, emit model.Emit) (model.Runtime, error) {
+		core := coreRef.Load()
+		if core == nil {
+			return nil, model.Err(503, "the relay is not ready")
+		}
+		return core.NewACPRuntime(ctx, agent, emit)
+	}
+	adapters := map[string]model.Adapter{"omp": omp.New(), "codex": codex.New(), "claude": claude.New(), "opencode": opencode.New(), "openai": openai.New(resolveEndpoint), "acp": acpAdapter}
+	opened, err := relay.OpenWithOptions(opts.DataDir, adapters, opts.Relay)
 	if err != nil {
 		listener.Close()
 		return err
 	}
+	core := opened
+	coreRef.Store(core)
 	logger := slog.New(slog.NewJSONHandler(errout, nil))
 	core.SetLogger(logger)
 	defer func() {

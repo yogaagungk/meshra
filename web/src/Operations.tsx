@@ -49,6 +49,8 @@ import {
   type TraceEvent,
 } from "./types";
 import { SettingsPanels } from "./Personal";
+import { Automation } from "./Automation";
+import { Profiles } from "./Profiles";
 import { Workspaces } from "./Workspaces";
 export function Operations({
   view,
@@ -86,6 +88,7 @@ export function Operations({
                 {
                   workspaces: "Coding workspaces",
                   agents: "Your agents",
+                  automation: "Automation",
                   contexts: "Shared context",
                   activity: "Activity & provenance",
                   settings: "Make yourself at home",
@@ -101,6 +104,8 @@ export function Operations({
                     "Browse project files, review changes, and give your AI the right working directory.",
                   agents:
                     "Independent instances. Exact identities. Clear boundaries.",
+                  automation:
+                    "Queued work, scheduled routines, flow graphs, skills, and templates.",
                   contexts:
                     "Small, immutable references. Explicit access for every agent.",
                   activity:
@@ -116,7 +121,9 @@ export function Operations({
       {view === "workspaces" ? (
         <Workspaces />
       ) : view === "agents" ? (
-        <Agents agents={agents} loading={loading} error={error} />
+        <AgentsWorkspace agents={agents} loading={loading} error={error} />
+      ) : view === "automation" ? (
+        <Automation />
       ) : view === "contexts" ? (
         <ContextBrowser />
       ) : view === "settings" ? (
@@ -132,6 +139,44 @@ export function Operations({
         <RecentActivity />
       )}
     </section>
+  );
+}
+function AgentsWorkspace({
+  agents,
+  loading,
+  error,
+}: {
+  agents: Agent[];
+  loading: boolean;
+  error: Error | null;
+}) {
+  const [tab, setTab] = useState("named");
+  return (
+    <>
+      <div
+        className="automation-tabs"
+        role="group"
+        aria-label="Agent sections"
+      >
+        {[
+          ["named", "Named agents"],
+          ["profiles", "Profiles"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            aria-pressed={tab === key}
+            onClick={() => setTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "named" ? (
+        <Agents agents={agents} loading={loading} error={error} />
+      ) : (
+        <Profiles />
+      )}
+    </>
   );
 }
 function Agents({

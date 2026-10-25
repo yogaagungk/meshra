@@ -20,6 +20,7 @@ import {
   SquareTerminal,
   Users,
   UserRound,
+  Workflow,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -38,11 +39,14 @@ import { Chat } from "./Chat";
 import { Operations } from "./Operations";
 import { ConversationList, type ConversationFilter } from "./ConversationList";
 import { HarnessLogo, harnessName } from "./HarnessLogo";
+import { automation } from "./automation-api";
+import { AutomationEvents } from "./AutomationEvents";
 export const navigation = [
   ["chat", "Chat", MessageSquare],
   ["agents", "Agents", Users],
   ["workspaces", "Workspaces", FolderOpen],
   ["contexts", "Contexts", BookOpen],
+  ["automation", "Automation", Workflow],
   ["activity", "Activity", Activity],
   ["settings", "Settings", Settings],
 ] as const;
@@ -135,6 +139,7 @@ export function App() {
       .finally(() => setLoading(false));
     const expired = () => {
       setConnected(false);
+      setCSRF("");
       client.clear();
     };
     window.addEventListener("meshra:expired", expired);
@@ -171,6 +176,7 @@ export function App() {
       dense={dense}
       setDense={setDense}
       onLogout={async () => {
+        window.dispatchEvent(new Event("meshra:cleanup"));
         await api("logout", {});
         setCSRF("");
         client.clear();
@@ -434,6 +440,7 @@ function Shell({
       }
       style={{ "--inbox-width": inboxWidth + "px" } as React.CSSProperties}
     >
+      <AutomationEvents />
       <a href="#main-content" className="skip-link">
         Skip to content
       </a>
@@ -836,7 +843,14 @@ function NewConversation({
 }) {
   const client = useQueryClient();
   const [title, setTitle] = useState("");
-  const [mode, setMode] = useState<"chat" | "collaboration">("chat");
+  const [mode, setMode] = useState<"chat" | "collaboration" | "profile">("chat");
+  const [profileKind, setProfileKind] = useState<"chat" | "task" | "channel">("chat");
+  const [profileIds, setProfileIds] = useState<string[]>([]);
+  const profiles = useQuery({
+    queryKey: ["profiles"],
+    queryFn: () => automation("profiles.list", { limit: 100 }),
+    enabled: open && mode === "profile",
+  });
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [harness, setHarness] = useState("codex");
@@ -875,7 +889,13 @@ function NewConversation({
     setError("");
     try {
       const c =
-        mode === "chat"
+        mode === "profile"
+          ? await automation("profiles.createConversation", {
+              title: title.trim() || "Profile conversation",
+              profileIds,
+              kind: profileKind,
+            })
+          : mode === "chat"
           ? await api<Conversation>("chat-create", {
               harness,
               workspaceId: workspace,
@@ -894,6 +914,7 @@ function NewConversation({
       onOpenChange(false);
       setTitle("");
       setSelected([]);
+      setProfileIds([]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -908,7 +929,7 @@ function NewConversation({
       description={
         mode === "chat"
           ? "Choose your AI. Every conversation has its own history."
-          : "Choose the named agents you want to work with."
+          : mode === "profile" ? "Choose an explicit profile chat, task, or multi-profile channel." : "Choose the named agents you want to work with."
       }
       wide
     >
@@ -917,10 +938,11 @@ function NewConversation({
         <select
           id="conversation-mode"
           value={mode}
-          onChange={(e) => setMode(e.target.value as "chat" | "collaboration")}
+          onChange={(e) => setMode(e.target.value as "chat" | "collaboration" | "profile")}
         >
           <option value="chat">Chat with an AI</option>
           <option value="collaboration">Agent collaboration</option>
+          <option value="profile">Work with profiles</option>
         </select>
         <label htmlFor="conversation-title">
           Conversation title <span className="muted">optional</span>
@@ -933,7 +955,28 @@ function NewConversation({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
-        {mode === "chat" ? (
+        {mode === "profile" ? (
+          <div className="form-stack">
+            <label htmlFor="profile-conversation-kind">Profile conversation mode</label>
+            <select id="profile-conversation-kind" value={profileKind} onChange={(e) => { setProfileKind(e.target.value as "chat" | "task" | "channel"); setProfileIds([]); }}>
+              <option value="chat">Single-profile chat</option>
+              <option value="task">Single-profile task</option>
+              <option value="channel">Multi-profile channel</option>
+            </select>
+            <fieldset className="agent-picker"><legend>Participant profiles</legend>
+              {profiles.data?.items.filter((p) => !p.archived).map((profile) => (
+                <label className="agent-option" key={profile.id}>
+                  <input type={profileKind === "channel" ? "checkbox" : "radio"} name="conversation-profile" checked={profileIds.includes(profile.id)} onChange={() => setProfileIds((ids) => profileKind !== "channel" ? [profile.id] : ids.includes(profile.id) ? ids.filter((id) => id !== profile.id) : [...ids, profile.id])} />
+                  <span>{profile.name}<small className="muted">{profile.binding.harness} · {profile.binding.config.model || "Configured default"}</small></span>
+                </label>
+              ))}
+            </fieldset>
+            {profiles.isPending && <p role="status">Loading profiles…</p>}
+            {profiles.isError && <Notice>{profiles.error.message}</Notice>}
+            {profiles.data && !profiles.data.items.some((p) => !p.archived) && <p>Create a profile in Agents → Profiles first.</p>}
+            <p className="muted">Messages queue per selected recipient. Channel membership grants no private memory or context access.</p>
+          </div>
+        ) : mode === "chat" ? (
           <>
             <fieldset className="harness-picker">
               <legend>Choose your AI</legend>
@@ -1103,9 +1146,11 @@ function NewConversation({
             type="submit"
             disabled={
               busy ||
-              (mode === "chat"
-                ? !harnesses.data?.some((h) => h.id === harness)
-                : !selected.length)
+              (mode === "profile"
+                ? (profileKind === "channel" ? profileIds.length < 2 : profileIds.length !== 1)
+                : mode === "chat"
+                  ? !harnesses.data?.some((h) => h.id === harness)
+                  : !selected.length)
             }
           >
             {busy ? "Creating…" : "Create conversation"}

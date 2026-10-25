@@ -252,5 +252,18 @@ func (r *Relay) recordContext(t model.Task, data string) {
 	if len(data) > 1024 || json.Unmarshal([]byte(data), &v) != nil || v.UsedTokens == nil || *v.UsedTokens < 0 || *v.UsedTokens > 1e12 || v.WindowTokens <= 0 || v.WindowTokens > 1e12 || len(v.Source) > 120 || !safeRegistryText(v.Source) || redact(v.Source) != v.Source {
 		return
 	}
-	_, _ = r.db.Exec(`UPDATE run_usage SET context_used_tokens=?,context_window_tokens=?,context_estimated=?,context_source=?,observed_at=? WHERE task_id=? AND attempt=?`, *v.UsedTokens, v.WindowTokens, v.Estimated, v.Source, now().Format(time.RFC3339Nano), t.ID, t.Attempts)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`UPDATE run_usage SET context_used_tokens=?,context_window_tokens=?,context_estimated=?,context_source=?,observed_at=? WHERE task_id=? AND attempt=?`, *v.UsedTokens, v.WindowTokens, v.Estimated, v.Source, now().Format(time.RFC3339Nano), t.ID, t.Attempts); err != nil {
+		return
+	}
+	if !v.Estimated && *v.UsedTokens*5 >= v.WindowTokens*4 {
+		if _, err = tx.Exec("UPDATE profile_context_epochs SET rotate_pending=1 WHERE binding_id=(SELECT binding_id FROM profile_task_snapshots WHERE task_id=?)", t.ID); err != nil {
+			return
+		}
+	}
+	_ = tx.Commit()
 }

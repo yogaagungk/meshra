@@ -125,7 +125,7 @@ func (r *Relay) publishTaskResult(t model.Task) (model.ContextRef, error) {
 	}
 	c := v.(model.SharedContext)
 	for _, id := range []string{t.From, t.OriginAgentID} {
-		if id == "human:operator" {
+		if id == "human:operator" || !validAgentID(id) {
 			continue
 		}
 		if _, err = r.contextOperation(p, "context.grant", model.CollaborationRequest{ContextID: c.ID, AgentID: id}); err != nil {

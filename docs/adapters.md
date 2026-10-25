@@ -5,7 +5,7 @@ Adapter support is intentionally asymmetric. A registered identity is durable ev
 | Adapter | Inspected implementation | Prompt | Text stream | Resume | Cancel | Automatic task-bound MCP | Tool/approval policy |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | OMP | CLI 18.12.1, custom RPC v2 over stdio | Yes | Yes | Saved session ID in per-identity session directory | Native abort, forced process cleanup if needed | No | Builtins/discovery/MCP disabled; no auto-approval |
-| Codex | CLI 0.163.0, App Server, generated installed schemas | Yes | Yes | Saved thread ID | Native turn interrupt, forced cleanup if needed | No | Read-only sandbox; network disabled; approval requests explicitly declined |
+| Codex | CLI 0.163.0, App Server, generated installed schemas | Yes | Yes | Saved thread ID | Native turn interrupt, forced cleanup if needed | No | Read-only sandbox; network disabled; approval requests explicitly declined. Profile-managed identities serve the Meshra broker catalog through the installed experimental dynamic tool API with every native tool surface disabled and verified |
 | Claude | Agent SDK 0.3.303, bundled Claude Code 2.1.303 | Yes | Yes | SDK native session ID | AbortController and owned process-group cleanup | Yes | Read/search and Meshra tools allowed; unsafe/unknown tools denied visibly |
 | OpenCode | CLI 1.19.3, owned localhost HTTP server | Yes | **No**, final text only | Saved HTTP session ID | HTTP abort and owned process-group cleanup | Yes | Read/search and Meshra tools allowed; permission events explicitly rejected |
 

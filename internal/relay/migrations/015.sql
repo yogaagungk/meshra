@@ -1,0 +1,13 @@
+CREATE TABLE routines(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),body TEXT NOT NULL,next_due_at TEXT NOT NULL DEFAULT '',enabled INTEGER NOT NULL CHECK(enabled IN (0,1)));
+CREATE INDEX routines_due ON routines(enabled,next_due_at);
+CREATE TABLE routine_runs(id TEXT PRIMARY KEY,routine_id TEXT NOT NULL REFERENCES routines(id) ON DELETE CASCADE,revision INTEGER NOT NULL CHECK(revision>0),scheduled_at TEXT NOT NULL,source TEXT NOT NULL,state TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(routine_id,revision,scheduled_at));
+CREATE INDEX routine_runs_routine ON routine_runs(routine_id,scheduled_at);
+CREATE TABLE routine_flow_versions(id TEXT NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),body TEXT NOT NULL,PRIMARY KEY(id,revision));
+CREATE TABLE routine_steps(run_id TEXT NOT NULL REFERENCES routine_runs(id) ON DELETE CASCADE,node_id TEXT NOT NULL,binding_id TEXT NOT NULL,task_id TEXT NOT NULL DEFAULT '',state TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(run_id,node_id));
+CREATE INDEX routine_steps_task ON routine_steps(task_id);
+CREATE INDEX routine_steps_state ON routine_steps(run_id,state);
+CREATE TABLE routine_execution_tokens(id TEXT PRIMARY KEY,token_hash TEXT NOT NULL UNIQUE,expires_at TEXT NOT NULL DEFAULT '',revoked_at TEXT NOT NULL DEFAULT '',body TEXT NOT NULL);
+CREATE TABLE routine_token_grants(token_id TEXT NOT NULL REFERENCES routine_execution_tokens(id) ON DELETE CASCADE,routine_id TEXT NOT NULL REFERENCES routines(id) ON DELETE CASCADE,PRIMARY KEY(token_id,routine_id));
+CREATE INDEX routine_token_grants_routine ON routine_token_grants(routine_id);
+CREATE TABLE routine_trigger_receipts(routine_id TEXT NOT NULL REFERENCES routines(id) ON DELETE CASCADE,source TEXT NOT NULL,event_id TEXT NOT NULL,request_hash TEXT NOT NULL,run_id TEXT NOT NULL,PRIMARY KEY(routine_id,source,event_id));
+UPDATE schema_version SET version=15;

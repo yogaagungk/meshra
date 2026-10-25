@@ -111,9 +111,9 @@ func TestConsoleExpiredSessionAndLoginHeaders(t *testing.T) {
 	}
 	cookie := w.Result().Cookies()[0]
 	s.consoleMu.Lock()
-	session := s.sessions[cookie.Value]
+	session := s.sessions[consoleSessionKey(cookie.Value)]
 	session.Expires = time.Now().Add(-time.Second)
-	s.sessions[cookie.Value] = session
+	s.sessions[consoleSessionKey(cookie.Value)] = session
 	s.consoleMu.Unlock()
 	r := httptest.NewRequest("GET", "http://127.0.0.1:7331/console/api/session", nil)
 	r.AddCookie(cookie)

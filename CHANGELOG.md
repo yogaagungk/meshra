@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Optional automation boundary
+
+- Report `201 Created` for automation saves without an `expectedRevision` (including client-selected IDs) and `200 OK` for revision-checked updates.
+- Add an optional context-aware automation service over authenticated bearer and console POST routes without changing the legacy service or runtime contracts. Unknown operations remain unavailable until their backing behavior is implemented.
+- Bind console-only authority to a digest of a validated live session, revalidate against the real session store, and notify relay revocations outside API session locks.
+- Factor task admission into one transaction-aware core so feature receipts fail atomically with task/event insertion; retain ordinary authorization, ordering and idempotency.
+- Add typed automation clients and authenticated byte-preserving upload/download transport without mutation retries.
+- Add a CLI `meshra automation OP JSON_OBJECT` route over the same bearer automation service, with `meshra automation runtime-status` as a confined-runtime readiness shortcut. Approval decisions, human takeover and microphone capture stay console-only.
+- Stream automation resource-change metadata over the console event feed with cursor replay, resync and heartbeat rules; events never carry task text, tool arguments or secrets.
+- Add portable profiles with separate conversation-specific execution identities, immutable admission snapshots, exact-version context grants, bounded history disclosure and revision-checked provider switches. Canonical named identities and legacy disposable chat remain separate.
+- Add asynchronous, metered profile drafting with disposable empty workspaces and reviewed name/instructions-only output. OMP verifies an empty native tool roster; Claude enforces an empty SDK catalog. Installed Codex 0.163.0 and OpenCode 1.19.3 refuse drafting where a complete native-tool/discovery denial cannot be enforced.
+- Add literal, bounded profile history search, scoped revisioned memories, persistent queue pause/reorder, safe native-context rotation and explicit reset cutoffs without changing transcript sequence.
+- Add byte-exact authorized attachments with integrity checks, quotas, draft expiry and provenance-preserving deletion; reject unsupported native image transports rather than silently omitting images.
+- Attribute run usage to admitted profile/binding revisions, preserve partial native reports and nullable costs, and distinguish configured from reported model/provider data.
+- Add active-attempt tool invocations, expiring exact-action approvals, session-owned clarification and uncertainty recovery. Bearer and agent credentials cannot decide human attention.
+- Add Linux bubblewrap workers with private snapshots, delegated cgroup-v2 limits, manifest checks and separately reviewed host changesets. Missing confinement prerequisites refuse execution; no host fallback is provided.
+- Add exact-origin, DNS-pinned egress and revocable scoped sockets. Connector ingress carries its own narrow route identity rather than administrator authority.
+- Add immutable pinned skills and scoped, bounded asset reads. Review ZIP/TAR/TAR.GZ skill archives without executing their contents; reject unsafe paths, links, devices, duplicate entries and size overruns. Template export/import strips connection credentials, native sessions and execution grants; digest-pinned single-use previews create inert drafts.
+- Add a confined ACP launcher with a read-only private workspace, isolated native state, selected authentication files and exact-origin egress. Capability/session checks make no model request; missing runtime manifests, bubblewrap or delegated cgroups refuse startup.
+- Pin endpoint/ACP configuration and encrypted credential revisions in admitted task snapshots; later configuration edits cannot redirect admitted inference. Credential replacement blocks subsequent calls, and disabling a connection cancels its discovery probes.
+- Support default text-only endpoint profiles without advertising broker tools; reject explicit tool-dependent grants before admission. A real HTTP fixture reproduced the prior no-request failure and completed after the fix with no tools offered.
+- Grant only the reviewed public endpoint origin on explicit enable, preserve revocation across metadata edits, and require separate confirmation for private targets. Scan canonical installed CLI paths without executing them and accept explicitly configured custom ACP v1 servers under the same confinement gate.
+- Reconcile flow step receipts and reservation indexes atomically. Deferred nodes block provider/workspace/policy widening until settled or canceled; routine tasks carry a narrow routine source and real same-conversation dependencies.
+- Give routine execution tokens a separate non-serializable principal field; deny legacy REST/MCP and every automation operation except granted `routines.run`.
+- Complete exact-loopback OAuth callback routing before browser metadata/cookie gates. State is claimed once before exchange; encrypted token persistence is atomic with its flow, logout cancels owned jobs and removes pending PKCE material, and callback success redirects locally without retaining codes in task events.
+- Integrate external MCP calls with the live active-attempt broker, immutable server/binding/tool/credential pins and exact one-call console approval. Revalidate before dispatch, cancel on configuration/auth revocation and preserve uncertain effects. A real loopback HTTP fixture exercised model-adapter → approval → MCP → result completion without exposing administrator or inference credentials upstream; no paid/native model turn was used.
+- Implement Codex dynamic-tool protocol framing and strict thread/turn/catalog checks against the installed app-server schema. Profile automation remains disabled: omission of native apply-patch and rooted-only native reads are not verified. Protocol fixtures are not evidence of native confinement; legacy Codex behavior is unchanged.
+- Gate OMP profile startup on installed `omp/18.12.1` protocol v2 and an exact host-tool roster, preserving native tool denial. Register and clear tools per turn, dispatch host calls asynchronously, and honor cancellation. The real no-model startup/set/clear preflight passes; authenticated model/tool turns are not claimed.
+- Gate Claude profiles on SDK `0.3.303`, native `2.1.303`, managed-settings exclusion and exact scoped MCP tools, with persisted native-session acknowledgement before calls. The installed no-model check passes. Keep OpenCode `1.19.3` profile automation disabled because ambient configuration/plugin installation precedes enforceable restrictions; preserve its legacy behavior.
+- Keep operator-only memories out of routine prompts and connector conversations, including local follow-ups in existing connector threads.
+- Route ACP filesystem requests through relative rooted broker paths and terminal requests through the approved confined command broker, preserving bounded output, cancellation and nonzero exit status.
+- Add console surfaces for the new automation capabilities: an Automation destination with queue, routine, flow, skill and template views, profile management with an explicit capability set, console-only approval and question decisions with the exact reviewed action, and operator controls for exact network origins, provider connections and confined-runtime readiness. Legacy views keep their behaviour and every call keeps the session cookie and CSRF handling.
+
 ### Developer Console (v0.4)
 
 - Add a production-embedded React/TypeScript/Vite console with Tailwind tokens, locally owned shadcn/ui Radix primitives, Lucide icons and TanStack Query.

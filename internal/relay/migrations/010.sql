@@ -1,0 +1,16 @@
+CREATE TABLE agent_profiles(id TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision>0), body TEXT NOT NULL);
+CREATE TABLE profile_conversations(conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES agent_profiles(id), PRIMARY KEY(conversation_id,profile_id));
+CREATE TABLE profile_conversation_settings(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE, kind TEXT NOT NULL CHECK(kind IN ('chat','task','channel')));
+CREATE INDEX profile_conversations_profile ON profile_conversations(profile_id,conversation_id);
+CREATE TABLE profile_bindings(id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES agent_profiles(id), conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, generation INTEGER NOT NULL CHECK(generation>0), agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id), body TEXT NOT NULL, UNIQUE(profile_id,conversation_id,generation));
+CREATE INDEX profile_bindings_conversation ON profile_bindings(conversation_id,profile_id,generation);
+CREATE TABLE profile_task_snapshots(task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES agent_profiles(id), profile_revision INTEGER NOT NULL, binding_id TEXT NOT NULL REFERENCES profile_bindings(id), body TEXT NOT NULL);
+CREATE INDEX profile_task_snapshots_profile ON profile_task_snapshots(profile_id,task_id);
+CREATE TABLE profile_context_epochs(binding_id TEXT PRIMARY KEY REFERENCES profile_bindings(id) ON DELETE CASCADE, epoch INTEGER NOT NULL DEFAULT 1, reset_after_seq INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE profile_context_grants(binding_id TEXT NOT NULL REFERENCES profile_bindings(id) ON DELETE CASCADE, context_id TEXT NOT NULL, version INTEGER NOT NULL, PRIMARY KEY(binding_id,context_id,version), FOREIGN KEY(context_id,version) REFERENCES context_versions(context_id,version));
+CREATE TABLE automation_events(seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, resource_id TEXT NOT NULL, profile_id TEXT NOT NULL DEFAULT '', data TEXT NOT NULL, time TEXT NOT NULL);
+CREATE INDEX automation_events_time ON automation_events(time);
+CREATE TABLE provider_endpoints(id TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision>0), body TEXT NOT NULL);
+CREATE TABLE acp_agents(id TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision>0), body TEXT NOT NULL);
+CREATE TABLE automation_secrets(id TEXT PRIMARY KEY, kind TEXT NOT NULL, nonce BLOB NOT NULL, ciphertext BLOB NOT NULL, updated_at TEXT NOT NULL);
+UPDATE schema_version SET version=10;

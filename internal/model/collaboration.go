@@ -36,6 +36,8 @@ type CollaborationRequest struct {
 	Limit        int      `json:"limit,omitempty"`
 }
 type Conversation struct {
+	ProfileKind  string        `json:"profileKind,omitempty"`
+	ProfileIDs   []string      `json:"profileIds,omitempty"`
 	ChatSettings *ChatSettings `json:"chatSettings,omitempty"`
 	Mode         string        `json:"mode,omitempty"`
 	ContextRefs  []ContextRef  `json:"contextRefs"`

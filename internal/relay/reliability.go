@@ -79,8 +79,8 @@ func migrate(db *sql.DB) error {
 	if err := db.QueryRow("SELECT max(version) FROM schema_version").Scan(&version); err != nil {
 		return err
 	}
-	if version < 1 || version > 9 {
-		return fmt.Errorf("unsupported database schema %d; this executable supports 1..9", version)
+	if version < 1 || version > schemaMigrations[len(schemaMigrations)-1].version {
+		return fmt.Errorf("unsupported database schema %d; this executable supports 1..%d", version, schemaMigrations[len(schemaMigrations)-1].version)
 	}
 	if _, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=OFF;"); err != nil {
 		return err
@@ -233,6 +233,36 @@ func migrate(db *sql.DB) error {
 			return e
 		}
 	}
+	for _, step := range schemaMigrations {
+		target := step.version
+		if version >= target {
+			continue
+		}
+		tx, e := db.Begin()
+		if e != nil {
+			return e
+		}
+		defer tx.Rollback()
+		if _, e = tx.Exec(step.source); e != nil {
+			return fmt.Errorf("schema %d migration: %w", target, e)
+		}
+		rows, e := tx.Query("PRAGMA foreign_key_check")
+		if e != nil {
+			return e
+		}
+		invalid := rows.Next()
+		checkErr := rows.Err()
+		rows.Close()
+		if checkErr != nil {
+			return checkErr
+		}
+		if invalid {
+			return errors.New("schema migration would break foreign keys")
+		}
+		if e = tx.Commit(); e != nil {
+			return e
+		}
+	}
 	_, err := db.Exec("PRAGMA foreign_keys=ON")
 	return err
 }
@@ -254,6 +284,12 @@ func fingerprint(q model.SendRequest) string {
 			Refs         []model.ContextRef
 			Deps         []string
 		}{string(b), q.ConversationID, q.ContextRefs, q.DependsOn})
+	}
+	if len(q.AttachmentIDs) > 0 {
+		b, _ = json.Marshal(struct {
+			Base          string
+			AttachmentIDs []string
+		}{string(b), q.AttachmentIDs})
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
@@ -630,15 +666,28 @@ func localAsset(relative, override string) string {
 // work and terminal tasks whose Run has not returned are never removed.
 func (r *Relay) prune() error {
 	r.nextPrune = now().Add(time.Hour)
-	if _, err := r.db.Exec("DELETE FROM run_usage WHERE started_at<?", now().Add(-30*24*time.Hour).Format(time.RFC3339Nano)); err != nil {
+	if err := r.expireAttachmentDrafts(); err != nil {
+		return err
+	}
+	featureCutoff := now().Add(-automationHistoryRetention)
+	if err := r.pruneChangesets(featureCutoff); err != nil {
+		return err
+	}
+	if err := r.pruneToolHistory(featureCutoff); err != nil {
+		return err
+	}
+	if err := r.pruneAutomationHistory(featureCutoff); err != nil {
+		return err
+	}
+	if _, err := r.db.Exec(`DELETE FROM run_usage WHERE julianday(started_at)<julianday(?) AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.id=run_usage.task_id AND `+retentionOpenTaskSQL+`)`, featureCutoff.Format(time.RFC3339Nano)); err != nil {
 		return err
 	}
 	if r.options.Retention < 0 {
-		return nil
+		return r.pruneUnownedAttachments(featureCutoff)
 	}
 	cutoff := now().Add(-r.options.Retention).Format(time.RFC3339Nano)
 	for {
-		rows, err := r.db.Query(`SELECT id FROM tasks t WHERE state IN ('completed','failed','cancelled','timed_out') AND json_extract(body,'$.updatedAt')<? AND NOT EXISTS(SELECT 1 FROM tasks child WHERE json_extract(child.body,'$.parentTaskId')=t.id OR EXISTS(SELECT 1 FROM json_each(child.body,'$.dependsOn') dep WHERE dep.value=t.id)) LIMIT 256`, cutoff)
+		rows, err := r.db.Query(`SELECT id FROM tasks t WHERE state IN ('completed','failed','cancelled','timed_out') AND julianday(json_extract(body,'$.updatedAt'))<julianday(:task_cutoff) AND NOT `+retentionOpenTaskSQL+` AND NOT `+retentionTaskReferencesSQL+` AND NOT EXISTS(SELECT 1 FROM tasks child WHERE json_extract(child.body,'$.parentTaskId')=t.id OR EXISTS(SELECT 1 FROM json_each(child.body,'$.dependsOn') dep WHERE dep.value=t.id)) ORDER BY t.seq LIMIT 256`, sql.Named("task_cutoff", cutoff), sql.Named("feature_cutoff", featureCutoff.Format(time.RFC3339Nano)))
 		if err != nil {
 			return err
 		}
@@ -673,6 +722,21 @@ func (r *Relay) prune() error {
 			return err
 		}
 		for _, id := range ids {
+			// Drop feature dedup markers only together with their terminal
+			// source task. Deleting them earlier would make the connector
+			// collector enqueue the same reply again.
+			if _, err = tx.Exec("DELETE FROM connector_outbox WHERE task_id=?", id); err != nil {
+				break
+			}
+			if _, err = tx.Exec("DELETE FROM connector_inbox WHERE task_id=?", id); err != nil {
+				break
+			}
+			if _, err = tx.Exec("DELETE FROM credentials WHERE task_id=?", id); err != nil {
+				break
+			}
+			if _, err = tx.Exec("DELETE FROM profile_history WHERE task_id=?", id); err != nil {
+				break
+			}
 			if _, err = tx.Exec("DELETE FROM events WHERE task_id=?", id); err != nil {
 				break
 			}
@@ -689,5 +753,8 @@ func (r *Relay) prune() error {
 		}
 	}
 	_, err := r.db.Exec("DELETE FROM audit WHERE time<?", cutoff)
-	return err
+	if err != nil {
+		return err
+	}
+	return r.pruneUnownedAttachments(featureCutoff)
 }

@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"meshra/internal/sandbox"
 )
 
 const MaxFrame = 1024 * 1024
@@ -25,14 +27,15 @@ type packet struct {
 	err  error
 }
 type Process struct {
-	cmd    *exec.Cmd
-	in     io.WriteCloser
-	frames chan packet
-	done   chan struct{}
-	stop   chan struct{}
-	once   sync.Once
-	mu     sync.Mutex
-	err    error
+	cmd       *exec.Cmd
+	terminate func() error
+	in        io.WriteCloser
+	frames    chan packet
+	done      chan struct{}
+	stop      chan struct{}
+	once      sync.Once
+	mu        sync.Mutex
+	err       error
 }
 
 // StateDir separates harness state by canonical identity, never by the latest session.
@@ -90,6 +93,29 @@ func Start(ctx context.Context, binary string, args []string, cwd string, env []
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stderr = io.Discard // Native diagnostics may contain credentials or complete prompts.
+	return start(ctx, cmd, cmd.Start, cmd.Wait, func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	})
+}
+
+// StartConfined preserves the prepared worker's born-in-cgroup launch and
+// whole-cgroup cleanup while sharing the bounded native JSONL transport.
+func StartConfined(ctx context.Context, worker *sandbox.Prepared) (*Process, error) {
+	if worker == nil || worker.Cmd == nil {
+		return nil, errors.New("a prepared confined worker is required")
+	}
+	child, err := start(ctx, worker.Cmd, worker.Start, worker.Wait, worker.Close)
+	if err != nil {
+		_ = worker.Close()
+	}
+	return child, err
+}
+
+func start(ctx context.Context, cmd *exec.Cmd, launch, wait, terminate func() error) (*Process, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	cmd.Stderr = io.Discard
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -99,12 +125,12 @@ func Start(ctx context.Context, binary string, args []string, cwd string, env []
 		in.Close()
 		return nil, err
 	}
-	if err = cmd.Start(); err != nil {
+	if err = launch(); err != nil {
 		in.Close()
 		out.Close()
-		return nil, fmt.Errorf("start %s (install CLI and authenticate natively): %w", binary, err)
+		return nil, fmt.Errorf("start native transport: %w", err)
 	}
-	p := &Process{cmd: cmd, in: in, frames: make(chan packet, 64), done: make(chan struct{}), stop: make(chan struct{})}
+	p := &Process{cmd: cmd, terminate: terminate, in: in, frames: make(chan packet, 64), done: make(chan struct{}), stop: make(chan struct{})}
 	go func() {
 		scanner := bufio.NewScanner(out)
 		scanner.Buffer(make([]byte, 4096), MaxFrame)
@@ -128,9 +154,9 @@ func Start(ctx context.Context, binary string, args []string, cwd string, env []
 			scanErr = fmt.Errorf("protocol frame exceeded limit or read failed: %w", err)
 		}
 		if scanErr != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = p.terminate()
 		}
-		waitErr := cmd.Wait()
+		waitErr := wait()
 		p.mu.Lock()
 		switch {
 		case scanErr != nil:
@@ -210,7 +236,7 @@ func (p *Process) Close() error {
 		case <-time.After(500 * time.Millisecond):
 		}
 		// Kill the entire owned group even when its leader exited normally.
-		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+		_ = p.terminate()
 		<-p.done
 	})
 	return nil

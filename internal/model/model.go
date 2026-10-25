@@ -21,17 +21,21 @@ type Config struct {
 	Provider string `json:"provider,omitempty"`
 }
 type CreateAgent struct {
-	ManagedChat bool   `json:"-"`
-	Harness     string `json:"harness"`
-	Name        string `json:"name"`
-	DisplayName string `json:"displayName,omitempty"`
-	Cwd         string `json:"cwd"`
-	Config      Config `json:"config"`
-	Policy      Policy `json:"policy"`
-	Concurrency int    `json:"concurrency,omitempty"`
+	GenerationDraft bool   `json:"-"`
+	ManagedChat     bool   `json:"-"`
+	Harness         string `json:"harness"`
+	Name            string `json:"name"`
+	DisplayName     string `json:"displayName,omitempty"`
+	Cwd             string `json:"cwd"`
+	Config          Config `json:"config"`
+	Policy          Policy `json:"policy"`
+	Concurrency     int    `json:"concurrency,omitempty"`
 }
 type Agent struct {
-	ManagedChat bool `json:"managedChat,omitempty"`
+	ToolDefinitions []ToolDefinition `json:"-"`
+	GenerationDraft bool             `json:"generationDraft,omitempty"`
+	ProfileManaged  bool             `json:"profileManaged,omitempty"`
+	ManagedChat     bool             `json:"managedChat,omitempty"`
 	// Ephemeral selects disposable native state for a single chat turn; never persisted.
 	Ephemeral     bool            `json:"-"`
 	SchemaVersion int             `json:"schemaVersion"`
@@ -50,12 +54,15 @@ type Agent struct {
 	Capabilities  map[string]bool `json:"capabilities"`
 }
 type Principal struct {
-	Admin     bool
-	AgentID   string
-	SessionID string
-	TaskID    string
+	ConsoleSessionID string `json:"-"`
+	RoutineTokenID   string `json:"-"`
+	Admin            bool
+	AgentID          string
+	SessionID        string
+	TaskID           string
 }
 type SendRequest struct {
+	AttachmentIDs  []string     `json:"attachmentIds,omitempty"`
 	ConversationID string       `json:"conversationId,omitempty"`
 	ContextRefs    []ContextRef `json:"contextRefs,omitempty"`
 	DependsOn      []string     `json:"dependsOn,omitempty"`
@@ -70,6 +77,7 @@ type SendRequest struct {
 	MaxHops        int    `json:"maxHops,omitempty"`
 }
 type Task struct {
+	AttachmentIDs   []string     `json:"attachmentIds,omitempty"`
 	SchedulingState string       `json:"schedulingState,omitempty"`
 	ResultRef       *ContextRef  `json:"resultRef,omitempty"`
 	ConversationID  string       `json:"conversationId,omitempty"`
@@ -130,6 +138,7 @@ type Event struct {
 }
 type Emit func(kind, data string)
 type Turn struct {
+	Tools  ToolExecutor `json:"-"`
 	Task   Task
 	MCPURL string
 	Token  string

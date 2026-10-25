@@ -1,0 +1,18 @@
+CREATE TABLE profile_tool_policies(profile_id TEXT PRIMARY KEY REFERENCES agent_profiles(id),revision INTEGER NOT NULL CHECK(revision>0),body TEXT NOT NULL);
+INSERT INTO profile_tool_policies(profile_id,revision,body) SELECT id,1,json_object('capabilities',json_extract(body,'$.capabilities'),'workspaceId',json_extract(body,'$.workspaceId'),'allowedProfileIds',json_extract(body,'$.allowedProfileIds')) FROM agent_profiles;
+CREATE TRIGGER profile_tool_policy_create AFTER INSERT ON agent_profiles BEGIN INSERT INTO profile_tool_policies(profile_id,revision,body) VALUES(NEW.id,1,json_object('capabilities',json_extract(NEW.body,'$.capabilities'),'workspaceId',json_extract(NEW.body,'$.workspaceId'),'allowedProfileIds',json_extract(NEW.body,'$.allowedProfileIds'))); END;
+CREATE TABLE automation_runtime_settings(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL CHECK(revision>0),body TEXT NOT NULL);
+CREATE TABLE network_grants(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),profile_id TEXT REFERENCES agent_profiles(id),connection_id TEXT,origin TEXT NOT NULL,enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),body TEXT NOT NULL);
+CREATE INDEX network_grants_scope ON network_grants(profile_id,connection_id,origin,enabled);
+CREATE TABLE tool_invocations(id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,attempt INTEGER NOT NULL,call_id TEXT NOT NULL,action_hash TEXT NOT NULL,state TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(task_id,attempt,call_id));
+CREATE INDEX tool_invocations_task ON tool_invocations(task_id,attempt,state);
+CREATE TABLE tool_approvals(id TEXT PRIMARY KEY,invocation_id TEXT NOT NULL UNIQUE REFERENCES tool_invocations(id) ON DELETE CASCADE,revision INTEGER NOT NULL CHECK(revision>0),status TEXT NOT NULL,expires_at TEXT NOT NULL,body TEXT NOT NULL);
+CREATE INDEX tool_approvals_pending ON tool_approvals(status,expires_at);
+CREATE TABLE workspace_changesets(id TEXT PRIMARY KEY,invocation_id TEXT NOT NULL REFERENCES tool_invocations(id),manifest_hash TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),state TEXT NOT NULL,body TEXT NOT NULL);
+CREATE TABLE workspace_apply_journal(changeset_id TEXT NOT NULL REFERENCES workspace_changesets(id),path TEXT NOT NULL,state TEXT NOT NULL,original_hash TEXT NOT NULL,result_hash TEXT NOT NULL,error TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(changeset_id,path));
+CREATE TRIGGER profile_tool_policy_update AFTER UPDATE OF body ON agent_profiles WHEN coalesce(json_extract(OLD.body,'$.capabilities'),'null')<>coalesce(json_extract(NEW.body,'$.capabilities'),'null') OR coalesce(json_extract(OLD.body,'$.workspaceId'),'')<>coalesce(json_extract(NEW.body,'$.workspaceId'),'') OR coalesce(json_extract(OLD.body,'$.allowedProfileIds'),'null')<>coalesce(json_extract(NEW.body,'$.allowedProfileIds'),'null') BEGIN
+ UPDATE profile_tool_policies SET revision=revision+1,body=json_object('capabilities',json_extract(NEW.body,'$.capabilities'),'workspaceId',json_extract(NEW.body,'$.workspaceId'),'allowedProfileIds',json_extract(NEW.body,'$.allowedProfileIds')) WHERE profile_id=NEW.id;
+ UPDATE tool_approvals SET status='invalidated',revision=revision+1 WHERE status IN ('pending','approved','answered') AND invocation_id IN (SELECT i.id FROM tool_invocations i JOIN profile_task_snapshots s ON s.task_id=i.task_id WHERE s.profile_id=NEW.id);
+ UPDATE tool_invocations SET state='cancelled' WHERE state IN ('pending','approved','waiting_question') AND task_id IN (SELECT task_id FROM profile_task_snapshots WHERE profile_id=NEW.id);
+END;
+UPDATE schema_version SET version=13;

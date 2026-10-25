@@ -4,6 +4,7 @@ import { Monitor, RefreshCw, ShieldCheck } from "lucide-react";
 import { AccountForm } from "./Account";
 import { AIStatusPanel } from "./AIStatus";
 import { api } from "./api";
+import { Connections } from "./Connections";
 import { Notice } from "./App";
 import { HarnessLogo, harnessName } from "./HarnessLogo";
 import { Button } from "./components/ui/button";
@@ -55,6 +56,7 @@ export function SettingsPanels({ children }: { children: ReactNode }) {
           ["resources", "Resources"],
           ["models", "Models & usage"],
           ["ai-status", "AI status"],
+          ["connections", "Connections"],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -71,6 +73,8 @@ export function SettingsPanels({ children }: { children: ReactNode }) {
         <AIStatusPanel />
       ) : tab === "models" ? (
         <ModelsUsage />
+      ) : tab === "connections" ? (
+        <Connections />
       ) : (
         <PersonalControls key={tab} access={tab === "access"} />
       )}

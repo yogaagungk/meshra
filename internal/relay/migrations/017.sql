@@ -1,0 +1,11 @@
+CREATE TABLE messaging_connectors(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),kind TEXT NOT NULL,enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),body TEXT NOT NULL);
+CREATE INDEX messaging_connectors_state ON messaging_connectors(kind,enabled,id);
+CREATE TABLE connector_routes(id TEXT PRIMARY KEY,connector_id TEXT NOT NULL REFERENCES messaging_connectors(id) ON DELETE CASCADE,revision INTEGER NOT NULL CHECK(revision>0),profile_id TEXT NOT NULL REFERENCES agent_profiles(id),body TEXT NOT NULL);
+CREATE INDEX connector_routes_connector ON connector_routes(connector_id,profile_id,id);
+CREATE TABLE connector_inbox(connector_id TEXT NOT NULL REFERENCES messaging_connectors(id) ON DELETE CASCADE,event_id TEXT NOT NULL,received_at TEXT NOT NULL,state TEXT NOT NULL,task_id TEXT NOT NULL DEFAULT '',body TEXT NOT NULL,PRIMARY KEY(connector_id,event_id));
+CREATE INDEX connector_inbox_state ON connector_inbox(state,received_at,connector_id);
+CREATE TABLE connector_threads(connector_id TEXT NOT NULL REFERENCES messaging_connectors(id) ON DELETE CASCADE,external_thread_key TEXT NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,PRIMARY KEY(connector_id,external_thread_key));
+CREATE INDEX connector_threads_conversation ON connector_threads(conversation_id,connector_id);
+CREATE TABLE connector_outbox(id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,chunk INTEGER NOT NULL CHECK(chunk>=0),state TEXT NOT NULL,remote_id TEXT NOT NULL DEFAULT '',body TEXT NOT NULL,UNIQUE(task_id,chunk));
+CREATE INDEX connector_outbox_state ON connector_outbox(state,task_id,chunk);
+UPDATE schema_version SET version=17;

@@ -7,6 +7,7 @@ import "./style.css";
 import "./conversation-list.css";
 import "./personal.css";
 import "./ai-status.css";
+import "./automation.css";
 const client = new QueryClient({
   defaultOptions: {
     queries: {

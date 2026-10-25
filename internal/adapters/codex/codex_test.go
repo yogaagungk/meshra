@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +33,16 @@ func TestCodexTransportHelper(t *testing.T) {
 	response := func(id any, result any) { send(map[string]any{"id": id, "result": result}) }
 	initialized := false
 	active := false
+	record := os.Getenv("MESHRA_CODEX_RECORD")
+	var recorder *os.File
+	if record != "" {
+		recorder, _ = os.Create(record)
+		if recorder != nil {
+			raw, _ := json.Marshal(map[string]any{"argv": os.Args})
+			recorder.Write(append(raw, '\n'))
+			defer recorder.Close()
+		}
+	}
 	scan := bufio.NewScanner(os.Stdin)
 	for scan.Scan() {
 		var cmd struct {
@@ -42,8 +54,25 @@ func TestCodexTransportHelper(t *testing.T) {
 		if json.Unmarshal(scan.Bytes(), &cmd) != nil {
 			os.Exit(21)
 		}
+		if recorder != nil {
+			recorder.Write(append([]byte(scan.Text()), '\n'))
+		}
 		switch cmd.Method {
 		case "initialize":
+			if mode == "profile-tools" || mode == "profile-native-enabled" || mode == "profile-old-version" || mode == "profile-no-dynamic" {
+				var capabilities struct {
+					ExperimentalAPI bool `json:"experimentalApi"`
+				}
+				if json.Unmarshal(cmd.Params["capabilities"], &capabilities) != nil || !capabilities.ExperimentalAPI {
+					os.Exit(30)
+				}
+				version := "0.163.0"
+				if mode == "profile-old-version" {
+					version = "0.162.0"
+				}
+				response(cmd.ID, map[string]any{"userAgent": "meshra/" + version + " (Ubuntu 24.4.0; x86_64) herdr/0.9.5 (meshra; 0.1.0)"})
+				continue
+			}
 			response(cmd.ID, map[string]any{"userAgent": "mock"})
 		case "initialized":
 			initialized = true
@@ -56,6 +85,13 @@ func TestCodexTransportHelper(t *testing.T) {
 			if mode == "unsafe-config" {
 				config["mcp_servers"] = map[string]any{"unsafe": map[string]any{"command": "untrusted"}}
 			}
+			if mode == "profile-tools" || mode == "profile-native-enabled" || mode == "profile-old-version" || mode == "profile-no-dynamic" {
+				features := map[string]any{}
+				for _, name := range nativeToolDisable {
+					features[name] = mode == "profile-native-enabled"
+				}
+				config["features"] = features
+			}
 			response(cmd.ID, map[string]any{"config": config, "origins": map[string]any{}})
 		case "thread/start", "thread/resume":
 			if !initialized {
@@ -66,6 +102,27 @@ func TestCodexTransportHelper(t *testing.T) {
 			_ = json.Unmarshal(cmd.Params["approvalPolicy"], &policy)
 			if sandbox != "read-only" || policy != "on-request" {
 				os.Exit(23)
+			}
+			if mode == "profile-tools" || mode == "profile-native-enabled" {
+				var tools []map[string]any
+				if json.Unmarshal(cmd.Params["dynamicTools"], &tools) != nil || len(tools) != 1 {
+					os.Exit(31)
+				}
+				if tools[0]["type"] != "function" || tools[0]["name"] != "meshra_history_search" {
+					os.Exit(32)
+				}
+				schema, ok := tools[0]["inputSchema"].(map[string]any)
+				if !ok {
+					os.Exit(33)
+				}
+				if schema["type"] != "object" {
+					os.Exit(34)
+				}
+			}
+			if mode == "profile-no-dynamic" {
+				// An app-server without the dynamic tool catalog refuses the request.
+				send(map[string]any{"id": cmd.ID, "error": map[string]any{"code": -32602, "message": "unknown field `dynamicTools`, expected one of: cwd, model"}})
+				continue
 			}
 			if cmd.Method == "thread/resume" {
 				_ = json.Unmarshal(cmd.Params["threadId"], &session)
@@ -109,6 +166,15 @@ func TestCodexTransportHelper(t *testing.T) {
 				send(map[string]any{"id": cmd.ID, "error": map[string]any{"code": -32000, "message": "turn rejected"}})
 				continue
 			}
+			if mode == "profile-tools" || mode == "profile-native-enabled" {
+				// The server asks this client to run the registered catalog tool.
+				send(map[string]any{"id": 200, "method": "item/tool/call", "params": map[string]any{"threadId": session, "turnId": "turn-1", "callId": "call-1", "tool": "meshra_history_search", "arguments": map[string]any{"query": "meshra"}}})
+				// A stale turn, an unknown tool and another thread must be refused.
+				send(map[string]any{"id": 201, "method": "item/tool/call", "params": map[string]any{"threadId": session, "turnId": "previous-turn", "callId": "call-2", "tool": "meshra_history_search", "arguments": map[string]any{"query": "meshra"}}})
+				send(map[string]any{"id": 202, "method": "item/tool/call", "params": map[string]any{"threadId": session, "turnId": "turn-1", "callId": "call-3", "tool": "meshra_unknown_tool", "arguments": map[string]any{}}})
+				send(map[string]any{"id": 203, "method": "item/tool/call", "params": map[string]any{"threadId": "other-thread", "turnId": "turn-1", "callId": "call-4", "tool": "meshra_history_search", "arguments": map[string]any{"query": "meshra"}}})
+				continue
+			}
 			send(map[string]any{"id": 100, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": session, "turnId": "turn-1", "itemId": "command-1", "command": "rm -rf example"}})
 		case "turn/interrupt":
 			if !active {
@@ -117,6 +183,40 @@ func TestCodexTransportHelper(t *testing.T) {
 			response(cmd.ID, map[string]any{})
 			notify("turn/completed", map[string]any{"threadId": session, "turn": map[string]any{"id": "turn-1", "status": "interrupted"}})
 		case "":
+			if mode == "profile-tools" || mode == "profile-native-enabled" {
+				raw, _ := json.Marshal(cmd.Result)
+				switch string(cmd.ID) {
+				case "200":
+					var result struct {
+						ContentItems []struct {
+							Type string `json:"type"`
+							Text string `json:"text"`
+						} `json:"contentItems"`
+						Success bool `json:"success"`
+					}
+					if json.Unmarshal(raw, &result) != nil || !result.Success || len(result.ContentItems) != 1 || result.ContentItems[0].Type != "inputText" || result.ContentItems[0].Text != "found" {
+						os.Exit(40)
+					}
+					continue
+				case "201", "202", "203":
+					var result struct {
+						ContentItems []struct {
+							Type string `json:"type"`
+							Text string `json:"text"`
+						} `json:"contentItems"`
+						Success bool `json:"success"`
+					}
+					if json.Unmarshal(raw, &result) != nil || result.Success || len(result.ContentItems) != 1 || result.ContentItems[0].Type != "inputText" {
+						os.Exit(41)
+					}
+					if string(cmd.ID) == "203" {
+						notify("item/agentMessage/delta", map[string]any{"threadId": session, "turnId": "turn-1", "itemId": "message-1", "delta": "lo"})
+						notify("item/completed", map[string]any{"threadId": session, "turnId": "turn-1", "item": map[string]any{"id": "message-1", "type": "agentMessage", "text": "hello"}})
+						notify("turn/completed", map[string]any{"threadId": session, "turn": map[string]any{"id": "turn-1", "status": "completed"}})
+					}
+					continue
+				}
+			}
 			if string(cmd.ID) == "100" {
 				var decision string
 				_ = json.Unmarshal(cmd.Result["decision"], &decision)
@@ -364,5 +464,248 @@ func TestNativeModelCatalogProtocol(t *testing.T) {
 	items, err := rt.(model.ModelCatalog).Models(ctx)
 	if err != nil || len(items) != 1 || items[0].ID != "catalog-model" {
 		t.Fatal(items, err)
+	}
+}
+
+func TestGenerationDraftFailsClosedBeforeNativeStartup(t *testing.T) {
+	// No executable can start here. A draft must return the specific unavailable
+	// error, not fall through to the ordinary read-only factory or spawn a turn.
+	t.Setenv("PATH", t.TempDir())
+	a := testAgent(t, "draft")
+	a.GenerationDraft, a.Ephemeral = true, true
+	adapter := New()
+	if adapter.Capabilities["toolFreeDraft"] {
+		t.Fatal("Codex advertised an unenforceable tool-free mode")
+	}
+	rt, err := adapter.Factory(context.Background(), a, nil)
+	if rt != nil {
+		rt.Close()
+		t.Fatal("Codex draft started without native deny-all support")
+	}
+	var unavailable *model.Error
+	if !errors.As(err, &unavailable) || unavailable.Status != 503 || !strings.Contains(unavailable.Message, "empty native tool catalog") {
+		t.Fatalf("expected actionable unavailable error, got %v", err)
+	}
+}
+
+// fakeBroker is a stand-in for the Meshra tool broker. It records every call
+// the adapter makes so a test can prove that only an authorized call ran.
+type fakeBroker struct {
+	mu          sync.Mutex
+	definitions []model.ToolDefinition
+	calls       []model.ToolCall
+	result      model.ToolResult
+	err         error
+}
+
+func (f *fakeBroker) Definitions() []model.ToolDefinition { return f.definitions }
+func (f *fakeBroker) Call(ctx context.Context, call model.ToolCall) (model.ToolResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, call)
+	if f.err != nil {
+		return model.ToolResult{}, f.err
+	}
+	return f.result, nil
+}
+func (f *fakeBroker) recorded() []model.ToolCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]model.ToolCall(nil), f.calls...)
+}
+
+func profileCatalog() []model.ToolDefinition {
+	return []model.ToolDefinition{{Name: "meshra_history_search", Description: "search", InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`)}}
+}
+
+func recordedFrames(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames := []map[string]any{}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if line == "" {
+			continue
+		}
+		var frame map[string]any
+		if err = json.Unmarshal([]byte(line), &frame); err != nil {
+			t.Fatal(err)
+		}
+		frames = append(frames, frame)
+	}
+	return frames
+}
+
+func TestProfileBrokerCatalogServesToolsAndRefusesWrongCalls(t *testing.T) {
+	mockCodex(t, "profile-tools")
+	record := filepath.Join(t.TempDir(), "frames.jsonl")
+	t.Setenv("MESHRA_CODEX_RECORD", record)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	definitions := profileCatalog()
+	agent := testAgent(t, "profile")
+	agent.ToolDefinitions = definitions
+	broker := &fakeBroker{definitions: definitions, result: model.ToolResult{Content: []model.ToolContent{{Type: "text", Text: "found"}}}}
+	rt, err := New().Factory(ctx, agent, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	got, err := rt.Run(ctx, model.Turn{Task: model.Task{ID: "task-1", Text: "hi"}, Tools: broker}, nil)
+	if err != nil || got != "hello" {
+		t.Fatalf("result %q, error %v", got, err)
+	}
+	calls := broker.recorded()
+	if len(calls) != 1 {
+		t.Fatalf("broker calls %d, want exactly the authorized call", len(calls))
+	}
+	if calls[0].Name != "meshra_history_search" || calls[0].ID != "call-1" {
+		t.Fatalf("unexpected broker call %+v", calls[0])
+	}
+	if string(calls[0].Arguments) != `{"query":"meshra"}` {
+		t.Fatalf("unexpected broker arguments %s", calls[0].Arguments)
+	}
+	frames := recordedFrames(t, record)
+	initialize := map[string]any{}
+	started := map[string]any{}
+	for _, frame := range frames {
+		switch frame["method"] {
+		case "initialize":
+			initialize = frame["params"].(map[string]any)
+		case "thread/start":
+			started = frame["params"].(map[string]any)
+		}
+	}
+	capabilities, ok := initialize["capabilities"].(map[string]any)
+	if !ok || capabilities["experimentalApi"] != true {
+		t.Fatalf("initialize did not opt into the experimental dynamic tool API: %v", initialize)
+	}
+	tools, ok := started["dynamicTools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("thread/start did not register the broker catalog: %v", started)
+	}
+	tool := tools[0].(map[string]any)
+	if tool["type"] != "function" || tool["name"] != "meshra_history_search" || tool["description"] != "search" {
+		t.Fatalf("unexpected registered tool %v", tool)
+	}
+	schema, ok := tool["inputSchema"].(map[string]any)
+	if !ok || schema["type"] != "object" {
+		t.Fatalf("registered tool lost its input schema: %v", tool)
+	}
+	cwd, _ := started["cwd"].(string)
+	if cwd == "" || cwd == agent.Cwd {
+		t.Fatalf("profile thread kept the operator workspace as native working directory: %q", cwd)
+	}
+	entries, err := os.ReadDir(cwd)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("profile native working directory is not an empty private directory: %v %v", entries, err)
+	}
+	argv := []any{}
+	for _, frame := range frames {
+		if values, ok := frame["argv"].([]any); ok {
+			argv = values
+		}
+	}
+	disabled := map[string]bool{}
+	for index, value := range argv {
+		if value == "--disable" && index+1 < len(argv) {
+			disabled[argv[index+1].(string)] = true
+		}
+	}
+	for _, name := range nativeToolDisable {
+		if !disabled[name] {
+			t.Fatalf("native feature %q was not disabled for a profile-managed turn", name)
+		}
+	}
+}
+
+func TestProfileTurnWithoutBrokerExecutorIsRefused(t *testing.T) {
+	mockCodex(t, "profile-tools")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	agent := testAgent(t, "profile")
+	agent.ToolDefinitions = profileCatalog()
+	rt, err := New().Factory(ctx, agent, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	_, err = rt.Run(ctx, model.Turn{Task: model.Task{ID: "task-1", Text: "hi"}}, nil)
+	var unavailable *model.Error
+	if !errors.As(err, &unavailable) || unavailable.Status != 503 || !strings.Contains(unavailable.Message, "broker executor") {
+		t.Fatalf("expected an actionable unavailable error, got %v", err)
+	}
+}
+
+func TestProfileRefusesWhenNativeToolsStayEnabled(t *testing.T) {
+	mockCodex(t, "profile-native-enabled")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	agent := testAgent(t, "profile")
+	agent.ToolDefinitions = profileCatalog()
+	rt, err := New().Factory(ctx, agent, nil)
+	if rt != nil {
+		rt.Close()
+		t.Fatal("profile automation started while a native tool surface was still enabled")
+	}
+	var unavailable *model.Error
+	if !errors.As(err, &unavailable) || unavailable.Status != 503 || !strings.Contains(unavailable.Message, "native feature") {
+		t.Fatalf("expected an actionable unavailable error, got %v", err)
+	}
+}
+
+func TestLegacyTurnKeepsNoBrokerSurface(t *testing.T) {
+	mockCodex(t, "success")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	rt, err := New().Factory(ctx, testAgent(t, "legacy"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	broker := &fakeBroker{definitions: profileCatalog()}
+	_, err = rt.Run(ctx, model.Turn{Task: model.Task{ID: "task-1", Text: "hi"}, Tools: broker}, nil)
+	var unavailable *model.Error
+	if !errors.As(err, &unavailable) || unavailable.Status != 503 {
+		t.Fatalf("expected a broker request on a legacy thread to be refused, got %v", err)
+	}
+	if len(broker.recorded()) != 0 {
+		t.Fatal("a legacy thread reached the broker")
+	}
+}
+
+func TestProfileRefusesAppServerWithoutDynamicToolCatalog(t *testing.T) {
+	mockCodex(t, "profile-no-dynamic")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	agent := testAgent(t, "profile")
+	agent.ToolDefinitions = profileCatalog()
+	rt, err := New().Factory(ctx, agent, nil)
+	if rt != nil {
+		rt.Close()
+		t.Fatal("profile automation started on an app-server without the dynamic tool catalog")
+	}
+	var unavailable *model.Error
+	if !errors.As(err, &unavailable) || unavailable.Status != 503 || !strings.Contains(unavailable.Message, "dynamic tool catalog") {
+		t.Fatalf("expected an actionable unavailable error, got %v", err)
+	}
+}
+
+func TestProfileRefusesAppServerOlderThanTheDynamicToolCatalog(t *testing.T) {
+	mockCodex(t, "profile-old-version")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	agent := testAgent(t, "profile")
+	agent.ToolDefinitions = profileCatalog()
+	rt, err := New().Factory(ctx, agent, nil)
+	if rt != nil {
+		rt.Close()
+		t.Fatal("profile automation started on an unverified app-server version")
+	}
+	var unavailable *model.Error
+	if !errors.As(err, &unavailable) || unavailable.Status != 503 || !strings.Contains(unavailable.Message, "0.163.0") {
+		t.Fatalf("expected an actionable unavailable error, got %v", err)
 	}
 }

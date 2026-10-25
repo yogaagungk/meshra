@@ -1,0 +1,17 @@
+CREATE TABLE attachments(id TEXT PRIMARY KEY,sha256 TEXT NOT NULL,size INTEGER NOT NULL CHECK(size>=0 AND size<=26214400),mime TEXT NOT NULL,name TEXT NOT NULL,owner TEXT NOT NULL,created_at TEXT NOT NULL,body TEXT NOT NULL);
+CREATE INDEX attachments_owner ON attachments(owner,created_at,id);
+CREATE TABLE attachment_conversations(attachment_id TEXT NOT NULL REFERENCES attachments(id),conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,PRIMARY KEY(attachment_id,conversation_id));
+CREATE INDEX attachment_conversations_conversation ON attachment_conversations(conversation_id,attachment_id);
+CREATE TABLE attachment_tasks(attachment_id TEXT NOT NULL REFERENCES attachments(id),task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,role TEXT NOT NULL CHECK(role IN ('input','result')),PRIMARY KEY(attachment_id,task_id,role));
+CREATE INDEX attachment_tasks_task ON attachment_tasks(task_id,role);
+CREATE TABLE attachment_read_audit(seq INTEGER PRIMARY KEY AUTOINCREMENT,attachment_id TEXT NOT NULL,caller TEXT NOT NULL,task_id TEXT NOT NULL,outcome TEXT NOT NULL,time TEXT NOT NULL);
+CREATE INDEX attachment_read_audit_time ON attachment_read_audit(time);
+ALTER TABLE run_usage ADD COLUMN profile_id TEXT;
+ALTER TABLE run_usage ADD COLUMN profile_revision INTEGER;
+ALTER TABLE run_usage ADD COLUMN binding_id TEXT;
+ALTER TABLE run_usage ADD COLUMN reported_model TEXT;
+ALTER TABLE run_usage ADD COLUMN reported_provider TEXT;
+ALTER TABLE run_usage ADD COLUMN reported_cost REAL;
+ALTER TABLE run_usage ADD COLUMN reported_currency TEXT;
+CREATE INDEX usage_profile ON run_usage(profile_id,binding_id,started_at);
+UPDATE schema_version SET version=12;

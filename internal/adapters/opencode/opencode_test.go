@@ -35,11 +35,18 @@ type fakeServer struct {
 	tokens   []string
 	fail     bool
 	mismatch bool
+	profile bool
+	persisted atomic.Bool
+	events chan string
+	blockDenial bool
+	denialStarted chan struct{}
 }
 
 func newFake(t *testing.T) *fakeServer {
 	f := &fakeServer{t: t, sessions: map[string]string{}, aborted: make(chan struct{}, 10), waiting: make(chan struct{}, 10), asks: make(chan string, 10), denied: make(chan struct{}, 10)}
 	f.policies = make(map[string][]map[string]string)
+	f.events = make(chan string, 10)
+	f.denialStarted = make(chan struct{}, 1)
 	f.http = httptest.NewServer(http.HandlerFunc(f.handle))
 	t.Cleanup(f.http.Close)
 	return f
@@ -76,7 +83,9 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			f.t.Error(err)
 		}
-		if len(body.Permission) == 0 || body.Permission[0]["action"] != "ask" {
+		action := "ask"
+		if f.profile { action = "deny" }
+		if len(body.Permission) == 0 || body.Permission[0]["action"] != action {
 			f.t.Error("unsafe session permissions")
 		}
 		f.mu.Lock()
@@ -97,6 +106,9 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 			case id := <-f.asks:
 				fmt.Fprintf(w, "data: {\"type\":\"permission.asked\",\"properties\":{\"id\":\"perm_1\",\"sessionID\":%q,\"permission\":\"bash\"}}\n\n", id)
 				w.(http.Flusher).Flush()
+			case event := <-f.events:
+				fmt.Fprint(w, "data: "+event+"\n\n")
+				w.(http.Flusher).Flush()
 			}
 		}
 	case strings.HasSuffix(r.URL.Path, "/abort"):
@@ -109,6 +121,11 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.Reply != "reject" {
 			f.t.Error("unsafe permission reply")
+		}
+		if f.blockDenial {
+			f.denialStarted <- struct{}{}
+			<-r.Context().Done()
+			return
 		}
 		f.denied <- struct{}{}
 		fmt.Fprint(w, "true")
@@ -128,6 +145,7 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.mu.Lock()
+		if f.profile && !f.persisted.Load() { f.t.Error("native prompt preceded session persistence") }
 		f.prompts++
 		fail, mismatch := f.fail, f.mismatch
 		f.mu.Unlock()
@@ -143,6 +161,12 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 			case <-r.Context().Done():
 				return
 			}
+		case "native:read", "native:bash", "native:edit", "native:write", "native:task", "native:foreign_mcp", "native:meshra_meshra_request", "native:meshra_meshra_collaboration_task_delegate":
+			name := strings.TrimPrefix(body.Parts[0].Text, "native:")
+			raw, _ := json.Marshal(map[string]any{"type":"message.part.updated","properties":map[string]any{"part":map[string]any{"type":"tool","sessionID":id,"tool":name,"state":map[string]string{"status":"running"}}}})
+			f.events <- string(raw)
+			<-r.Context().Done()
+			return
 		}
 		if fail {
 			w.WriteHeader(502)
@@ -167,7 +191,9 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 				Permission []map[string]string `json:"permission"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			if len(body.Permission) == 0 || body.Permission[0]["action"] != "ask" {
+			action := "ask"
+			if f.profile { action = "deny" }
+			if len(body.Permission) == 0 || body.Permission[0]["action"] != action {
 				f.t.Error("resume did not reset safe permission rules")
 			}
 			f.mu.Lock()
@@ -425,5 +451,23 @@ func TestNativeModelCatalogProtocol(t *testing.T) {
 	}
 	if f.created != 0 || f.prompts != 0 {
 		t.Fatal("catalog discovery created a generation")
+	}
+}
+
+func TestGenerationDraftRefusesUnsafeNativeStartup(t *testing.T) {
+	resolved := false
+	a := adapter(func() (starter, error) {
+		resolved = true
+		return nil, errors.New("must not resolve or launch native OpenCode")
+	})
+	if a.Capabilities["toolFreeDraft"] {
+		t.Fatal("OpenCode claims tool-free generation despite ambient discovery")
+	}
+	if !a.Capabilities["durableHistory"] {
+		t.Fatal("existing resumable native sessions lost their history capability")
+	}
+	r, err := a.Factory(context.Background(), model.Agent{Cwd: t.TempDir(), GenerationDraft: true}, nil)
+	if err == nil || r != nil || resolved || !strings.Contains(err.Error(), "profile generation unavailable") {
+		t.Fatalf("unsafe draft reached native startup: runtime=%v resolved=%v err=%v", r, resolved, err)
 	}
 }

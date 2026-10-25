@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,22 +30,34 @@ func (r *Relay) task(id string) (model.Task, error) {
 	return t, err
 }
 func (r *Relay) tasks() ([]model.Task, error) {
-	rows, err := r.db.Query("SELECT body FROM tasks WHERE state IN ('queued','dispatching','running') ORDER BY seq")
+	rows, err := r.db.Query("SELECT t.body,coalesce(d.rank,t.seq),t.seq FROM tasks t LEFT JOIN task_dispatch_order d ON d.task_id=t.id WHERE t.state IN ('queued','dispatching','running') ORDER BY t.seq")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []model.Task{}
+	priorities := []dispatchPriority{}
+	recipients := map[string][]int{}
 	for rows.Next() {
 		var b string
 		var t model.Task
-		if err = rows.Scan(&b); err != nil {
+		var priority dispatchPriority
+		if err = rows.Scan(&b, &priority.rank, &priority.seq); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal([]byte(b), &t); err != nil {
 			return nil, err
 		}
+		if t.State == "queued" {
+			recipients[t.To] = append(recipients[t.To], len(out))
+		}
+		priorities = append(priorities, priority)
 		out = append(out, t)
+	}
+	for _, positions := range recipients {
+		if len(positions) > 1 {
+			sort.Sort(recipientTaskOrder{tasks: out, priorities: priorities, positions: positions})
+		}
 	}
 	return out, rows.Err()
 }
@@ -77,8 +90,18 @@ func (r *Relay) transition(t model.Task, kind, data string) error {
 	if _, err = tx.Exec("UPDATE tasks SET body=?,state=? WHERE id=? AND state=?", string(b), t.State, t.ID, old); err != nil {
 		return err
 	}
+	if (old == "queued") != (t.State == "queued") {
+		if err = touchQueue(tx, t.To); err != nil {
+			return err
+		}
+	}
 	if t.ConversationID != "" && model.Terminal(t.State) {
 		if _, err = tx.Exec("INSERT INTO conversation_events(conversation_id,actor,operation,resource,time) VALUES(?,?,?,?,?)", t.ConversationID, t.To, "task."+t.State, t.ID, now().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+	if model.Terminal(t.State) {
+		if err = invalidateToolTaskTx(tx, t.ID, "task became terminal"); err != nil {
 			return err
 		}
 	}
@@ -111,12 +134,23 @@ func (r *Relay) access(p model.Principal, t model.Task, op string) error {
 func (r *Relay) Send(p model.Principal, q model.SendRequest) (model.Task, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.sendLocked(p, q)
+	return r.admitLocked(p, q, nil)
 }
-func (r *Relay) sendLocked(p model.Principal, q model.SendRequest) (model.Task, error) {
+func (r *Relay) admitLocked(p model.Principal, q model.SendRequest, meta *admissionMeta) (model.Task, error) {
 	var t model.Task
 	if r.closed {
 		return t, model.Err(503, "relay is shutting down")
+	}
+	ingress := meta != nil && meta.ingress != nil
+	if ingress {
+		if err := meta.ingress.validate(r, q); err != nil {
+			return t, err
+		}
+	}
+	if meta != nil && meta.validate != nil {
+		if err := meta.validate(p, q); err != nil {
+			return t, err
+		}
 	}
 	if q.Type == "" {
 		q.Type = "send"
@@ -124,7 +158,7 @@ func (r *Relay) sendLocked(p model.Principal, q model.SendRequest) (model.Task, 
 	if q.Type != "send" && q.Type != "request" {
 		return t, model.Err(400, "type must be send or request")
 	}
-	if err := r.permit(p, q.Type); err != nil {
+	if err := r.permit(p, q.Type); err != nil && !ingress {
 		r.auditDenied(p, q.To, q.Type)
 		return t, err
 	}
@@ -135,7 +169,14 @@ func (r *Relay) sendLocked(p model.Principal, q model.SendRequest) (model.Task, 
 		r.auditDenied(p, q.To, q.Type)
 		return t, model.Err(403, "cannot impersonate another agent")
 	}
-	a, err := r.agent(from)
+	var a model.Agent
+	var err error
+	if ingress {
+		from = meta.ingress.source
+		a = model.Agent{ID: from, SessionID: meta.ingress.source}
+	} else {
+		a, err = r.agent(from)
+	}
 	if p.Admin && from == "human:operator" {
 		a = model.Agent{ID: from, SessionID: "console"}
 		err = nil
@@ -147,11 +188,24 @@ func (r *Relay) sendLocked(p model.Principal, q model.SendRequest) (model.Task, 
 	if err != nil {
 		return t, err
 	}
-	if err = r.authorizeRecipient(p, from, destination, q.Type); err != nil {
-		return t, err
+	if destination.ProfileManaged {
+		if meta == nil || meta.profile == nil {
+			return t, model.Err(403, "profile-managed recipients require trusted profile admission")
+		}
+		if err = r.validateProfileAdmission(q, *meta.profile); err != nil {
+			return t, err
+		}
+	}
+	if destination.GenerationDraft && (meta == nil || meta.generationAgentID != destination.ID) {
+		return t, model.Err(403, "draft identities require trusted generation admission")
+	}
+	if !ingress {
+		if err = r.authorizeRecipient(p, from, destination, q.Type); err != nil {
+			return t, err
+		}
 	}
 	session := p.SessionID
-	if p.Admin {
+	if p.Admin || ingress {
 		session = a.SessionID
 	}
 	if p.TaskID != "" {
@@ -164,7 +218,7 @@ func (r *Relay) sendLocked(p model.Principal, q model.SendRequest) (model.Task, 
 		}
 		session = parent.DestinationSessionID
 	}
-	if !p.Admin && !contains(a.Policy.Destinations, q.To) {
+	if !p.Admin && !ingress && !contains(a.Policy.Destinations, q.To) {
 		r.auditDenied(p, q.To, q.Type)
 		return t, model.Err(403, "destination not permitted: "+q.To)
 	}
@@ -197,7 +251,36 @@ func (r *Relay) sendLocked(p model.Principal, q model.SendRequest) (model.Task, 
 		}
 		q.ParentTaskID = p.TaskID
 	}
+	attachmentPrincipal := p
+	if ingress {
+		attachmentPrincipal = model.Principal{AgentID: destination.ID}
+	}
+	attachments, err := r.validateTaskAttachments(attachmentPrincipal, q)
+	if err != nil {
+		return t, err
+	}
 	t = model.Task{ConversationID: q.ConversationID, ContextRefs: q.ContextRefs, DependsOn: q.DependsOn, SchemaVersion: 1, ID: randomID(), MessageID: randomID(), CorrelationID: randomID(), OriginAgentID: from, OriginSessionID: session, From: from, FromSessionID: session, To: q.To, HopCount: 1, MaxHops: q.MaxHops, Type: q.Type, Text: redact(q.Text), State: "queued", IdempotencyKey: q.IdempotencyKey, CreatedAt: now(), UpdatedAt: now(), MaxAttempts: 3, RequestHash: fingerprint(q)}
+	t.AttachmentIDs = q.AttachmentIDs
+	if len(attachments) > 0 {
+		body, marshalErr := json.Marshal(struct {
+			Base        string
+			Attachments []model.Attachment
+		}{t.RequestHash, attachments})
+		if marshalErr != nil {
+			return model.Task{}, marshalErr
+		}
+		t.RequestHash = tokenHash(string(body))
+	}
+	if meta != nil && meta.profile != nil {
+		body, marshalErr := json.Marshal(struct {
+			Base     string
+			Snapshot model.ProfileTaskSnapshot
+		}{t.RequestHash, *meta.profile})
+		if marshalErr != nil {
+			return model.Task{}, marshalErr
+		}
+		t.RequestHash = tokenHash(string(body))
+	}
 	t.Deadline = t.CreatedAt.Add(time.Duration(q.TimeoutSeconds) * time.Second)
 	if q.ParentTaskID != "" {
 		if !p.Admin && !a.Policy.Delegate {
@@ -273,8 +356,10 @@ func (r *Relay) sendLocked(p model.Principal, q model.SendRequest) (model.Task, 
 			return model.Task{}, e
 		}
 	}
-	if err := r.validateCollaboration(p, q); err != nil {
-		return model.Task{}, err
+	if !ingress {
+		if err := r.validateCollaboration(p, q); err != nil {
+			return model.Task{}, err
+		}
 	}
 	if q.ConversationID != "" {
 		t.Chat, err = r.isChat(q.ConversationID)
@@ -314,6 +399,22 @@ func (r *Relay) sendLocked(p model.Principal, q model.SendRequest) (model.Task, 
 	if _, err = tx.Exec("INSERT INTO tasks(id,sender,sender_session,recipient,operation,idempotency_key,state,body) VALUES(?,?,?,?,?,?,?,?)", t.ID, from, session, q.To, q.Type, key, t.State, string(b)); err != nil {
 		return model.Task{}, err
 	}
+	if _, err = tx.Exec("INSERT INTO task_dispatch_order(task_id,agent_id,rank) SELECT ?,?,coalesce(max(rank),0)+1 FROM task_dispatch_order WHERE agent_id=?", t.ID, t.To, t.To); err != nil {
+		return model.Task{}, err
+	}
+	if err = touchQueue(tx, t.To); err != nil {
+		return model.Task{}, err
+	}
+	for _, attachment := range attachments {
+		if _, err = tx.Exec("INSERT INTO attachment_tasks(attachment_id,task_id,role) VALUES(?,?,'input')", attachment.ID, t.ID); err != nil {
+			return model.Task{}, err
+		}
+		if t.ConversationID != "" {
+			if _, err = tx.Exec("INSERT OR IGNORE INTO attachment_conversations(attachment_id,conversation_id) VALUES(?,?)", attachment.ID, t.ConversationID); err != nil {
+				return model.Task{}, err
+			}
+		}
+	}
 	if t.ConversationID != "" {
 		if _, err = tx.Exec("INSERT INTO conversation_events(conversation_id,actor,operation,resource,time) VALUES(?,?,?,?,?)", t.ConversationID, t.From, "task.queued", t.ID, now().Format(time.RFC3339Nano)); err != nil {
 			return model.Task{}, err
@@ -321,6 +422,34 @@ func (r *Relay) sendLocked(p model.Principal, q model.SendRequest) (model.Task, 
 	}
 	if err = insertEvent(tx, t, "queued", "durably accepted; destination may be offline"); err != nil {
 		return model.Task{}, err
+	}
+	if meta != nil && meta.profile != nil {
+		snapshot := *meta.profile
+		body, marshalErr := json.Marshal(struct {
+			model.ProfileTaskSnapshot
+			SourceRequestHash string `json:"sourceRequestHash"`
+		}{snapshot, meta.sourceRequestHash})
+		if marshalErr != nil {
+			return model.Task{}, marshalErr
+		}
+		if _, err = tx.Exec("INSERT INTO profile_task_snapshots(task_id,profile_id,profile_revision,binding_id,body) VALUES(?,?,?,?,?)", t.ID, snapshot.Profile.ID, snapshot.Profile.Revision, snapshot.Binding.ID, string(body)); err != nil {
+			return model.Task{}, err
+		}
+		bindingBody, bindingErr := json.Marshal(snapshot.Binding)
+		if bindingErr != nil {
+			return model.Task{}, bindingErr
+		}
+		if _, err = tx.Exec("UPDATE profile_bindings SET body=? WHERE id=?", string(bindingBody), snapshot.Binding.ID); err != nil {
+			return model.Task{}, err
+		}
+		if err = insertAutomationEvent(tx, "profiles.task", t.ID, snapshot.Profile.ID, map[string]string{"conversationId": t.ConversationID, "bindingId": snapshot.Binding.ID}); err != nil {
+			return model.Task{}, err
+		}
+	}
+	if meta != nil && meta.persist != nil {
+		if err = meta.persist(tx, t); err != nil {
+			return model.Task{}, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return model.Task{}, err
@@ -344,6 +473,15 @@ func (r *Relay) Task(p model.Principal, id string) (model.Task, error) {
 		t.SchedulingState = "blocked"
 		if ready && err == nil {
 			t.SchedulingState = "ready"
+		}
+	}
+	if t.State == "queued" {
+		paused, pauseErr := r.queuePaused(t.To)
+		if pauseErr != nil {
+			return t, pauseErr
+		}
+		if paused {
+			t.SchedulingState = "paused"
 		}
 	}
 	return t, nil
@@ -425,6 +563,22 @@ func (r *Relay) Retry(p model.Principal, id string) (model.Task, error) {
 	t, err := r.task(id)
 	if err != nil {
 		return t, err
+	}
+	destination, err := r.agent(t.To)
+	if err != nil {
+		return t, err
+	}
+	if destination.GenerationDraft {
+		return t, model.Err(403, "draft generation is disposable; create a new profiles.generate task")
+	}
+	if destination.ProfileManaged {
+		snapshot, snapshotErr := r.profileSnapshot(t)
+		if snapshotErr != nil {
+			return t, snapshotErr
+		}
+		if err = r.validateProfileAdmission(model.SendRequest{To: t.To, ConversationID: t.ConversationID}, snapshot); err != nil {
+			return t, err
+		}
 	}
 	if t.State != "failed" && t.State != "timed_out" && t.State != "cancelled" {
 		return model.Task{}, model.Err(409, "only failed, timed_out or cancelled tasks may be manually retried")
@@ -551,6 +705,14 @@ func (r *Relay) tick() time.Duration {
 	if err != nil {
 		return time.Second
 	}
+	paused, err := r.pausedQueues()
+	if err != nil {
+		return time.Second
+	}
+	rotations, err := r.pendingProfileRotations()
+	if err != nil {
+		return time.Second
+	}
 	for _, t := range ts {
 		remaining := time.Until(t.Deadline)
 		if remaining <= 0 {
@@ -572,6 +734,9 @@ func (r *Relay) tick() time.Duration {
 		if t.State != "queued" {
 			continue
 		}
+		if paused[t.To] || r.rotatingProfiles[t.To] {
+			continue
+		}
 		ready, depErr := r.dependenciesReady(t)
 		if depErr != nil {
 			t.State = "failed"
@@ -590,7 +755,14 @@ func (r *Relay) tick() time.Duration {
 			continue
 		}
 		a, e := r.agent(t.To)
+		if e == nil && a.ProfileManaged && rotations[t.To] && s != nil && s.runtime != nil && a.State == "idle" {
+			r.beginProfileRotation(t.To)
+			continue
+		}
 		if e != nil || s == nil || s.runtime == nil || a.State != "idle" {
+			if e == nil && a.ProfileManaged {
+				continue
+			}
 			if wait := time.Until(t.NextAttemptAt); wait > 0 {
 				if t.NextAttemptAt.Before(next) {
 					next = t.NextAttemptAt
@@ -613,6 +785,15 @@ func (r *Relay) tick() time.Duration {
 		}
 		repo := repository(a.Cwd)
 		if r.repos[repo] {
+			continue
+		}
+		if e = r.validateAttachmentDispatch(t); e != nil {
+			t.State = "failed"
+			t.ErrorCategory = "attachment_unavailable"
+			t.Error = "attachment unavailable, corrupt or authorization revoked"
+			if r.transition(t, "failed", t.Error) != nil {
+				return time.Second
+			}
 			continue
 		}
 		if _, e = r.resolveTaskContext(t); e != nil {
@@ -697,12 +878,26 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 			e = r.transition(current, "running", "harness turn started; external effects now possible")
 		}
 	}
+	var tools *toolBroker
+	if e == nil && a.ProfileManaged && !model.Terminal(current.State) {
+		tools, e = r.newToolBrokerLocked(ctx, current, s)
+	}
 	var injected string
 	if e == nil && !model.Terminal(current.State) {
 		injected, e = r.resolveTaskContext(current)
 	}
+	if e == nil && len(current.AttachmentIDs) > 0 && !model.Terminal(current.State) {
+		var excerpt string
+		excerpt, e = r.attachmentExcerpt(current)
+		injected += excerpt
+	}
 	if e == nil && current.Chat && !model.Terminal(current.State) {
 		injected, e = r.chatPrompt(current, injected)
+	}
+	if e == nil && a.ProfileManaged && !model.Terminal(current.State) {
+		var profileText string
+		profileText, e = r.profilePrompt(current)
+		injected = profileText + injected
 	}
 	r.mu.Unlock()
 	runtime := s.runtime
@@ -745,7 +940,12 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 		} else {
 			delivery.Text += injected
 		}
-		result, runErr = runtime.Run(ctx, model.Turn{Task: delivery, Token: token, MCPURL: url}, func(kind, data string) {
+		var executor model.ToolExecutor
+		if tools != nil {
+			executor = tools
+			ctx = context.WithValue(ctx, admittedConnectionKey{}, &tools.snapshot)
+		}
+		result, runErr = runtime.Run(ctx, model.Turn{Task: delivery, Token: token, MCPURL: url, Tools: executor}, func(kind, data string) {
 			data = strings.ReplaceAll(data, token, "[REDACTED]")
 			r.mu.Lock()
 			defer r.mu.Unlock()
@@ -800,6 +1000,9 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 		})
 	} else {
 		runErr = e
+	}
+	if tools != nil {
+		tools.Close()
 	}
 	if current.Chat && runtime != nil {
 		_ = runtime.Close()

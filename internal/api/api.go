@@ -28,7 +28,11 @@ type server struct {
 }
 
 func New(service model.Service) http.Handler {
-	return &server{service: service, sessions: map[string]consoleSession{}}
+	s := &server{service: service, sessions: map[string]consoleSession{}}
+	if svc, ok := service.(model.ConsoleSessionService); ok {
+		svc.SetConsoleSessionValidator(s.validConsoleSession)
+	}
+	return s
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +40,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.URL.Path == "/" || r.URL.Path == "/console" || strings.HasPrefix(r.URL.Path, "/console/") {
 		s.console(w, r)
+		return
+	}
+	// The routine webhook ingress is the only unauthenticated route: it carries
+	// its own signed, replay-protected receipt instead of a bearer credential.
+	if strings.HasPrefix(r.URL.Path, "/v1/automation-webhooks/") {
+		s.routineWebhook(w, r)
 		return
 	}
 	if _, present := r.Header["Origin"]; present {
@@ -53,6 +63,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	// Only the validated console cookie boundary may establish human provenance.
+	p.ConsoleSessionID = ""
+	if p.RoutineTokenID != "" && (r.Method != http.MethodPost || r.URL.Path != "/v1/automation/routines.run" || r.URL.RawQuery != "") {
+		fail(w, model.Err(403, "routine credentials may only run their granted routines"))
+		return
+	}
 	if r.URL.Path == "/mcp" {
 		s.mcp(w, r, p)
 		return
@@ -66,6 +82,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var result any
 	status := http.StatusOK
 	switch {
+	case len(parts) == 2 && parts[0] == "automation" && parts[1] != "":
+		s.automation(w, r, p, parts[1])
+		return
 	case len(parts) == 2 && parts[0] == "collaboration":
 		if r.Method != http.MethodPost {
 			method(w, "POST")

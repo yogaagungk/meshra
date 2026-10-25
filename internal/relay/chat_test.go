@@ -238,21 +238,26 @@ func TestChatRuntimeResourcesReleasedAcrossLongConversation(t *testing.T) {
 }
 
 func TestChatSchemaUpgradePreservesExistingConversations(t *testing.T) {
-	r, dir := openTest(t, nil)
-	ai := createTest(t, r, "claude", "existing")
-	v, err := r.Collaborate(admin, "conversation.create", model.CollaborationRequest{Title: "Existing conversation", Participants: []string{ai.ID}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	existing := v.(model.Conversation)
-	if err = r.Close(); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
 	db, err := sql.Open("sqlite", filepath.Join(dir, "meshra.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec("DROP TABLE chat_conversations; UPDATE schema_version SET version=5"); err != nil {
+	for _, source := range []string{migration, migrationV2, migrationV3, migrationV4, migrationV5} {
+		if _, err = db.Exec(source); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ai := model.Agent{ID: "claude:existing", Harness: "claude", Name: "existing", Cwd: t.TempDir(), State: "registered"}
+	body, _ := json.Marshal(ai)
+	if _, err = db.Exec("INSERT INTO agents(id,body) VALUES(?,?)", ai.ID, string(body)); err != nil {
+		t.Fatal(err)
+	}
+	existing := model.Conversation{ID: randomID(), Title: "Existing conversation"}
+	if _, err = db.Exec("INSERT INTO conversations(id,title,owner,created_at) VALUES(?,?,?,?)", existing.ID, existing.Title, "admin", now().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec("INSERT INTO conversation_participants(conversation_id,agent_id) VALUES(?,?)", existing.ID, ai.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.Close(); err != nil {
@@ -263,7 +268,7 @@ func TestChatSchemaUpgradePreservesExistingConversations(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	v, err = reopened.Collaborate(admin, "conversation.get", model.CollaborationRequest{ID: existing.ID})
+	v, err := reopened.Collaborate(admin, "conversation.get", model.CollaborationRequest{ID: existing.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

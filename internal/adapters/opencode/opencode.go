@@ -25,6 +25,7 @@ type runtimeSession struct {
 	start   starter
 	mu      sync.Mutex
 	session string
+	catalog []byte
 	closed  bool
 	cancel  context.CancelFunc
 	running sync.Mutex
@@ -40,9 +41,15 @@ func New() model.Adapter {
 	})
 }
 func adapter(resolve func() (starter, error)) model.Adapter {
-	return model.Adapter{Capabilities: map[string]bool{"prompt": true, "stream": false, "resume": true, "cancel": true, "mcp": true, "interactiveApproval": false, "authenticatedSmokeVerified": false}, Factory: func(ctx context.Context, agent model.Agent, emit model.Emit) (model.Runtime, error) {
+	return model.Adapter{Capabilities: map[string]bool{"prompt": true, "stream": false, "resume": true, "durableHistory": true, "toolFreeDraft": false, "profileAutomation": false, "cancel": true, "mcp": true, "interactiveApproval": false, "authenticatedSmokeVerified": false}, Factory: func(ctx context.Context, agent model.Agent, emit model.Emit) (model.Runtime, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if agent.GenerationDraft {
+			return nil, model.Err(503, "OpenCode profile generation unavailable: pinned OpenCode 1.19.3 cannot disable all ambient configuration and plugin dependency discovery; use a harness advertising toolFreeDraft")
+		}
+		if agent.ToolDefinitions != nil || agent.ProfileManaged || agent.ManagedChat {
+			return nil, profileUnavailable()
 		}
 		if (agent.Config.Model == "") != (agent.Config.Provider == "") {
 			return nil, errors.New("OpenCode requires both provider and model, or neither for its native default")
@@ -70,6 +77,19 @@ func permissions() []map[string]string {
 	rules := []map[string]string{{"permission": "*", "pattern": "*", "action": "ask"}}
 	for _, name := range []string{"read", "glob", "grep", "meshra_meshra_agents_list", "meshra_meshra_agent_status", "meshra_meshra_send", "meshra_meshra_request", "meshra_meshra_task_status", "meshra_meshra_task_events", "meshra_meshra_task_cancel", "meshra_meshra_task_trace", "meshra_meshra_collaboration_conversation_create", "meshra_meshra_collaboration_conversation_get", "meshra_meshra_collaboration_conversation_list", "meshra_meshra_collaboration_conversation_addParticipant", "meshra_meshra_collaboration_conversation_events", "meshra_meshra_collaboration_context_publish", "meshra_meshra_collaboration_context_get", "meshra_meshra_collaboration_context_search", "meshra_meshra_collaboration_context_attach", "meshra_meshra_collaboration_context_grant", "meshra_meshra_collaboration_context_revoke", "meshra_meshra_collaboration_context_audit", "meshra_meshra_collaboration_task_delegate", "meshra_meshra_collaboration_task_list"} {
 		rules = append(rules, map[string]string{"permission": name, "pattern": "*", "action": "allow"})
+	}
+	return rules
+}
+
+func profileUnavailable() error {
+	return model.Err(503, "OpenCode profile automation unavailable: pinned OpenCode 1.19.3 loads ambient global/well-known configuration, foreign MCP and plugins and starts dependency discovery before inline config; use a profileAutomation-capable harness. Native sessions and credentials are unchanged")
+}
+
+func brokerPermissions(definitions []model.ToolDefinition) []map[string]string {
+	rules := make([]map[string]string, 1, len(definitions)+1)
+	rules[0] = map[string]string{"permission": "*", "pattern": "*", "action": "deny"}
+	for _, definition := range definitions {
+		rules = append(rules, map[string]string{"permission": "meshra_" + definition.Name, "pattern": "*", "action": "allow"})
 	}
 	return rules
 }
@@ -110,6 +130,27 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	profile := r.catalog != nil
+	if profile && (turn.Task.To != r.agent.ID || (turn.Task.DestinationSessionID != "" && turn.Task.DestinationSessionID != session)) {
+		return "", model.Err(503, "OpenCode broker task does not own this native destination session")
+	}
+	if !profile && turn.Tools != nil {
+		return "", model.Err(503, "OpenCode broker tools require an exact profile-managed startup catalog")
+	}
+	if profile {
+		if turn.Tools == nil || emit == nil {
+			return "", model.Err(503, "OpenCode profile automation requires an active-attempt broker and session persistence emitter")
+		}
+		current, err := json.Marshal(turn.Tools.Definitions())
+		if err != nil || !bytes.Equal(current, r.catalog) {
+			return "", model.Err(503, "OpenCode broker catalog changed; restart the native runtime with the admitted catalog")
+		}
+		if _, ok := turn.Tools.(model.ScopedToolEndpoint); !ok {
+			return "", model.Err(503, "OpenCode profile automation requires a private active-attempt MCP endpoint")
+		}
+		// The native process must never receive the relay's main bearer.
+		turn.Token, turn.MCPURL = "", ""
+	}
 	s, err := r.start(ctx, r.agent, turn)
 	if err != nil {
 		return "", err
@@ -121,6 +162,9 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 		Permission []map[string]string `json:"permission"`
 	}
 	policy := permissions()
+	if profile {
+		policy = brokerPermissions(r.agent.ToolDefinitions)
+	}
 	if session == "" {
 		err = s.call(ctx, "POST", "/session", map[string]any{"title": "Meshra " + r.agent.ID, "permission": policy}, &native)
 	} else {
@@ -142,9 +186,21 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 	if emit != nil {
 		emit("session", session)
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if !hasPermissionTail(native.Permission, policy) {
 		if err = s.call(ctx, "PATCH", "/session/"+url.PathEscape(session), map[string]any{"permission": policy}, nil); err != nil {
 			return "", fmt.Errorf("OpenCode session permission policy: %w", err)
+		}
+	}
+	if profile {
+		var verified struct {
+			ID string `json:"id"`
+			Permission []map[string]string `json:"permission"`
+		}
+		if err = s.call(ctx, "GET", "/session/"+url.PathEscape(session), nil, &verified); err != nil || verified.ID != session || !hasPermissionTail(verified.Permission, policy) {
+			return "", model.Err(503, "OpenCode did not enforce the exact broker-only session permission policy")
 		}
 	}
 	// Subscribe before prompting: permission requests must be explicitly rejected,
@@ -162,7 +218,7 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 	eventDone := make(chan error, 1)
 	go func() {
 		defer response.Body.Close()
-		eventDone <- s.permissions(eventsCtx, response.Body, session, emit)
+		eventDone <- s.permissions(eventsCtx, response.Body, session, emit, r.agent.ToolDefinitions)
 	}()
 	defer func() { stopEvents(); response.Body.Close(); <-eventDone }()
 	// Independent cancellation sends the native abort endpoint before teardown.
@@ -257,6 +313,9 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 	if turn.Token != "" {
 		result = strings.ReplaceAll(result, turn.Token, "[redacted]")
 	}
+	if s.credential != "" {
+		result = strings.ReplaceAll(result, s.credential, "[redacted]")
+	}
 	return result, nil
 }
 func (s *server) request(ctx context.Context, method, path string, body any) (*http.Response, error) {
@@ -295,10 +354,14 @@ func (s *server) call(ctx context.Context, method, path string, body, out any) e
 	}
 	return nil
 }
-func (s *server) permissions(ctx context.Context, reader io.Reader, session string, emit model.Emit) error {
+func (s *server) permissions(ctx context.Context, reader io.Reader, session string, emit model.Emit, definitions []model.ToolDefinition) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	var data strings.Builder
+	allowed := make(map[string]bool, len(definitions))
+	for _, definition := range definitions {
+		allowed["meshra_"+definition.Name] = true
+	}
 	handle := func() error {
 		if data.Len() == 0 {
 			return nil
@@ -310,12 +373,26 @@ func (s *server) permissions(ctx context.Context, reader io.Reader, session stri
 				SessionID  string `json:"sessionID"`
 				Permission string `json:"permission"`
 				Action     string `json:"action"`
+				Part struct {
+					Type string `json:"type"`
+					SessionID string `json:"sessionID"`
+					Tool string `json:"tool"`
+					State struct {
+						Status string `json:"status"`
+					} `json:"state"`
+				} `json:"part"`
 			} `json:"properties"`
 		}
 		raw := data.String()
 		data.Reset()
 		if err := json.Unmarshal([]byte(raw), &event); err != nil {
 			return errors.New("invalid OpenCode event JSON")
+		}
+		if definitions != nil && event.Type == "message.part.updated" && event.Properties.Part.SessionID == session {
+			part := event.Properties.Part
+			if part.Type == "tool" && !allowed[part.Tool] && part.State.Status != "error" {
+				return model.Err(503, "OpenCode attempted a tool outside the exact broker catalog; native work was aborted")
+			}
 		}
 		if event.Properties.SessionID != session || (event.Type != "permission.asked" && event.Type != "permission.v2.asked") {
 			return nil

@@ -25,6 +25,7 @@ import (
 type server struct {
 	base     string
 	password string
+	credential string
 	client   *http.Client
 	stop     func()
 	cwd      string
@@ -55,15 +56,19 @@ func executable() (string, error) {
 // the turn or crosses to another agent. Native sessions live in OpenCode's store.
 func startServer(binary string) starter {
 	return func(ctx context.Context, agent model.Agent, turn model.Turn) (*server, error) {
+		if agent.ToolDefinitions != nil || agent.ProfileManaged || agent.ManagedChat {
+			// 1.19.3 discovers ambient plugins and may install dependencies before
+			// inline MCP/tool settings apply. Never launch it to test isolation.
+			return nil, profileUnavailable()
+		}
 		secret := make([]byte, 32)
 		if _, err := rand.Read(secret); err != nil {
 			return nil, err
 		}
 		password := hex.EncodeToString(secret)
-		permission := map[string]any{"*": "ask", "read": "allow", "glob": "allow", "grep": "allow"}
-		config := map[string]any{"autoupdate": false, "permission": permission, "share": "disabled"}
-		if turn.MCPURL != "" && turn.Token != "" {
-			config["mcp"] = map[string]any{"meshra": map[string]any{"type": "remote", "url": turn.MCPURL, "oauth": false, "enabled": true, "headers": map[string]string{"Authorization": "Bearer " + turn.Token}}}
+		config, credential, err := serverConfiguration(ctx, agent, turn)
+		if err != nil {
+			return nil, err
 		}
 		raw, err := json.Marshal(config)
 		if err != nil {
@@ -130,7 +135,7 @@ func startServer(binary string) starter {
 			cleanup()
 			return nil, errors.New("OpenCode reported a non-local server address")
 		}
-		s := &server{base: base, password: password, client: &http.Client{Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, stop: cleanup, cwd: agent.Cwd}
+		s := &server{base: base, password: password, credential: credential, client: &http.Client{Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, stop: cleanup, cwd: agent.Cwd}
 		var health struct {
 			Healthy bool   `json:"healthy"`
 			Version string `json:"version"`
@@ -160,4 +165,66 @@ func environment(in []string, values map[string]string) []string {
 		out = append(out, key+"="+value)
 	}
 	return out
+}
+
+// This transport is ready for an isolated native installation, but the native
+// startup gate above intentionally rejects the installed 1.19.3 before this is
+// used for profiles. Inline config alone is not an isolation boundary.
+func serverConfiguration(ctx context.Context, agent model.Agent, turn model.Turn) (map[string]any, string, error) {
+	permission := map[string]any{"*": "ask", "read": "allow", "glob": "allow", "grep": "allow"}
+	config := map[string]any{"autoupdate": false, "permission": permission, "share": "disabled"}
+	if agent.ToolDefinitions == nil {
+		if turn.Tools != nil {
+			return nil, "", model.Err(503, "OpenCode scoped tools require a profile-managed startup catalog")
+		}
+		if turn.MCPURL != "" && turn.Token != "" {
+			config["mcp"] = map[string]any{"meshra": map[string]any{"type": "remote", "url": turn.MCPURL, "oauth": false, "enabled": true, "headers": map[string]string{"Authorization": "Bearer " + turn.Token}}}
+		}
+		return config, "", nil
+	}
+	endpoint, ok := turn.Tools.(model.ScopedToolEndpoint)
+	if !ok {
+		return nil, "", model.Err(503, "OpenCode profile automation requires a private active-attempt MCP endpoint")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		return nil, "", model.Err(503, "OpenCode broker transport requires Node.js for bridges/mcp-stdio/bridge.mjs")
+	}
+	bridge, err := scopedBridge()
+	if err != nil {
+		return nil, "", err
+	}
+	socket, credential, err := endpoint.ScopedMCP(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	if !filepath.IsAbs(socket) || !strings.HasSuffix(socket, ".sock") || credential == "" || credential == turn.Token {
+		return nil, "", model.Err(503, "OpenCode requires a private scoped socket and a distinct active-attempt credential")
+	}
+	permission = map[string]any{"*": "deny"}
+	for _, definition := range agent.ToolDefinitions {
+		permission["meshra_"+definition.Name] = "allow"
+	}
+	config["permission"] = permission
+	config["plugin"] = []string{}
+	config["mcp"] = map[string]any{"meshra": map[string]any{
+		"type": "local", "command": []string{node, bridge}, "enabled": true,
+		"environment": map[string]string{"MESHRA_TOOL_SOCKET": socket, "MESHRA_TOOL_TOKEN": credential},
+	}}
+	return config, credential, nil
+}
+
+func scopedBridge() (string, error) {
+	exe, _ := os.Executable()
+	_, source, _, _ := runtime.Caller(0)
+	for _, candidate := range []string{filepath.Join(filepath.Dir(exe), "bridges/mcp-stdio/bridge.mjs"), "bridges/mcp-stdio/bridge.mjs", filepath.Join(filepath.Dir(source), "../../../bridges/mcp-stdio/bridge.mjs")} {
+		path, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+			return path, nil
+		}
+	}
+	return "", model.Err(503, "OpenCode broker transport requires the reviewed bridges/mcp-stdio/bridge.mjs beside meshra")
 }

@@ -159,6 +159,104 @@ Outbound policies are deny-by-default. Agents need permitted operations and exac
 
 See [protocol.md](docs/protocol.md) for state transitions, queue limits, events, correlation, ancestry, session ownership and retry semantics; [security.md](docs/security.md) for authentication and safety.
 
+## Portable profiles and scoped automation
+
+The optional JSON boundary is `POST /v1/automation/{operation}` with bearer
+authentication, or `/console/api/automation/{operation}` with the existing
+console cookie and CSRF header. Payloads are strict JSON objects; mutations and
+admissions are never automatically retried by the console client.
+
+- `profiles.save` creates a separate portable profile, not a renamed canonical
+  agent. `profiles.createConversation` gives each participant its own native
+  binding; `profiles.send` requires one explicit recipient and an idempotency key.
+  Raw sends and lifecycle controls cannot bypass those managed bindings.
+- `profiles.switchPreview` discloses bounded, exact-conversation history and
+  pinned context versions before `profiles.switch` with `shareHistory:true`.
+  Pending work blocks a switch. Existing tasks keep their original ownership.
+- `queue.list`, `queue.pause`, `queue.resume`, and `queue.reorder` use revision
+  checks. Reorder must name the exact queued set. Pause does not cancel work or
+  extend deadlines, and dispatch rank never changes transcript sequence.
+- `history.search`/`history.read` and `memory.*` remain profile/conversation
+  scoped. Memories are quoted data, not execution policy. External conversations
+  never inherit operator-only memories. `profiles.resetContext` excludes prior
+  transcript from future handoffs without deleting saved memory or old tasks.
+- Console uploads are immutable byte-exact attachments, at most 25 MiB each and
+  four per message. Downloads require authorization, use attachment disposition
+  and `nosniff`, and never execute or extract uploads. Deletion leaves unavailable
+  references in history. Unsupported image transports fail visibly.
+- `usage.list` separates configured model/provider from natively reported
+  attribution, tokens and cost. Missing reports remain `null`; subscription
+  quotas, local turn budgets and context pressure are separate measurements.
+- `runtime.status` reports missing executables, manifests and cgroup delegation.
+  `meshra automation runtime-status` queries the same service. Configuring a
+  runtime does not enable a profile's write, command or network permissions.
+- Write and command tools use a private workspace copy. The console approves
+  one exact action; `changesets.apply` separately approves its manifest before
+  touching the original workspace. Conflicts and interrupted application retain
+  a per-path journal; no rollback or automatic replay is promised.
+- `skills.save` preserves immutable versions. A profile's reviewed binding pins
+  the admitted version; a later library edit cannot replace queued instructions.
+  Skill text never grants command execution.
+- `templates.export` produces an authenticated attachment. For skills, select an
+  explicit immutable version. `templates.importPreview` reviews JSON definitions
+  or ZIP/TAR/TAR.GZ `SKILL.md` folders (100 entries / 25 MiB maximum); supply the
+  skill name and description separately. `templates.import` consumes its
+  15-minute preview and exact digest once. Imported profiles, routines and flows
+  remain inert library drafts; normal reviewed save forms create live objects.
+- ACP requires manifest entries for the selected CLI plus `node`, `acp-bridge`
+  (`bridges/acp/launch.mjs`) and `mcp-bridge`
+  (`bridges/mcp-stdio/bridge.mjs`). Review additional CLI runtime packages and
+  provider-origin grants explicitly. `connections.acpStatus` reports readiness;
+  `connections.checkAcp` initializes a disposable session without a prompt.
+  Neither command installs software, enables the saved configuration or proves
+  that a model turn works.
+- `connections.authenticateAcp` is console-only and targets an existing ACP
+  binding with `{id,expectedRevision,profileId,conversationId,methodId}`. Select
+  an advertised method. Authentication uses that binding's private native state,
+  never a shared conversation HOME; logout cancels the job. Native CLI sign-in
+  files and environment secrets must be explicitly selected, not entered in chat.
+- Endpoint/ACP turns retain their admitted connection revision. Connection edits
+  do not redirect an admitted turn; replacing/revoking its credential blocks
+  subsequent calls. `connections.models` requires an exact-origin network grant;
+  disabling or editing the connection cancels pending discovery.
+- Enabling a public model endpoint grants only its reviewed exact origin, without
+  private-network access. Metadata-only edits do not revive a revoked grant.
+  Local/LAN endpoints still need explicit `network.grant` private confirmation.
+  Text-only endpoints can run default profiles without a tool catalog; profiles
+  that explicitly require broker tools are rejected before admission instead of
+  silently dropping those permissions.
+- Local Scan inspects installed Gemini/Cursor/Cline paths without running them;
+  symlinked package-manager executables resolve to their canonical file. Custom
+  installed ACP v1 servers use the same explicit executable/argv, protocol check
+  and fail-closed confinement requirements, not a provider-specific fallback.
+- External MCP clients are separate from Meshra's legacy `/mcp` server. Save and
+  test a connection, explicitly review its exact tools and bind them to a profile,
+  then enable the profile capability and server. Each admitted call pins server,
+  binding, tool-definition and credential revisions and waits for one exact
+  console approval; bearer credentials cannot approve it. Editing, disabling,
+  signing out or revoking the owner invalidates pending calls. HTTP discovery and
+  OAuth use exact-origin policy; local targets require explicit private-access
+  review. Stdio discovery executes code and requires the configured confined
+  runtime; it never falls back to an unrestricted host process.
+- Routine tokens can invoke only `routines.run` for reviewed grants. They cannot
+  inspect agent identities, call legacy MCP, change configuration or approve
+  actions. Flow tasks retain their routine source and actual parent dependencies;
+  deferred binding reservations hold policy/provider changes until settlement.
+
+Profile execution requires a verified broker-only transport; an unverified
+native transport leaves queued work visible with an actionable binding error
+rather than exposing its legacy native tools. Existing named-agent and
+disposable direct-chat workflows keep their current policy.
+
+OMP profile automation is pinned to `omp/18.12.1` protocol v2 and checks the exact
+host-tool roster before a prompt. Claude checks SDK `0.3.303`, native Claude Code
+`2.1.303`, managed-settings exclusion and the exact scoped MCP catalog; native
+session acknowledgement precedes tool dispatch. Both installed-version
+no-model compatibility checks passed. Authenticated model/tool turns remain a
+separate opt-in check. Codex `0.163.0` and OpenCode `1.19.3` remain unavailable for
+profile automation where rooted native reads/tool omission or pre-start plugin
+installation cannot be verified; legacy workflows are not relaxed.
+
 ## Tests and checks
 
 ```sh
@@ -198,13 +296,13 @@ Optional model/provider overrides are documented in [adapters.md](docs/adapters.
 - **Already owned:** another daemon holds that state directory; use it or stop it cleanly. A dead process releases the OS lock; do not delete SQLite/WAL files to force recovery.
 - **Harness not found / model unavailable:** install the documented version, authenticate through native tooling, and launch the daemon from that environment. Custom Codex provider definitions are not inherited from user config by the isolated adapter.
 - **Queued:** inspect agent state, `nextAttemptAt`, `deliveryAttempts`, and deadline. Start/restart the exact destination before delivery exhaustion. A running conflicting repository turn keeps the shared lock; nested requests must not wait indefinitely while holding it.
-- **Approval required:** unsafe tool actions are rejected visibly. Write enablement is unsupported and rejected; no approval console or automatic sandbox escape exists. Do not enable bypass approval to fix a smoke test.
+- **Approval required:** legacy native execution stays denied. Profile write/command actions require explicit capability enablement, a ready confined runtime and a one-call console approval; applying host changes is a separate reviewed manifest decision. Missing confinement remains an error, never a reason to enable bypass approvals.
 - **After WSL shutdown:** restart the daemon and agents; queued tasks remain. Inspect uncertain failed turns before retrying.
 - Keep state on the WSL Linux filesystem, not a shared Windows mount with different locking/permission semantics. Idle relay and spawned harness footprints are separate; see measured resource evidence.
 
 ## Boundaries and next steps
 
-No arbitrary interactive-session attach, autonomous planning, cloud/remote relay, model-based routing, web UI, or identical tool capabilities across harnesses. Current adapters are read-oriented; native permissions are not universal OS filesystem containment. Native harness sessions live outside SQLite. No interactive approval UI, remote security boundary, or coordination with external writers. MCP delegation is automatic only where verified adapter configuration supports it. Claude/OpenCode authenticated provider turns remain dependent on unavailable native credentials in the inspected environment.
+No arbitrary interactive-session attach, cloud/remote relay, hosted marketplace, model-based routing, or identical native capabilities across harnesses. Native harness sessions live outside SQLite; legacy read-oriented restrictions are not universal OS containment. Profile automation uses the separate broker and verified transport gates. Native browser, desktop, ACP, stdio MCP and voice execution remain dependent on operator-configured manifests, namespaces, cgroups and their actual runtime artifacts. Authenticated provider turns require native credentials and explicit opt-in verification; protocol fixtures are not native execution evidence.
 
 Design and evidence: [v0.2 design](docs/V0.2_DESIGN.md), [operations/migration/recovery](docs/V0.2_OPERATIONS.md), [test report](docs/V0.2_TEST_REPORT.md), [adapter verification](docs/V0.2_ADAPTER_VERIFICATION.md), [architecture](docs/architecture.md), [protocol](docs/protocol.md), [security](docs/security.md), [CLI/API/MCP](docs/cli.md), [changelog](CHANGELOG.md).
 

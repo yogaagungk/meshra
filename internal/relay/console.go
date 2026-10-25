@@ -54,7 +54,7 @@ func (r *Relay) Console(p model.Principal, op string, q model.ConsoleRequest) (a
 	switch op {
 	case "harnesses":
 		out := []map[string]string{}
-		for _, h := range []string{"codex", "claude", "opencode", "omp"} {
+		for _, h := range []string{"codex", "claude", "opencode", "omp", "openai", "acp"} {
 			if adapter, ok := r.adapters[h]; ok && adapter.Factory != nil {
 				out = append(out, map[string]string{"id": h})
 			}
@@ -110,7 +110,7 @@ func (r *Relay) Console(p model.Principal, op string, q model.ConsoleRequest) (a
 		tasks := []model.Task{}
 		failures := map[string]string{}
 		for _, id := range q.Recipients {
-			task, err := r.sendLocked(p, model.SendRequest{From: "human:operator", To: id, Text: q.Text, Type: "request", ConversationID: q.ConversationID, ContextRefs: q.ContextRefs, IdempotencyKey: tokenHash(q.ConversationID + "\x00" + q.IdempotencyKey + "\x00" + id)})
+			task, err := r.admitLocked(p, model.SendRequest{From: "human:operator", To: id, Text: q.Text, Type: "request", ConversationID: q.ConversationID, ContextRefs: q.ContextRefs, IdempotencyKey: tokenHash(q.ConversationID + "\x00" + q.IdempotencyKey + "\x00" + id)}, nil)
 			if err != nil {
 				if e, ok := err.(*model.Error); ok {
 					failures[id] = e.Message
@@ -166,6 +166,25 @@ func (r *Relay) Console(p model.Principal, op string, q model.ConsoleRequest) (a
 		var seq int64
 		err := r.db.QueryRow("SELECT coalesce(max(id),0) FROM events").Scan(&seq)
 		return seq, err
+	case "automation-events":
+		// Feature events carry resource-change metadata only: no task text, no
+		// tool arguments and no secret material.
+		after := q.After
+		rows, err := r.db.Query(`SELECT seq,kind,resource_id,profile_id,data,time FROM automation_events WHERE seq>? ORDER BY seq LIMIT 100`, after)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := []map[string]any{}
+		for rows.Next() {
+			var seq int64
+			var kind, resource, profile, data, tm string
+			if err = rows.Scan(&seq, &kind, &resource, &profile, &data, &tm); err != nil {
+				return nil, err
+			}
+			out = append(out, map[string]any{"id": seq, "type": kind, "resourceId": resource, "profileId": profile, "data": data, "time": tm})
+		}
+		return out, rows.Err()
 	case "feed":
 		if err := r.member(p, q.ConversationID, false); err != nil {
 			return nil, err

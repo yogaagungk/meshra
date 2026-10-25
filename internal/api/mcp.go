@@ -63,6 +63,22 @@ func protocolSupported(version string) bool {
 	return version == "2025-03-26" || version == "2025-06-18" || version == "2025-11-25"
 }
 func (s *server) mcp(w http.ResponseWriter, r *http.Request, p model.Principal) {
+	if service, ok := s.service.(model.ActiveToolService); ok {
+		executor, err := service.ActiveTools(p)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if executor != nil {
+			transport, ok := executor.(interface{ MCPHandler() http.Handler })
+			if !ok {
+				fail(w, model.Err(503, "active tool MCP transport unavailable"))
+				return
+			}
+			transport.MCPHandler().ServeHTTP(w, r)
+			return
+		}
+	}
 	if r.Method != http.MethodPost {
 		method(w, "POST")
 		return

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"meshra/internal/model"
 	"os"
 	"path/filepath"
@@ -37,6 +38,12 @@ func validConfig(c model.Config, harness string) error {
 	}
 	if harness == "claude" && c.Provider != "" && c.Provider != "anthropic" {
 		return model.Err(400, "Claude uses its native Anthropic provider")
+	}
+	if harness == "openai" && (c.Model == "" || c.Provider == "") {
+		return model.Err(400, "OpenAI-compatible endpoints require both model and endpoint identifier")
+	}
+	if harness == "acp" && c.Provider == "" {
+		return model.Err(400, "ACP agents require an installed-command configuration identifier")
 	}
 	return nil
 }
@@ -136,7 +143,17 @@ func (r *Relay) reserveRun(t model.Task, a model.Agent) (bool, error) {
 		}
 		workspace = config.WorkspaceID
 	}
-	_, err := r.db.Exec(`INSERT INTO run_usage(task_id,attempt,started_at,harness,model,provider,workspace_id,state,input_bytes,conversation_id) VALUES(?,?,?,?,?,?,?,?,?,?)`, t.ID, t.Attempts, now().Format(time.RFC3339Nano), a.Harness, a.Config.Model, a.Config.Provider, workspace, "running", len(t.Text), t.ConversationID)
+	var profileID, bindingID any
+	var profileRevision any
+	if a.ProfileManaged {
+		snapshot, err := r.profileSnapshot(t)
+		if err != nil {
+			return false, err
+		}
+		profileID, bindingID, profileRevision = snapshot.Profile.ID, snapshot.Binding.ID, snapshot.Profile.Revision
+		workspace = snapshot.Profile.WorkspaceID
+	}
+	_, err := r.db.Exec(`INSERT INTO run_usage(task_id,attempt,started_at,harness,model,provider,workspace_id,state,input_bytes,conversation_id,profile_id,profile_revision,binding_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.ID, t.Attempts, now().Format(time.RFC3339Nano), a.Harness, a.Config.Model, a.Config.Provider, workspace, "running", len(t.Text), t.ConversationID, profileID, profileRevision, bindingID)
 	return err == nil, err
 }
 func (r *Relay) reapIdle() {
@@ -149,6 +166,13 @@ func (r *Relay) reapIdle() {
 			return
 		case <-ticker.C:
 			r.releaseIdle()
+			r.cleanupProfileGenerations()
+			if err := r.sweepVoiceJobs(r.ctx, now()); err != nil && r.ctx.Err() == nil {
+				r.logger.Warn("local voice expiry cleanup failed")
+			}
+			if err := r.sweepBrowserSessions(r.ctx, now()); err != nil && r.ctx.Err() == nil {
+				r.logger.Warn("browser expiry cleanup failed")
+			}
 		}
 	}
 }
@@ -249,15 +273,44 @@ func (r *Relay) discoverModels(harness string) (any, error) {
 
 func (r *Relay) recordUsage(t model.Task, data string) {
 	var v struct {
-		Input  *int64 `json:"inputTokens"`
-		Output *int64 `json:"outputTokens"`
-		Cached *int64 `json:"cachedInputTokens"`
+		Input    *int64   `json:"inputTokens"`
+		Output   *int64   `json:"outputTokens"`
+		Cached   *int64   `json:"cachedInputTokens"`
+		Model    string   `json:"model"`
+		Provider string   `json:"provider"`
+		Cost     *float64 `json:"reportedCost"`
+		Currency string   `json:"currency"`
 	}
-	if len(data) > 1024 || json.Unmarshal([]byte(data), &v) != nil || v.Input == nil || v.Output == nil || *v.Input < 0 || *v.Output < 0 || *v.Input > 1000000000000 || *v.Output > 1000000000000 {
+	if len(data) > 2048 || json.Unmarshal([]byte(data), &v) != nil {
 		return
 	}
-	if v.Cached != nil && (*v.Cached < 0 || *v.Cached > *v.Input) {
+	for _, tokens := range []*int64{v.Input, v.Output, v.Cached} {
+		if tokens != nil && (*tokens < 0 || *tokens > 1e12) {
+			return
+		}
+	}
+	if v.Cached != nil && v.Input != nil && *v.Cached > *v.Input {
 		v.Cached = nil
 	}
-	_, _ = r.db.Exec("UPDATE run_usage SET input_tokens=?,output_tokens=?,cached_input_tokens=?,observed_at=? WHERE task_id=? AND attempt=?", *v.Input, *v.Output, v.Cached, now().Format(time.RFC3339Nano), t.ID, t.Attempts)
+	if len(v.Model) > 200 || len(v.Provider) > 200 || !safeRegistryText(v.Model) || !safeRegistryText(v.Provider) || redact(v.Model) != v.Model || redact(v.Provider) != v.Provider {
+		return
+	}
+	if v.Cost != nil {
+		validCurrency := len(v.Currency) == 3
+		for _, c := range v.Currency {
+			if c < 'A' || c > 'Z' {
+				validCurrency = false
+			}
+		}
+		if !validCurrency || math.IsNaN(*v.Cost) || math.IsInf(*v.Cost, 0) || *v.Cost < 0 {
+			v.Cost = nil
+		}
+	}
+	if v.Cost == nil {
+		v.Currency = ""
+	}
+	if v.Input == nil && v.Output == nil && v.Cached == nil && v.Model == "" && v.Provider == "" && v.Cost == nil {
+		return
+	}
+	_, _ = r.db.Exec(`UPDATE run_usage SET input_tokens=coalesce(?,input_tokens),output_tokens=coalesce(?,output_tokens),cached_input_tokens=coalesce(?,cached_input_tokens),reported_model=coalesce(nullif(?,''),reported_model),reported_provider=coalesce(nullif(?,''),reported_provider),reported_cost=coalesce(?,reported_cost),reported_currency=coalesce(nullif(?,''),reported_currency),observed_at=? WHERE task_id=? AND attempt=?`, v.Input, v.Output, v.Cached, v.Model, v.Provider, v.Cost, v.Currency, now().Format(time.RFC3339Nano), t.ID, t.Attempts)
 }

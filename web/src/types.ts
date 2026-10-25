@@ -1,4 +1,5 @@
 export type Agent = {
+  profileManaged?: boolean;
   managedChat?: boolean;
   id: string;
   harness: string;
@@ -18,6 +19,8 @@ export type Agent = {
 };
 export type Ref = { contextId: string; version: number };
 export type Conversation = {
+  profileIds?: string[];
+  profileKind?: "chat" | "task" | "channel";
   chatSettings?: ChatSettings;
   mode?: "chat";
   conversationId: string;
@@ -34,6 +37,7 @@ export type InboxItem = {
   state: string;
 };
 export type Task = {
+  attachmentIds?: string[];
   seq: number;
   taskId: string;
   messageId: string;

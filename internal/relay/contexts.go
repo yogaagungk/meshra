@@ -22,6 +22,11 @@ func (r *Relay) contextAccess(p model.Principal, op, id string, version int, wri
 		var n int
 		err = r.db.QueryRow("SELECT count(*) FROM context_acl WHERE context_id=? AND agent_id=?", id, p.AgentID).Scan(&n)
 		allowed = err == nil && n == 1
+		if a, agentErr := r.agent(p.AgentID); agentErr == nil && a.ProfileManaged {
+			err = r.db.QueryRow(`SELECT count(*) FROM profile_context_grants g JOIN profile_bindings b ON b.id=g.binding_id
+				WHERE b.agent_id=? AND g.context_id=? AND g.version=? AND b.generation=(SELECT max(n.generation) FROM profile_bindings n WHERE n.profile_id=b.profile_id AND n.conversation_id=b.conversation_id)`, p.AgentID, id, version).Scan(&n)
+			allowed = err == nil && n == 1
+		}
 	}
 	outcome := "denied"
 	if allowed {
@@ -154,14 +159,18 @@ func (r *Relay) contextOperation(p model.Principal, op string, q model.Collabora
 		if err := r.contextAccess(p, op, q.ContextID, 0, true); err != nil {
 			return nil, err
 		}
-		if _, err := r.agent(q.AgentID); err != nil {
+		a, err := r.agent(q.AgentID)
+		if err != nil {
 			return nil, err
+		}
+		if a.ProfileManaged {
+			return r.profileContextGrant(op, q)
 		}
 		query := "INSERT OR IGNORE INTO context_acl VALUES(?,?)"
 		if op == "context.revoke" {
 			query = "DELETE FROM context_acl WHERE context_id=? AND agent_id=?"
 		}
-		_, err := r.db.Exec(query, q.ContextID, q.AgentID)
+		_, err = r.db.Exec(query, q.ContextID, q.AgentID)
 		return map[string]bool{"updated": err == nil}, err
 	case "context.audit":
 		if err := r.contextAccess(p, op, q.ContextID, 0, true); err != nil {
@@ -206,6 +215,9 @@ func (r *Relay) contextOperation(p model.Principal, op string, q model.Collabora
 			t, err := r.task(q.TargetTaskID)
 			if err != nil {
 				return nil, err
+			}
+			if a, lookupErr := r.agent(t.To); lookupErr == nil && a.ProfileManaged {
+				return nil, model.Err(409, "profile task snapshots are immutable; pin context before admission")
 			}
 			if err = r.access(p, t, "cancel"); err != nil {
 				return nil, err

@@ -34,7 +34,7 @@ func (r *Relay) authorizeRecipient(p model.Principal, from string, dest model.Ag
 func validAgentID(id string) bool {
 	parts := strings.Split(id, ":")
 	return len(parts) == 2 && namePattern.MatchString(parts[1]) &&
-		(parts[0] == "omp" || parts[0] == "claude" || parts[0] == "codex" || parts[0] == "opencode")
+		(parts[0] == "omp" || parts[0] == "claude" || parts[0] == "codex" || parts[0] == "opencode" || parts[0] == "openai" || parts[0] == "acp")
 }
 
 func validOperation(op string) bool {
@@ -146,6 +146,9 @@ var (
 // be present in free text, so access control and filesystem protection remain
 // necessary. Callers must hash original requests before applying this function.
 func redact(s string) string {
+	// Registered vault values are masked before the pattern rules so a stored
+	// secret never survives in persisted text.
+	s = maskSecretValues(s)
 	s = doubleQuotedSecret.ReplaceAllString(s, "${1}[REDACTED]${3}")
 	s = singleQuotedSecret.ReplaceAllString(s, "${1}[REDACTED]${3}")
 	s = unquotedSecret.ReplaceAllString(s, "${1}[REDACTED]")

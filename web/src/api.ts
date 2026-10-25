@@ -10,27 +10,42 @@ export class APIError extends Error {
 export function setCSRF(value: string) {
   csrf = value;
 }
+export async function authenticatedFetch(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (
+    init.method &&
+    !["GET", "HEAD"].includes(init.method.toUpperCase()) &&
+    !headers.has("X-Meshra-CSRF")
+  )
+    headers.set("X-Meshra-CSRF", csrf);
+  const response = await fetch("/console/api/" + path, {
+    ...init,
+    credentials: "same-origin",
+    signal: init.signal ?? AbortSignal.timeout(60000),
+    headers,
+  });
+  if (response.status === 401 && path !== "session" && path !== "login")
+    window.dispatchEvent(new Event("meshra:expired"));
+  return response;
+}
 export async function api<T>(
   path: string,
   body?: unknown,
   headers: Record<string, string> = {},
 ): Promise<T> {
-  const response = await fetch("/console/api/" + path, {
+  const response = await authenticatedFetch(path, {
     method: body === undefined ? "GET" : "POST",
-    credentials: "same-origin",
-    signal: AbortSignal.timeout(60000),
     headers: {
-      ...(body === undefined
-        ? {}
-        : { "Content-Type": "application/json", "X-Meshra-CSRF": csrf }),
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const value = await response.json();
   if (!response.ok) {
-    if (response.status === 401 && path !== "session" && path !== "login")
-      window.dispatchEvent(new Event("meshra:expired"));
     throw new APIError(response.status, value.error || "Request failed");
   }
   return value;

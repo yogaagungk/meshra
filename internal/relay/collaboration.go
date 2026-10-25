@@ -85,7 +85,33 @@ func (r *Relay) conversation(p model.Principal, id string) (model.Conversation, 
 		}
 		c.ContextRefs = append(c.ContextRefs, ref)
 	}
-	return c, bindings.Err()
+	err = bindings.Err()
+	bindings.Close()
+	if err != nil {
+		return c, err
+	}
+	profiles, err := r.db.Query("SELECT profile_id FROM profile_conversations WHERE conversation_id=? ORDER BY profile_id", id)
+	if err != nil {
+		return c, err
+	}
+	for profiles.Next() {
+		var profileID string
+		if err = profiles.Scan(&profileID); err != nil {
+			break
+		}
+		c.ProfileIDs = append(c.ProfileIDs, profileID)
+	}
+	if err == nil {
+		err = profiles.Err()
+	}
+	profiles.Close()
+	if err != nil {
+		return c, err
+	}
+	if len(c.ProfileIDs) > 0 {
+		err = r.db.QueryRow("SELECT kind FROM profile_conversation_settings WHERE conversation_id=?", id).Scan(&c.ProfileKind)
+	}
+	return c, err
 }
 func (r *Relay) Collaborate(p model.Principal, op string, q model.CollaborationRequest) (any, error) {
 	if op == "task.delegate" {

@@ -48,7 +48,18 @@ import {
   type SharedContext,
   type Task,
 } from "./types";
-export function Chat({
+import { ProfileChat } from "./ProfileChat";
+export function Chat(props: { id: string; agents: Agent[]; onNew: () => void }) {
+  const conversation = useQuery({
+    queryKey: ["conversation", props.id],
+    queryFn: () => collab<Conversation>("conversation.get", { id: props.id }),
+    gcTime: 0,
+  });
+  if (conversation.data?.profileIds?.length)
+    return <ProfileChat key={props.id} conversation={conversation.data} agents={props.agents} onNew={props.onNew} />;
+  return <LegacyChat {...props} />;
+}
+function LegacyChat({
   id,
   agents,
   onNew,

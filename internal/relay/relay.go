@@ -21,6 +21,7 @@ import (
 
 	"golang.org/x/sys/unix"
 	"meshra/internal/model"
+	"meshra/internal/netpolicy"
 	_ "modernc.org/sqlite"
 )
 
@@ -51,6 +52,43 @@ var migrationV8 string
 //go:embed migrations/009.sql
 var migrationV9 string
 
+//go:embed migrations/010.sql
+var migrationV10 string
+
+//go:embed migrations/011.sql
+var migrationV11 string
+
+//go:embed migrations/012.sql
+var migrationV12 string
+
+//go:embed migrations/013.sql
+var migrationV13 string
+
+//go:embed migrations/014.sql
+var migrationV14 string
+
+//go:embed migrations/015.sql
+var migrationV15 string
+
+//go:embed migrations/016.sql
+var migrationV16 string
+
+//go:embed migrations/017.sql
+var migrationV17 string
+
+//go:embed migrations/018.sql
+var migrationV18 string
+
+// schemaMigrations lists every embedded schema step in order. A new feature
+// appends its own step; existing steps are never renumbered.
+var schemaMigrations = []struct {
+	version int
+	source  string
+}{
+	{10, migrationV10}, {11, migrationV11}, {12, migrationV12}, {13, migrationV13},
+	{14, migrationV14}, {15, migrationV15}, {16, migrationV16}, {17, migrationV17}, {18, migrationV18},
+}
+
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
 type slot struct {
@@ -62,28 +100,45 @@ type slot struct {
 	repo       string
 }
 type Relay struct {
-	accountMu  sync.Mutex
-	mu         sync.Mutex
-	lifecycle  sync.Mutex
-	db         *sql.DB
-	lock       *os.File
-	admin      string
-	adapters   map[string]model.Adapter
-	slots      map[string]*slot
-	repos      map[string]bool
-	wake       chan struct{}
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	closed     bool
-	mcpURL     string
-	owner      string
-	options    Options
-	settings   model.PersonalSettings
-	catalogMu  sync.Mutex
-	quotaCache map[string]model.QuotaSnapshot
-	logger     *slog.Logger
-	nextPrune  time.Time
+	sessionMu               sync.Mutex
+	consoleSessionValidator func(string) bool
+	revokedConsoleSessions  map[string]bool
+	consoleJobs             map[string]map[string]context.CancelFunc
+	consoleJobCount         int
+	accountMu               sync.Mutex
+	mu                      sync.Mutex
+	lifecycle               sync.Mutex
+	db                      *sql.DB
+	lock                    *os.File
+	admin                   string
+	adapters                map[string]model.Adapter
+	slots                   map[string]*slot
+	repos                   map[string]bool
+	rotatingProfiles        map[string]bool
+	networkPolicy           *netpolicy.Policy
+	toolBrokers             map[string]*toolBroker
+	connectionProbes        map[string]map[string]context.CancelFunc
+	mcpRefreshes            map[string]chan struct{}
+	connectionProbeCount    int
+	connectorOnce           sync.Once
+	connectorState          *connectorRegistryState
+	browserOnce             sync.Once
+	browserRegistry         *browserManager
+	closeDone               chan struct{}
+	closeErr                error
+	wake                    chan struct{}
+	ctx                     context.Context
+	cancel                  context.CancelFunc
+	wg                      sync.WaitGroup
+	closed                  bool
+	mcpURL                  string
+	owner                   string
+	options                 Options
+	settings                model.PersonalSettings
+	catalogMu               sync.Mutex
+	quotaCache              map[string]model.QuotaSnapshot
+	logger                  *slog.Logger
+	nextPrune               time.Time
 }
 
 func randomID() string {
@@ -164,7 +219,31 @@ func OpenWithOptions(dir string, adapters map[string]model.Adapter, options Opti
 		cancel()
 		return nil, err
 	}
+	if err = r.recoverTools(); err != nil {
+		cancel()
+		return nil, err
+	}
+	if err = r.cleanupSandboxStore(); err != nil {
+		cancel()
+		return nil, err
+	}
+	if err = r.cleanupToolSockets(); err != nil {
+		cancel()
+		return nil, err
+	}
 	if _, err = r.db.Exec("UPDATE run_usage SET state='interrupted' WHERE state='running'"); err != nil {
+		cancel()
+		return nil, err
+	}
+	if err = r.recoverVoiceJobs(); err != nil {
+		cancel()
+		return nil, err
+	}
+	if err = r.recoverProfileExposure(); err != nil {
+		cancel()
+		return nil, err
+	}
+	if err = r.recoverBrowserSessions(); err != nil {
 		cancel()
 		return nil, err
 	}
@@ -172,14 +251,25 @@ func OpenWithOptions(dir string, adapters map[string]model.Adapter, options Opti
 	go r.schedule()
 	r.wg.Add(1)
 	go r.reapIdle()
+	r.ensureRoutineScheduler()
 	return r, nil
 }
-func (r *Relay) SetMCPURL(url string) { r.mu.Lock(); defer r.mu.Unlock(); r.mcpURL = url }
+func (r *Relay) SetMCPURL(url string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.mcpURL = url
+	r.setNetworkListenerLocked(url)
+}
 func (r *Relay) Authenticate(token string) (model.Principal, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(r.admin)) == 1 {
 		return model.Principal{Admin: true}, nil
+	}
+	// A routine execution token is a narrow ingress credential: it is never an
+	// administrator and never holds approval authority.
+	if principal, err := r.routineTokenPrincipal(token); err == nil {
+		return principal, nil
 	}
 	var p model.Principal
 	err := r.db.QueryRow("SELECT agent_id,session_id,task_id FROM credentials WHERE hash=?", tokenHash(token)).Scan(&p.AgentID, &p.SessionID, &p.TaskID)
@@ -249,6 +339,21 @@ func (r *Relay) Create(p model.Principal, c model.CreateAgent) (model.Agent, err
 	return r.createLocked(p, c)
 }
 func (r *Relay) createLocked(p model.Principal, c model.CreateAgent) (model.Agent, error) {
+	a, err := r.prepareAgentLocked(p, c)
+	if err != nil {
+		return a, err
+	}
+	b, _ := json.Marshal(a)
+	if _, err = r.db.Exec("INSERT INTO agents(id,body) VALUES(?,?)", a.ID, string(b)); err != nil {
+		if _, e := r.agent(a.ID); e == nil {
+			return model.Agent{}, model.Err(409, "agent already exists: "+a.ID)
+		}
+		return model.Agent{}, err
+	}
+	return a, nil
+}
+
+func (r *Relay) prepareAgentLocked(p model.Principal, c model.CreateAgent) (model.Agent, error) {
 	if r.closed {
 		return model.Agent{}, model.Err(503, "relay is stopping")
 	}
@@ -259,7 +364,7 @@ func (r *Relay) createLocked(p model.Principal, c model.CreateAgent) (model.Agen
 	if !namePattern.MatchString(c.Name) {
 		return a, model.Err(400, "name must match [a-z][a-z0-9_-]{0,62}; IDs are lowercase")
 	}
-	if c.Harness != "omp" && c.Harness != "claude" && c.Harness != "codex" && c.Harness != "opencode" {
+	if c.Harness != "omp" && c.Harness != "claude" && c.Harness != "codex" && c.Harness != "opencode" && c.Harness != "openai" && c.Harness != "acp" {
 		return a, model.Err(400, "unsupported harness")
 	}
 	if c.Concurrency != 0 && c.Concurrency != 1 {
@@ -319,14 +424,7 @@ func (r *Relay) createLocked(p model.Principal, c model.CreateAgent) (model.Agen
 		}
 	}
 	a = model.Agent{ManagedChat: c.ManagedChat, SchemaVersion: 1, ID: id, Harness: c.Harness, Name: c.Name, DisplayName: display, Cwd: cwd, Config: c.Config, Policy: c.Policy, Concurrency: 1, State: "registered", LastSeen: now(), Capabilities: caps}
-	b, _ := json.Marshal(a)
-	_, err = r.db.Exec("INSERT INTO agents(id,body) VALUES(?,?)", id, string(b))
-	if err != nil {
-		if _, e := r.agent(id); e == nil {
-			return model.Agent{}, model.Err(409, "agent already exists: "+id)
-		}
-		return model.Agent{}, err
-	}
+	a.GenerationDraft = c.GenerationDraft
 	return a, nil
 }
 func contains(values []string, v string) bool {
@@ -338,6 +436,9 @@ func contains(values []string, v string) bool {
 	return false
 }
 func (r *Relay) permit(p model.Principal, op string) error {
+	if p.RoutineTokenID != "" {
+		return model.Err(403, "routine credentials cannot use agent operations")
+	}
 	if p.Admin {
 		return nil
 	}
@@ -356,7 +457,17 @@ func (r *Relay) Agents(p model.Principal) ([]model.Agent, error) {
 	if err := r.permit(p, "list"); err != nil {
 		return nil, err
 	}
-	return r.agents()
+	agents, err := r.agents()
+	if err != nil {
+		return nil, err
+	}
+	named := agents[:0]
+	for _, a := range agents {
+		if !a.ProfileManaged && !a.GenerationDraft {
+			named = append(named, a)
+		}
+	}
+	return named, nil
 }
 func (r *Relay) Agent(p model.Principal, id string) (model.Agent, error) {
 	r.mu.Lock()
@@ -449,11 +560,43 @@ func repository(cwd string) string {
 	return cwd
 }
 func (r *Relay) Action(p model.Principal, id, action string) (model.Agent, error) {
+	return r.action(p, id, action, false)
+}
+
+func (r *Relay) action(p model.Principal, id, action string, profileControl bool) (model.Agent, error) {
 	if err := requireAdmin(p); err != nil {
 		return model.Agent{}, err
 	}
 	r.lifecycle.Lock()
 	defer r.lifecycle.Unlock()
+	return r.actionWithLifecycle(p, id, action, profileControl)
+}
+
+// Caller owns lifecycle; never hold r.mu while calling this function.
+func (r *Relay) actionWithLifecycle(p model.Principal, id, action string, profileControl bool) (model.Agent, error) {
+	r.mu.Lock()
+	managed, checkErr := r.agent(id)
+	if checkErr == nil && managed.GenerationDraft && !profileControl {
+		checkErr = model.Err(403, "draft generation identities cannot be controlled directly")
+	}
+	if checkErr == nil && managed.ProfileManaged {
+		if !profileControl {
+			checkErr = model.Err(403, "profile identities require profiles.bindingAction")
+		} else {
+			checkErr = r.currentProfileAgent(id)
+			if checkErr == nil && action != "stop" {
+				var archived bool
+				checkErr = r.db.QueryRow("SELECT json_extract(p.body,'$.archived') FROM agent_profiles p JOIN profile_bindings b ON b.profile_id=p.id WHERE b.agent_id=?", id).Scan(&archived)
+				if checkErr == nil && archived {
+					checkErr = model.Err(409, "profile is archived")
+				}
+			}
+		}
+	}
+	r.mu.Unlock()
+	if checkErr != nil {
+		return model.Agent{}, checkErr
+	}
 	if action != "start" && action != "stop" && action != "restart" {
 		return model.Agent{}, model.Err(400, "action must be start, stop, or restart")
 	}
@@ -490,11 +633,43 @@ func (r *Relay) Action(p model.Principal, id, action string) (model.Agent, error
 		r.mu.Unlock()
 		return a, model.Err(503, "adapter unavailable: "+a.Harness)
 	}
+	if a.ProfileManaged && !ad.Capabilities["profileAutomation"] {
+		a.State = "error"
+		a.Error = "profile automation requires a verified broker-only native tool transport"
+		_ = r.saveAgent(a)
+		r.mu.Unlock()
+		return a, model.Err(503, a.Error)
+	}
 	if err = validateWorkspace(a); err != nil {
 		r.mu.Unlock()
 		return a, err
 	}
-	if a.ManagedChat {
+	if a.ProfileManaged {
+		var profileID string
+		if err = r.db.QueryRow("SELECT profile_id FROM profile_bindings WHERE agent_id=?", a.ID).Scan(&profileID); err != nil {
+			r.mu.Unlock()
+			return a, err
+		}
+		profile, profileErr := r.profile(profileID)
+		if profileErr != nil {
+			r.mu.Unlock()
+			return a, profileErr
+		}
+		a.ToolDefinitions = profileToolCatalog(profile)
+		pending, pendingErr := r.profileRotationNeeded(a.ID)
+		if pendingErr != nil {
+			r.mu.Unlock()
+			return a, pendingErr
+		}
+		if pending {
+			if _, err = r.advanceProfileEpochLocked(a.ID, nil); err != nil {
+				r.mu.Unlock()
+				return a, err
+			}
+			a.SessionID = ""
+		}
+	}
+	if a.ManagedChat || a.GenerationDraft {
 		// Managed identities are readiness slots, not durable model histories.
 		// Idle Codex threads may have no rollout to resume after a restart.
 		a.SessionID = ""
@@ -590,13 +765,20 @@ func (r *Relay) stop(id string) error {
 }
 func (r *Relay) Close() error {
 	r.lifecycle.Lock()
-	defer r.lifecycle.Unlock()
 	r.mu.Lock()
 	if r.closed {
+		done := r.closeDone
 		r.mu.Unlock()
-		return nil
+		r.lifecycle.Unlock()
+		if done != nil {
+			<-done
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.closeErr
 	}
 	r.closed = true
+	r.closeDone = make(chan struct{})
 	r.cancel()
 	for _, s := range r.slots {
 		s.cancel()
@@ -605,16 +787,25 @@ func (r *Relay) Close() error {
 		}
 	}
 	r.mu.Unlock()
+	// Canceled ingress may still be acquiring lifecycle ownership. Never hold
+	// it while draining callbacks, native workers or the scheduler.
+	r.lifecycle.Unlock()
+	r.closeNetworkPolicy()
+	r.stopConnectors()
+	first := r.closeVoiceJobs()
+	first = errors.Join(first, r.closeBrowserSessions())
 	r.wg.Wait()
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	var first error
-	for id, s := range r.slots {
+	slots := r.slots
+	r.slots = make(map[string]*slot)
+	r.mu.Unlock()
+	for id, s := range slots {
 		if s.runtime != nil {
 			if e := s.runtime.Close(); first == nil {
 				first = e
 			}
 		}
+		r.mu.Lock()
 		a, e := r.agent(id)
 		if e == nil {
 			a.State = "stopped"
@@ -622,6 +813,7 @@ func (r *Relay) Close() error {
 				first = e
 			}
 		}
+		r.mu.Unlock()
 	}
 	if e := r.db.Close(); first == nil {
 		first = e
@@ -629,5 +821,9 @@ func (r *Relay) Close() error {
 	if e := r.lock.Close(); first == nil {
 		first = e
 	}
+	r.mu.Lock()
+	r.closeErr = first
+	close(r.closeDone)
+	r.mu.Unlock()
 	return first
 }

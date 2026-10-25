@@ -18,7 +18,32 @@ import (
 )
 
 func New() model.Adapter {
-	return model.Adapter{Factory: factory, Capabilities: map[string]bool{"prompt": true, "stream": true, "resume": true, "cancel": true, "read_only": true, "approval": false, "mcp": false}}
+	return model.Adapter{Factory: factory, Capabilities: map[string]bool{"prompt": true, "stream": true, "resume": true, "durableHistory": true, "toolFreeDraft": false, "cancel": true, "read_only": true, "approval": false, "mcp": false, "profileAutomation": false}}
+}
+
+// The installed 0.163 app-server supports dynamic-tool protocol frames, but
+// native apply_patch exclusion and rooted-only native reads remain unverified.
+// Do not advertise profileAutomation until both restrictions can be enforced.
+// The frame implementation below is covered independently by protocol fixtures;
+// those fixtures are not evidence of native filesystem confinement.
+var nativeToolDisable = []string{"shell_tool", "unified_exec", "unified_exec_tty", "code_mode", "code_mode_host", "code_mode_interrupt", "view_image", "multi_agent", "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "sleep_tool", "apps", "plugins", "remote_plugin", "codex_apps_mcp_2026_07_28", "skill_search", "skill_mcp_dependency_install", "guardian_approval", "hooks", "tool_suggest", "realtime_conversation", "browser_annotation_api", "write_stdin_approval", "tool_call_mcp_elicitation"}
+
+// dynamicToolSpec is the installed app-server shape for one registered tool.
+type dynamicToolSpec struct {
+	Type        string          `json:"type"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+}
+
+// toolCallParams is the installed app-server shape for a server tool request.
+type toolCallParams struct {
+	ThreadID  string          `json:"threadId"`
+	TurnID    string          `json:"turnId"`
+	CallID    string          `json:"callId"`
+	Tool      string          `json:"tool"`
+	Namespace *string         `json:"namespace"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
 type frame struct {
@@ -46,6 +71,8 @@ type runtime struct {
 	run     sync.Mutex
 	once    sync.Once
 	unlock  func()
+	profile bool
+	catalog map[string]bool
 }
 
 func isolatedEnv(dir string) ([]string, error) {
@@ -86,6 +113,15 @@ func isolatedEnv(dir string) ([]string, error) {
 }
 
 func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runtime, err error) {
+	// The installed 0.163 app-server serves an experimental client tool catalog:
+	// thread/start registers dynamic tools and the server then asks this client
+	// to run one with item/tool/call. A profile-managed turn uses that catalog
+	// and disables every native tool surface, so the Meshra broker is the only
+	// route to files, commands and the network. A draft has no broker and no
+	// tool roster, so it stays unavailable on this harness.
+	if a.GenerationDraft {
+		return nil, &model.Error{Status: 503, Message: "Codex profile generation is unavailable: this adapter cannot enforce an empty native tool catalog on the installed app-server protocol. Use a harness advertising toolFreeDraft; ordinary Codex sessions are unchanged"}
+	}
 	dir, unlock, err := process.RuntimeStateDir("codex", a.ID, a.Ephemeral)
 	if err != nil {
 		return nil, err
@@ -95,12 +131,27 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 		unlock()
 		return nil, fmt.Errorf("Codex isolated native auth: %w", err)
 	}
-	p, err := process.Start(ctx, "codex", []string{"app-server", "--listen", "stdio://"}, dir, env)
+	// A profile-managed thread serves the Meshra broker catalog only. Every
+	// native tool surface is disabled and the effective state is verified below.
+	profile := a.ToolDefinitions != nil
+	specs, catalog, specErr := dynamicToolCatalog(a.ToolDefinitions)
+	if specErr != nil {
+		unlock()
+		return nil, specErr
+	}
+	args := []string{"app-server", "--listen", "stdio://"}
+	if profile {
+		for _, name := range nativeToolDisable {
+			args = append(args, "--disable", name)
+		}
+		args = append(args, "-c", "tools.web_search=false")
+	}
+	p, err := process.Start(ctx, "codex", args, dir, env)
 	if err != nil {
 		unlock()
 		return nil, err
 	}
-	r := &runtime{p: p, cwd: a.Cwd, unlock: unlock}
+	r := &runtime{p: p, cwd: a.Cwd, unlock: unlock, profile: profile, catalog: catalog}
 	defer func() {
 		if err != nil {
 			_ = r.Close()
@@ -108,15 +159,41 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 	}()
 	startup, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	if _, err = r.command(startup, "initialize", map[string]any{"clientInfo": map[string]any{"name": "meshra", "title": "Meshra", "version": "0.1.0"}}, emit); err != nil {
+	initialize := map[string]any{"clientInfo": map[string]any{"name": "meshra", "title": "Meshra", "version": "0.1.0"}}
+	if profile {
+		// The dynamic tool catalog is an experimental server API on this version.
+		initialize["capabilities"] = map[string]any{"experimentalApi": true}
+	}
+	initialized, err := r.command(startup, "initialize", initialize, emit)
+	if err != nil {
 		return nil, fmt.Errorf("Codex initialize: %w", err)
+	}
+	if profile {
+		if err = requireDynamicToolSupport(initialized); err != nil {
+			return nil, err
+		}
 	}
 	if err = p.Send(startup, map[string]any{"method": "initialized", "params": map[string]any{}}); err != nil {
 		return nil, err
 	}
+	if profile {
+		// Native tools are gone, so the native working directory carries no
+		// workspace content. The broker is the only route to profile files.
+		workspace := filepath.Join(dir, "workspace")
+		if err = os.MkdirAll(workspace, 0700); err != nil {
+			return nil, fmt.Errorf("Codex profile workspace isolation: %w", err)
+		}
+		r.cwd = workspace
+	}
 	// Resolve project layers without starting a thread. The read-only OS sandbox
 	// does not contain external MCP servers or command hooks.
-	effective, err := r.command(startup, "config/read", map[string]any{"cwd": a.Cwd, "includeLayers": false}, emit)
+	configCwd := a.Cwd
+	if profile {
+		// The native project root is the isolated directory, so an operator
+		// project configuration is neither loaded nor trusted here.
+		configCwd = r.cwd
+	}
+	effective, err := r.command(startup, "config/read", map[string]any{"cwd": configCwd, "includeLayers": false}, emit)
 	if err != nil {
 		return nil, fmt.Errorf("Codex inspect effective project configuration: %w", err)
 	}
@@ -133,7 +210,12 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 		}
 		return nil, fmt.Errorf("Codex isolated read-only adapter refuses effective %s configuration; use a clean project configuration or a separately managed interactive harness", key)
 	}
-	params := map[string]any{"cwd": a.Cwd, "sandbox": "read-only", "approvalPolicy": "on-request"}
+	if profile {
+		if err = verifyNativeToolsDisabled(config.Config); err != nil {
+			return nil, err
+		}
+	}
+	params := map[string]any{"cwd": r.cwd, "sandbox": "read-only", "approvalPolicy": "on-request"}
 	if a.Config.Model != "" {
 		params["model"] = a.Config.Model
 	}
@@ -146,8 +228,16 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 		params["threadId"] = a.SessionID
 		params["excludeTurns"] = true
 	}
+	if profile && len(specs) > 0 && method == "thread/start" {
+		// The catalog is registered once, when the thread is created. A resumed
+		// thread restores the same catalog from its own rollout session metadata.
+		params["dynamicTools"] = specs
+	}
 	data, err := r.command(startup, method, params, emit)
 	if err != nil {
+		if profile && method == "thread/start" && dynamicToolUnsupported(err) {
+			return nil, &model.Error{Status: 503, Message: "Codex profile automation is unavailable: the installed app-server rejected the dynamic tool catalog (" + err.Error() + "); install Codex 0.163.0 or newer"}
+		}
 		return nil, fmt.Errorf("Codex %s (authenticate with codex login; custom provider definitions are not inherited): %w", method, err)
 	}
 	var response struct {
@@ -237,7 +327,25 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 	if err = ctx.Err(); err != nil {
 		return "", err
 	}
+	// A broker catalog is only served by a thread that registered it. A turn
+	// that expects tools without a registered catalog is refused, never run
+	// with a silently empty tool surface.
+	if r.profile && len(r.catalog) > 0 && turn.Tools == nil {
+		return "", &model.Error{Status: 503, Message: "Codex profile automation requires the Meshra broker executor for this turn; no tool catalog was bound to the turn"}
+	}
+	if !r.profile && turn.Tools != nil {
+		return "", &model.Error{Status: 503, Message: "Codex broker tools require a profile-managed thread; this native session was started without a registered tool catalog"}
+	}
+	if r.profile && turn.Tools != nil && emit != nil {
+		// The native catalog is registered when the thread is created. A profile
+		// edited afterwards can admit a different catalog; the difference stays
+		// visible and every call outside the registered catalog is refused.
+		if missing := unregisteredTools(turn.Tools.Definitions(), r.catalog); len(missing) > 0 {
+			emit("progress", "Codex native tool catalog and the admitted broker catalog differ; tools outside the registered catalog are refused: "+strings.Join(missing, ", "))
+		}
+	}
 	active := ""
+	var calls sync.WaitGroup
 	defer func() {
 		if err != nil {
 			if ctx.Err() != nil && active != "" {
@@ -245,6 +353,9 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 				_ = r.p.Send(abort, map[string]any{"id": r.next(), "method": "turn/interrupt", "params": map[string]any{"threadId": r.session, "turnId": active}})
 				cancel()
 			}
+		}
+		waitToolCalls(&calls)
+		if err != nil {
 			_ = r.Close()
 		}
 	}()
@@ -258,6 +369,7 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 	}
 	accepted := false
 	var terminal *nativeTurn
+	var toolRequests []frame
 	// A resumed thread can emit old-turn events before turn/start responds.
 	// Buffer early relevant events, then match only the authoritative response ID.
 	var pending []frame
@@ -314,6 +426,20 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 			}
 		}
 		if f.Method != "" && len(f.ID) > 0 {
+			if r.profile && f.Method == "item/tool/call" {
+				if active == "" {
+					// The tool request can arrive before the turn response that
+					// names the active turn. Buffer it; never run it unverified.
+					if len(toolRequests) >= 32 {
+						r.refuseToolCall(ctx, f, "too many unverified tool calls are pending")
+					} else {
+						toolRequests = append(toolRequests, f)
+					}
+				} else {
+					r.toolCall(ctx, f, turn, emit, active, &calls)
+				}
+				continue
+			}
 			if err = r.deny(ctx, f, emit); err != nil {
 				return "", err
 			}
@@ -337,6 +463,10 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 			if response.Turn.Status != "inProgress" && response.Turn.Status != "" {
 				terminal = &response.Turn
 			}
+			for _, request := range toolRequests {
+				r.toolCall(ctx, request, turn, emit, active, &calls)
+			}
+			toolRequests = nil
 			continue
 		}
 		var event struct {
@@ -431,4 +561,278 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 			}
 		}
 	}
+}
+
+// dynamicToolCatalog converts the Meshra broker catalog into the installed
+// app-server registration shape. Only the tool name, description and schema
+// cross the boundary; identity, policy and workspace stay with the broker.
+func dynamicToolCatalog(definitions []model.ToolDefinition) ([]dynamicToolSpec, map[string]bool, error) {
+	specs := make([]dynamicToolSpec, 0, len(definitions))
+	catalog := map[string]bool{}
+	for _, definition := range definitions {
+		if !validToolName(definition.Name) {
+			return nil, nil, fmt.Errorf("Codex broker catalog contains an unusable tool name %q", definition.Name)
+		}
+		schema := definition.InputSchema
+		if len(schema) == 0 {
+			schema = json.RawMessage(`{"type":"object"}`)
+		}
+		if !json.Valid(schema) {
+			return nil, nil, fmt.Errorf("Codex broker catalog tool %q has an invalid input schema", definition.Name)
+		}
+		specs = append(specs, dynamicToolSpec{Type: "function", Name: definition.Name, Description: definition.Description, InputSchema: schema})
+		catalog[definition.Name] = true
+	}
+	return specs, catalog, nil
+}
+
+func validToolName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// requireDynamicToolSupport refuses an app-server that cannot be proven to
+// carry the dynamic tool catalog. The installed version reports its own
+// version in the initialize user agent.
+func requireDynamicToolSupport(result json.RawMessage) error {
+	var response struct {
+		UserAgent string `json:"userAgent"`
+	}
+	if json.Unmarshal(result, &response) != nil || response.UserAgent == "" {
+		return &model.Error{Status: 503, Message: "Codex profile automation is unavailable: the app-server did not report its version, so the dynamic tool catalog cannot be verified"}
+	}
+	version, ok := codexVersion(response.UserAgent)
+	if !ok {
+		return &model.Error{Status: 503, Message: "Codex profile automation is unavailable: the app-server user agent " + response.UserAgent + " does not report a verifiable version for the dynamic tool catalog"}
+	}
+	if !codexAtLeast(version, "0.163.0") {
+		return &model.Error{Status: 503, Message: "Codex profile automation requires Codex 0.163.0 or newer for the dynamic tool catalog; installed version is " + version}
+	}
+	return nil
+}
+
+func codexVersion(userAgent string) (string, bool) {
+	fields := strings.Fields(userAgent)
+	if len(fields) == 0 {
+		return "", false
+	}
+	parts := strings.Split(fields[0], "/")
+	if len(parts) < 2 {
+		return "", false
+	}
+	version := parts[len(parts)-1]
+	if _, ok := codexVersionParts(version); !ok {
+		return "", false
+	}
+	return version, true
+}
+
+func codexVersionParts(version string) ([3]int, bool) {
+	var out [3]int
+	parts := strings.Split(version, ".")
+	if len(parts) == 0 || len(parts) > 3 {
+		return out, false
+	}
+	for i, part := range parts {
+		if part == "" {
+			return out, false
+		}
+		value := 0
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return out, false
+			}
+			value = value*10 + int(r-'0')
+		}
+		out[i] = value
+	}
+	return out, true
+}
+
+func codexAtLeast(version, minimum string) bool {
+	have, ok := codexVersionParts(version)
+	if !ok {
+		return false
+	}
+	want, ok := codexVersionParts(minimum)
+	if !ok {
+		return false
+	}
+	for i := 0; i < 3; i++ {
+		if have[i] != want[i] {
+			return have[i] > want[i]
+		}
+	}
+	return true
+}
+
+// dynamicToolUnsupported recognizes an app-server that refused the catalog.
+func dynamicToolUnsupported(err error) bool {
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "dynamictool") || strings.Contains(text, "experimentalapi") || strings.Contains(text, "unknown field")
+}
+
+// verifyNativeToolsDisabled proves that the installed app-server turned every
+// native tool surface off. A missing or still-enabled feature fails closed.
+func verifyNativeToolsDisabled(config map[string]json.RawMessage) error {
+	raw, ok := config["features"]
+	if !ok {
+		return &model.Error{Status: 503, Message: "Codex profile automation is unavailable: the installed app-server did not report its effective feature state, so native tools cannot be proven disabled"}
+	}
+	var features map[string]any
+	if json.Unmarshal(raw, &features) != nil {
+		return &model.Error{Status: 503, Message: "Codex profile automation is unavailable: the installed app-server reported an unreadable effective feature state"}
+	}
+	for _, name := range nativeToolDisable {
+		value, ok := features[name]
+		if !ok {
+			return &model.Error{Status: 503, Message: "Codex profile automation is unavailable: the installed app-server does not report feature " + name + ", so native tools cannot be proven disabled"}
+		}
+		if enabled, _ := value.(bool); enabled {
+			return &model.Error{Status: 503, Message: "Codex profile automation is unavailable: native feature " + name + " is still enabled on the installed app-server"}
+		}
+	}
+	return nil
+}
+
+// toolCall answers one server tool request. Only the active thread and turn may
+// reach the broker, and only with a tool from the registered catalog. Every
+// other request is refused instead of executed.
+func (r *runtime) toolCall(ctx context.Context, f frame, turn model.Turn, emit model.Emit, active string, calls *sync.WaitGroup) {
+	params := toolCallParams{}
+	reason := ""
+	switch {
+	case json.Unmarshal(f.Params, &params) != nil:
+		reason = "the tool request could not be read"
+	case params.ThreadID != r.session:
+		reason = "the tool request belongs to another native thread"
+	case active == "" || params.TurnID != active:
+		reason = "the tool request belongs to a stale or unknown turn"
+	case params.CallID == "":
+		reason = "the tool request carries no native call identity"
+	case params.Namespace != nil && *params.Namespace != "":
+		reason = "the tool request names an unregistered namespace"
+	case !r.catalog[params.Tool]:
+		reason = "the tool request names a tool outside the broker catalog"
+	case turn.Tools == nil:
+		reason = "no broker executor is bound to this turn"
+	}
+	if reason != "" {
+		r.refuseToolCall(ctx, f, reason)
+		if emit != nil {
+			emit("tool_denied", "Codex denied tool call: "+reason)
+		}
+		return
+	}
+	calls.Add(1)
+	go func() {
+		defer calls.Done()
+		result, err := turn.Tools.Call(ctx, model.ToolCall{ID: params.CallID, Name: params.Tool, Arguments: toolArguments(params.Arguments)})
+		send, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = r.p.Send(send, map[string]any{"id": f.ID, "result": toolCallResult(result, err)})
+	}()
+}
+
+// refuseToolCall answers a tool request without running anything.
+func (r *runtime) refuseToolCall(ctx context.Context, f frame, reason string) {
+	_ = r.p.Send(ctx, map[string]any{"id": f.ID, "result": map[string]any{"contentItems": []any{map[string]any{"type": "inputText", "text": "Meshra refused this tool call: " + reason}}, "success": false}})
+}
+
+// toolArguments normalizes the installed argument shape. The server sends the
+// parsed arguments, but a JSON encoded string is accepted as well.
+func toolArguments(raw json.RawMessage) json.RawMessage {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return json.RawMessage(`{}`)
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return json.RawMessage(`{}`)
+	}
+	if text, ok := value.(string); ok {
+		if json.Valid([]byte(text)) {
+			return json.RawMessage(text)
+		}
+		return raw
+	}
+	return raw
+}
+
+// toolCallResult maps a broker result onto the installed output shape.
+func toolCallResult(result model.ToolResult, err error) map[string]any {
+	if err != nil {
+		return map[string]any{"contentItems": []any{map[string]any{"type": "inputText", "text": "Meshra broker tool failed: " + boundedText(err.Error(), 2000)}}, "success": false}
+	}
+	items := []any{}
+	size := 0
+	for _, content := range result.Content {
+		switch content.Type {
+		case "text":
+			text := boundedText(content.Text, 64*1024)
+			size += len(text)
+			items = append(items, map[string]any{"type": "inputText", "text": text})
+		case "image":
+			if !strings.HasPrefix(content.MimeType, "image/") {
+				continue
+			}
+			size += len(content.Data)
+			items = append(items, map[string]any{"type": "inputImage", "imageUrl": "data:" + content.MimeType + ";base64," + content.Data})
+		case "audio":
+			if !strings.HasPrefix(content.MimeType, "audio/") {
+				continue
+			}
+			size += len(content.Data)
+			items = append(items, map[string]any{"type": "inputAudio", "audioUrl": "data:" + content.MimeType + ";base64," + content.Data})
+		}
+	}
+	if size > 512*1024 {
+		return map[string]any{"contentItems": []any{map[string]any{"type": "inputText", "text": "Meshra refused this tool result: the encoded result exceeds the transport bound"}}, "success": false}
+	}
+	if result.IsError {
+		return map[string]any{"contentItems": items, "success": false}
+	}
+	return map[string]any{"contentItems": items, "success": true}
+}
+
+func boundedText(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	return text[:limit] + " [truncated]"
+}
+
+// waitToolCalls waits for in-flight broker calls so a response is never lost
+// when the native process is torn down.
+func waitToolCalls(calls *sync.WaitGroup) {
+	done := make(chan struct{})
+	go func() {
+		calls.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
+}
+
+// unregisteredTools lists admitted broker tools that this native session never
+// registered, so the difference is reported instead of hidden.
+func unregisteredTools(definitions []model.ToolDefinition, registered map[string]bool) []string {
+	missing := []string{}
+	for _, definition := range definitions {
+		if !registered[definition.Name] {
+			missing = append(missing, definition.Name)
+		}
+	}
+	return missing
 }

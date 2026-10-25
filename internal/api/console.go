@@ -33,17 +33,21 @@ func randomConsoleToken() string {
 	}
 	return hex.EncodeToString(b[:])
 }
-func localConsoleRequest(r *http.Request) bool {
-	host := r.Host
+func loopbackHost(host string) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
 	host = strings.Trim(host, "[]")
-	if host != "localhost" {
-		ip := net.ParseIP(host)
-		if ip == nil || !ip.IsLoopback() {
-			return false
-		}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func localConsoleRequest(r *http.Request) bool {
+	if !loopbackHost(r.Host) {
+		return false
 	}
 	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
 		return false
@@ -58,7 +62,11 @@ func localConsoleRequest(r *http.Request) bool {
 func (s *server) console(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	if r.URL.Path == "/console/api/automation/mcp-oauth-callback" {
+		s.mcpOAuthCallback(w, r)
+		return
+	}
 	if !localConsoleRequest(r) {
 		fail(w, model.Err(403, "console requires a loopback host and same-origin request"))
 		return
@@ -135,21 +143,20 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 			fail(w, model.Err(401, "invalid sign-in credentials"))
 			return
 		}
+		p.ConsoleSessionID = ""
 		key := randomConsoleToken()
 		session := consoleSession{ID: randomConsoleToken(), Device: sessionDevice(r.UserAgent()), Created: time.Now(), LastSeen: time.Now(), Principal: p, CSRF: randomConsoleToken(), Expires: time.Now().Add(8 * time.Hour)}
 		s.consoleMu.Lock()
-		for k, v := range s.sessions {
-			if time.Now().After(v.Expires) {
-				delete(s.sessions, k)
-			}
-		}
+		expired := s.expireConsoleSessionsLocked(time.Now())
 		if len(s.sessions) >= 128 {
 			s.consoleMu.Unlock()
+			s.revokeConsoleSessions(expired)
 			fail(w, model.Err(429, "too many console sessions"))
 			return
 		}
-		s.sessions[key] = session
+		s.sessions[consoleSessionKey(key)] = session
 		s.consoleMu.Unlock()
+		s.revokeConsoleSessions(expired)
 		http.SetCookie(w, &http.Cookie{Name: "meshra_console", Value: key, Path: "/console/api/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 3600})
 		respond(w, 200, map[string]any{"csrf": session.CSRF, "operator": "Local operator", "expiresAt": session.Expires, "version": "0.4.0"})
 		return
@@ -159,17 +166,8 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 		fail(w, model.Err(401, "console session required"))
 		return
 	}
-	s.consoleMu.Lock()
-	session, ok := s.sessions[cookie.Value]
-	if ok {
-		session.LastSeen = time.Now()
-		s.sessions[cookie.Value] = session
-	}
-	if ok && time.Now().After(session.Expires) {
-		delete(s.sessions, cookie.Value)
-		ok = false
-	}
-	s.consoleMu.Unlock()
+	key := consoleSessionKey(cookie.Value)
+	session, ok := s.lookupConsoleSession(key, true)
 	if !ok {
 		fail(w, model.Err(401, "console session expired; connect again"))
 		return
@@ -179,10 +177,11 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "sessions" || path == "sessions/revoke" || path == "sessions/revoke-others" {
-		s.consoleSessions(w, r, cookie.Value, path)
+		s.consoleSessions(w, r, key, path)
 		return
 	}
 	p := session.Principal
+	p.ConsoleSessionID = key
 	if path == "account" || path == "account/save" {
 		svc, ok := s.service.(model.ConsoleAccountService)
 		if !ok {
@@ -236,12 +235,15 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.consoleMu.Lock()
+		var revoked []string
 		for key := range s.sessions {
-			if key != cookie.Value {
+			if key != p.ConsoleSessionID {
 				delete(s.sessions, key)
+				revoked = append(revoked, key)
 			}
 		}
 		s.consoleMu.Unlock()
+		s.revokeConsoleSessions(revoked)
 		respond(w, 200, value)
 		return
 	}
@@ -251,8 +253,9 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 	}
 	if path == "logout" && r.Method == "POST" {
 		s.consoleMu.Lock()
-		delete(s.sessions, cookie.Value)
+		delete(s.sessions, key)
 		s.consoleMu.Unlock()
+		s.revokeConsoleSessions([]string{key})
 		http.SetCookie(w, &http.Cookie{Name: "meshra_console", Path: "/console/api/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 		respond(w, 200, map[string]bool{"loggedOut": true})
 		return
@@ -261,6 +264,22 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 	status := 200
 	parts := strings.Split(path, "/")
 	switch {
+	case len(parts) == 3 && ((parts[0] == "browser" && parts[2] == "frame") || (parts[0] == "voice" && parts[2] == "audio")):
+		s.consoleMedia(w, r, p, parts[0], parts[1])
+		return
+	case len(parts) == 2 && parts[0] == "attachments":
+		s.consoleAttachment(w, r, p, parts[1])
+		return
+	case len(parts) == 2 && parts[0] == "automation" && parts[1] == "events":
+		if r.Method != http.MethodGet {
+			method(w, "GET")
+			return
+		}
+		s.consoleAutomationEvents(w, r, p, key)
+		return
+	case len(parts) == 2 && parts[0] == "automation" && parts[1] != "":
+		s.automation(w, r, p, parts[1])
+		return
 	case path == "ai-status" || path == "usage-history" || path == "preferences" || path == "resources" || path == "usage" || path == "workspaces" || path == "conversations" || path == "tasks" || path == "timeline" || path == "chat-state" || path == "harnesses":
 		if r.Method != "GET" {
 			method(w, "GET")
@@ -301,7 +320,7 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 			method(w, "GET")
 			return
 		}
-		s.consoleEvents(w, r, p, cookie.Value)
+		s.consoleEvents(w, r, p, key)
 		return
 	case path == "agents":
 		if r.Method == "GET" {
@@ -420,6 +439,76 @@ func consoleQuery(r *http.Request) (model.ConsoleRequest, error) {
 	}
 	return q, nil
 }
+
+// consoleAutomationEvents streams feature resource-change metadata. It never
+// carries task text, tool arguments or secret material.
+func (s *server) consoleAutomationEvents(w http.ResponseWriter, r *http.Request, p model.Principal, key string) {
+	svc, ok := s.service.(model.ConsoleService)
+	if !ok {
+		fail(w, model.Err(501, "feed unavailable"))
+		return
+	}
+	q, err := consoleQuery(r)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	if q.After < 0 {
+		fail(w, model.Err(400, "after must not be negative"))
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		fail(w, model.Err(500, "stream unavailable"))
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(200)
+	fmt.Fprint(w, "event: resync\ndata: {}\n\n")
+	flusher.Flush()
+	poll := time.NewTicker(700 * time.Millisecond)
+	defer poll.Stop()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		batch, err := svc.Console(p, "automation-events", q)
+		if err != nil {
+			return
+		}
+		events, _ := batch.([]map[string]any)
+		deadline := http.NewResponseController(w)
+		_ = deadline.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		for _, event := range events {
+			b, _ := json.Marshal(event)
+			id, _ := event["id"].(int64)
+			if _, err = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", id, b); err != nil {
+				return
+			}
+			q.After = id
+		}
+		flusher.Flush()
+		_ = deadline.SetWriteDeadline(time.Time{})
+		if len(events) < 100 {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-poll.C:
+			case <-heartbeat.C:
+				if _, err = fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+					return
+				}
+				flusher.Flush()
+			}
+		}
+		if !s.validConsoleSession(key) {
+			fmt.Fprint(w, "event: expired\ndata: {}\n\n")
+			flusher.Flush()
+			return
+		}
+	}
+}
+
 func (s *server) consoleEvents(w http.ResponseWriter, r *http.Request, p model.Principal, key string) {
 	svc, ok := s.service.(model.ConsoleService)
 	if !ok {
@@ -481,10 +570,7 @@ func (s *server) consoleEvents(w http.ResponseWriter, r *http.Request, p model.P
 				flusher.Flush()
 			}
 		}
-		s.consoleMu.Lock()
-		current, valid := s.sessions[key]
-		s.consoleMu.Unlock()
-		if !valid || time.Now().After(current.Expires) {
+		if !s.validConsoleSession(key) {
 			fmt.Fprint(w, "event: expired\ndata: {}\n\n")
 			flusher.Flush()
 			return

@@ -93,7 +93,9 @@ func awaitTask(t *testing.T, r *Relay, id string) model.Task {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("task %s did not finish", id)
+	current, _ := r.Task(admin, id)
+	recipient, _ := r.Agent(admin, current.To)
+	t.Fatalf("task %s did not finish: state=%s scheduling=%s recipientState=%s recipientError=%s", id, current.State, current.SchedulingState, recipient.State, recipient.Error)
 	return model.Task{}
 }
 func requireStatus(t *testing.T, err error, status int) {
