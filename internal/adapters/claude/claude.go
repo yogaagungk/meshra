@@ -142,7 +142,8 @@ func adapter(resolve func(context.Context) (commandFactory, error)) model.Adapte
 		if agent.GenerationDraft && agent.SessionID != "" {
 			return nil, errors.New("Claude profile generation requires a fresh disposable session")
 		}
-		if (agent.ProfileManaged || agent.ManagedChat) && agent.ToolDefinitions == nil {
+		// Managed console chats run the legacy tool-denied path; only profiles need a catalog.
+		if agent.ProfileManaged && agent.ToolDefinitions == nil {
 			return nil, model.Err(503, "Claude profile automation requires an exact startup broker catalog")
 		}
 		var catalog []byte

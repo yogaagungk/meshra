@@ -127,6 +127,23 @@ func TestSessionAllocationResumeIsolation(t *testing.T) {
 		t.Fatal("independent identities shared a native session")
 	}
 }
+func TestManagedChatRunsWithoutProfileCatalog(t *testing.T) {
+	var started atomic.Int32
+	a := fakeAdapter(&started)
+	r, err := a.Factory(context.Background(), model.Agent{ID: "claude:chat", Cwd: t.TempDir(), ManagedChat: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err = r.Run(context.Background(), model.Turn{Task: model.Task{Text: "hello"}}, nil); err != nil || started.Load() != 1 {
+		t.Fatalf("managed chat did not run: starts=%d err=%v", started.Load(), err)
+	}
+	_, err = a.Factory(context.Background(), model.Agent{ID: "claude:profile", Cwd: t.TempDir(), ProfileManaged: true}, nil)
+	var unavailable *model.Error
+	if !errors.As(err, &unavailable) || unavailable.Status != 503 {
+		t.Fatalf("profile without catalog was admitted: %v", err)
+	}
+}
 func TestBridgeFailures(t *testing.T) {
 	for _, prompt := range []string{"bad-json", "missing-result", "error", "mismatch"} {
 		t.Run(prompt, func(t *testing.T) {
