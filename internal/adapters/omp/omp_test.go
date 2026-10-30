@@ -796,7 +796,7 @@ func TestHostToolsRequireExactActiveTaskSessionCatalog(t *testing.T) {
 }
 
 func TestHostToolsFactoryFailsClosedBeforePrompt(t *testing.T) {
-	for _, mode := range []string{"profile-version", "profile-protocol", "profile-registration", "profile-native", "profile-missing", "profile-schema"} {
+	for _, mode := range []string{"profile-version", "profile-protocol", "profile-registration", "profile-missing", "profile-schema"} {
 		t.Run(mode, func(t *testing.T) {
 			mockOMP(t, mode)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -854,4 +854,15 @@ func TestLegacyDoesNotRegisterStartupHostDefinitions(t *testing.T) {
 	if err != nil || got != "hello" {
 		t.Fatalf("legacy behavior changed: %q, %v", got, err)
 	}
+}
+
+func TestHostToolsFactoryAcceptsFullAccessBuiltins(t *testing.T) {
+	mockOMP(t, "profile-native")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rt, err := New().Factory(ctx, profileAgent(t), nil)
+	if err != nil {
+		t.Fatalf("native builtins beside the trusted catalog: %v", err)
+	}
+	rt.Close()
 }

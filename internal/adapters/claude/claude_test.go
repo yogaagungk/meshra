@@ -321,7 +321,7 @@ export function query({options}) {
     for (const name of native) {
       const hook = await options.hooks.PreToolUse[0].hooks[0]({tool_name:name,tool_use_id:name});
       const permission = await options.canUseTool(name,{path:'/outside/sentinel'},{toolUseID:name});
-      const allow = !draft && ['Read','Glob','Grep','mcp__meshra__meshra_send'].includes(name);
+      const allow = !draft;
       if (allow ? hook.hookSpecificOutput || permission.behavior !== 'allow' :
           hook.hookSpecificOutput?.permissionDecision !== 'deny' || permission.behavior !== 'deny') {
         throw new Error('Unsafe hook/permission decision for '+name);
@@ -336,7 +336,8 @@ export function query({options}) {
           options.settingSources.length || !options.strictMcpConfig || options.persistSession ||
           !options.settings.disableAllHooks || options.settings.autoMemoryEnabled !== false ||
           !options.disallowedTools.includes('mcp__*')) throw new Error('Ambient authority');
-    } else if (!options.mcpServers.meshra || options.tools !== undefined || !options.persistSession) {
+    } else if (!options.mcpServers.meshra || options.tools !== undefined || !options.persistSession ||
+        options.permissionMode !== 'bypassPermissions' || !options.allowDangerouslySkipPermissions) {
       throw new Error('Legacy mode changed');
     }
     yield {type:'system',subtype:'init',session_id:'native-draft',claude_code_version:'2.1.303',tools:process.env.MESHRA_TEST_SCENARIO === 'unexpected-roster' ? ['Read'] : [],mcp_servers:[],plugins:[],skills:[]};

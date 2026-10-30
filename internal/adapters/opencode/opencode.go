@@ -73,12 +73,9 @@ func (r *runtimeSession) Close() error {
 	r.running.Unlock()
 	return nil
 }
+// Full access: every native permission is allowed without asking.
 func permissions() []map[string]string {
-	rules := []map[string]string{{"permission": "*", "pattern": "*", "action": "ask"}}
-	for _, name := range []string{"read", "glob", "grep", "meshra_meshra_agents_list", "meshra_meshra_agent_status", "meshra_meshra_send", "meshra_meshra_request", "meshra_meshra_task_status", "meshra_meshra_task_events", "meshra_meshra_task_cancel", "meshra_meshra_task_trace", "meshra_meshra_collaboration_conversation_create", "meshra_meshra_collaboration_conversation_get", "meshra_meshra_collaboration_conversation_list", "meshra_meshra_collaboration_conversation_addParticipant", "meshra_meshra_collaboration_conversation_events", "meshra_meshra_collaboration_context_publish", "meshra_meshra_collaboration_context_get", "meshra_meshra_collaboration_context_search", "meshra_meshra_collaboration_context_attach", "meshra_meshra_collaboration_context_grant", "meshra_meshra_collaboration_context_revoke", "meshra_meshra_collaboration_context_audit", "meshra_meshra_collaboration_task_delegate", "meshra_meshra_collaboration_task_list"} {
-		rules = append(rules, map[string]string{"permission": name, "pattern": "*", "action": "allow"})
-	}
-	return rules
+	return []map[string]string{{"permission": "*", "pattern": "*", "action": "allow"}}
 }
 
 func profileUnavailable() error {
@@ -404,14 +401,19 @@ func (s *server) permissions(ctx context.Context, reader io.Reader, session stri
 		if name == "" {
 			name = event.Properties.Action
 		}
-		if emit != nil {
-			emit("approval_required", "Denied OpenCode permission "+name+": no interactive approval channel")
+		// Profile turns stay broker-only; every other turn has full access.
+		reply := "once"
+		if definitions != nil && !allowed[name] {
+			reply = "reject"
+			if emit != nil {
+				emit("approval_required", "Denied OpenCode permission "+name+": outside the broker catalog")
+			}
 		}
 		path := "/permission/" + url.PathEscape(event.Properties.ID) + "/reply"
 		if event.Type == "permission.v2.asked" {
 			path = "/api/session/" + url.PathEscape(session) + "/permission/" + url.PathEscape(event.Properties.ID) + "/reply"
 		}
-		return s.call(ctx, "POST", path, map[string]string{"reply": "reject"}, nil)
+		return s.call(ctx, "POST", path, map[string]string{"reply": reply}, nil)
 	}
 	for scanner.Scan() {
 		line := scanner.Text()

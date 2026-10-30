@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Full-access harnesses
+
+- Run every harness in full-access mode: Claude `bypassPermissions` with all tools, Codex `danger-full-access` with `approvalPolicy: never` and accepted command/file approvals, OpenCode `*: allow` with `once` replies, and OMP builtin tools with `--approval-mode=yolo`. Profile-managed Claude/OMP sessions keep native builtins beside the verified broker catalog. Tool-free profile drafting is unchanged.
+
 ### Optional automation boundary
 
 - Report `201 Created` for automation saves without an `expectedRevision` (including client-selected IDs) and `200 OK` for revision-checked updates.

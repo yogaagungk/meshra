@@ -83,7 +83,7 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			f.t.Error(err)
 		}
-		action := "ask"
+		action := "allow"
 		if f.profile { action = "deny" }
 		if len(body.Permission) == 0 || body.Permission[0]["action"] != action {
 			f.t.Error("unsafe session permissions")
@@ -119,8 +119,10 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 			Reply string `json:"reply"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.Reply != "reject" {
-			f.t.Error("unsafe permission reply")
+		reply := "once"
+		if f.profile { reply = "reject" }
+		if body.Reply != reply {
+			f.t.Error("unexpected permission reply")
 		}
 		if f.blockDenial {
 			f.denialStarted <- struct{}{}
@@ -191,7 +193,7 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 				Permission []map[string]string `json:"permission"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			action := "ask"
+			action := "allow"
 			if f.profile { action = "deny" }
 			if len(body.Permission) == 0 || body.Permission[0]["action"] != action {
 				f.t.Error("resume did not reset safe permission rules")
@@ -230,7 +232,7 @@ func TestSessionOwnershipResumePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(answer, one.SessionID()+":") || len(events) != 2 || events[0] != "session" || events[1] != "approval_required" {
+	if !strings.HasPrefix(answer, one.SessionID()+":") || len(events) != 1 || events[0] != "session" {
 		t.Fatalf("wrong sequence %q %v", answer, events)
 	}
 	id := one.SessionID()
@@ -260,7 +262,7 @@ func TestResumeRestoresPermissionsWithoutRepeatedAppend(t *testing.T) {
 	f := newFake(t)
 	cwd := t.TempDir()
 	f.sessions["saved"] = cwd
-	f.policies["saved"] = []map[string]string{{"permission": "*", "pattern": "*", "action": "allow"}}
+	f.policies["saved"] = []map[string]string{{"permission": "*", "pattern": "*", "action": "ask"}}
 	r, err := f.adapter().Factory(context.Background(), model.Agent{Cwd: cwd, SessionID: "saved"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +276,7 @@ func TestResumeRestoresPermissionsWithoutRepeatedAppend(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.patches != 1 || len(f.policies["saved"]) != 1+len(permissions()) || !hasPermissionTail(f.policies["saved"], permissions()) {
-		t.Fatalf("resume must restore safe policy once, not append each turn: patches=%d rules=%d", f.patches, len(f.policies["saved"]))
+		t.Fatalf("resume must restore full-access policy once, not append each turn: patches=%d rules=%d", f.patches, len(f.policies["saved"]))
 	}
 }
 func TestResumeOnlyOwnedSession(t *testing.T) {

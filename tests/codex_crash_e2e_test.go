@@ -57,7 +57,7 @@ func TestCrashCodexTransportHelper(t *testing.T) {
 					Text string `json:"text"`
 				} `json:"input"`
 			}
-			if json.Unmarshal(request.Params, &params) != nil || params.ThreadID != "thread-crash-owned" || params.Sandbox.Type != "readOnly" || params.Sandbox.Network || len(params.Input) != 1 {
+			if json.Unmarshal(request.Params, &params) != nil || params.ThreadID != "thread-crash-owned" || params.Sandbox.Type != "dangerFullAccess" || params.Sandbox.Network || len(params.Input) != 1 {
 				os.Exit(22)
 			}
 			words := strings.Fields(params.Input[0].Text)

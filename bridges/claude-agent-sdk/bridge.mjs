@@ -19,10 +19,9 @@ let token = '';
 let scopedToken = '';
 const safeError = (error) => [token, scopedToken].filter(Boolean).reduce(
   (text, secret) => text.replaceAll(secret, '[redacted]'), String(error?.message ?? error)).slice(0, 4096);
-const readOnly = new Set(['Read', 'Glob', 'Grep']);
-const meshraTools = new Set(['meshra_agents_list', 'meshra_agent_status', 'meshra_send', 'meshra_request', 'meshra_task_status', 'meshra_task_events', 'meshra_task_cancel', 'meshra_task_trace', 'meshra_collaboration_conversation_create', 'meshra_collaboration_conversation_get', 'meshra_collaboration_conversation_list', 'meshra_collaboration_conversation_addParticipant', 'meshra_collaboration_conversation_events', 'meshra_collaboration_context_publish', 'meshra_collaboration_context_get', 'meshra_collaboration_context_search', 'meshra_collaboration_context_attach', 'meshra_collaboration_context_grant', 'meshra_collaboration_context_revoke', 'meshra_collaboration_context_audit', 'meshra_collaboration_task_delegate', 'meshra_collaboration_task_list']);
-const allowed = (name) => !generationDraft && (profileManaged ? brokerTools.has(name) :
-  readOnly.has(name) || (name.startsWith('mcp__meshra__') && meshraTools.has(name.slice('mcp__meshra__'.length))));
+// Full access: every tool runs without approval, except during tool-free
+// profile generation.
+const allowed = () => !generationDraft;
 const denied = new Set();
 function deny(name, id) {
   const key = id || name;
@@ -136,8 +135,8 @@ try {
   const options = {
     cwd: input.cwd,
     abortController,
-    permissionMode: 'default',
-    allowDangerouslySkipPermissions: false,
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
     settingSources: [],
     strictMcpConfig: true,
     includePartialMessages: true,
@@ -149,23 +148,25 @@ try {
         if (profileManaged) await session(event.session_id);
         if (allowed(event.tool_name)) return {};
         deny(event.tool_name, event.tool_use_id);
-        return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Meshra denies native, subagent, foreign MCP, and unknown tools' } };
+        return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Meshra profile generation is tool-free' } };
       }] }],
     },
     canUseTool: async (name, toolInput, event) => {
       if (profileManaged && (!nativeSession || readySession !== nativeSession)) return { behavior: 'deny', message: 'Meshra native session has not been bound to the active task' };
       if (allowed(name)) return { behavior: 'allow', updatedInput: toolInput };
       deny(name, event.toolUseID);
-      return { behavior: 'deny', message: 'Meshra requires human approval; no approval channel is available' };
+      return { behavior: 'deny', message: 'Meshra profile generation is tool-free' };
     },
     mcpServers: profileManaged ? { meshra: { command: process.execPath, args: [input.toolBridge],
       env: { MESHRA_TOOL_SOCKET: input.toolSocket, MESHRA_TOOL_TOKEN: scopedToken } } } :
       !generationDraft && input.mcpURL && token ? { meshra: { type: 'http', url: input.mcpURL, headers: { Authorization: `Bearer ${token}` } } } : {},
   };
   if (generationDraft || profileManaged) {
-    options.tools = [];
-    options.allowedTools = profileManaged ? [...brokerTools] : [];
-    options.disallowedTools = [...sdk.BUILTIN_TOOL_NAMES, ...Object.keys(sdk.LEGACY_TOOL_NAME_ALIASES || {}), ...(generationDraft ? ['mcp__*'] : [])];
+    if (generationDraft) {
+      options.tools = [];
+      options.allowedTools = [];
+      options.disallowedTools = [...sdk.BUILTIN_TOOL_NAMES, ...Object.keys(sdk.LEGACY_TOOL_NAME_ALIASES || {}), 'mcp__*'];
+    }
     options.plugins = [];
     options.skills = [];
     options.agents = {};
@@ -208,11 +209,11 @@ try {
           throw new Error('Claude native session did not enforce the empty profile-generation tool/skill/plugin roster');
         }
         if (profileManaged && (message.claude_code_version !== '2.1.303' ||
-            !Array.isArray(message.tools) || message.tools.length !== brokerTools.size || message.tools.some(name => !brokerTools.has(name)) ||
+            !Array.isArray(message.tools) || [...brokerTools].some(name => !message.tools.includes(name)) ||
             !Array.isArray(message.mcp_servers) || message.mcp_servers.length !== 1 || message.mcp_servers[0].name !== 'meshra' || message.mcp_servers[0].status !== 'connected' ||
             ['plugins', 'skills'].some(key => !Array.isArray(message[key]) || message[key].length))) {
           abortController.abort();
-          throw new Error('Claude native session did not enforce the exact broker-only tool roster');
+          throw new Error('Claude native session did not load the Meshra broker tool catalog');
         }
         draftInitialized = true;
         await session(message.session_id);

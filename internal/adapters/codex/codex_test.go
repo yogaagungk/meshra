@@ -100,7 +100,7 @@ func TestCodexTransportHelper(t *testing.T) {
 			var sandbox, policy string
 			_ = json.Unmarshal(cmd.Params["sandbox"], &sandbox)
 			_ = json.Unmarshal(cmd.Params["approvalPolicy"], &policy)
-			if sandbox != "read-only" || policy != "on-request" {
+			if sandbox != "danger-full-access" || policy != "never" {
 				os.Exit(23)
 			}
 			if mode == "profile-tools" || mode == "profile-native-enabled" {
@@ -140,7 +140,7 @@ func TestCodexTransportHelper(t *testing.T) {
 				Network bool   `json:"networkAccess"`
 			}
 			_ = json.Unmarshal(cmd.Params["sandboxPolicy"], &sandbox)
-			if sandbox.Type != "readOnly" || sandbox.Network {
+			if sandbox.Type != "dangerFullAccess" || sandbox.Network {
 				os.Exit(24)
 			}
 			active = true
@@ -220,7 +220,7 @@ func TestCodexTransportHelper(t *testing.T) {
 			if string(cmd.ID) == "100" {
 				var decision string
 				_ = json.Unmarshal(cmd.Result["decision"], &decision)
-				if decision != "decline" {
+				if decision != "accept" {
 					os.Exit(26)
 				}
 				send(map[string]any{"id": 101, "method": "item/permissions/requestApproval", "params": map[string]any{"threadId": session, "turnId": "turn-1", "itemId": "permission-1"}})
@@ -277,7 +277,7 @@ func TestCompletionApprovalAndEarlyNotifications(t *testing.T) {
 	if err != nil || got != "hello" {
 		t.Fatalf("result %q, error %v", got, err)
 	}
-	if len(events) != 5 || events[0] != "session:"+rt.SessionID() || events[1] != "delta:hel" || !strings.HasPrefix(events[2], "approval_required:") || !strings.HasPrefix(events[3], "approval_required:") || events[4] != "delta:lo" {
+	if len(events) != 4 || events[0] != "session:"+rt.SessionID() || events[1] != "delta:hel" || !strings.HasPrefix(events[2], "approval_required:") || events[3] != "delta:lo" {
 		t.Fatalf("events: %v", events)
 	}
 }

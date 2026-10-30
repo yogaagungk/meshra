@@ -171,7 +171,7 @@ func environment(in []string, values map[string]string) []string {
 // startup gate above intentionally rejects the installed 1.19.3 before this is
 // used for profiles. Inline config alone is not an isolation boundary.
 func serverConfiguration(ctx context.Context, agent model.Agent, turn model.Turn) (map[string]any, string, error) {
-	permission := map[string]any{"*": "ask", "read": "allow", "glob": "allow", "grep": "allow"}
+	permission := map[string]any{"*": "allow"}
 	config := map[string]any{"autoupdate": false, "permission": permission, "share": "disabled"}
 	if agent.ToolDefinitions == nil {
 		if turn.Tools != nil {

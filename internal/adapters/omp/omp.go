@@ -111,9 +111,12 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 		unlock()
 		return nil, err
 	}
-	args := []string{"--mode=rpc", "--no-ui", "--no-tools", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-pty", "--no-title", "--approval-mode=always-ask", "--config=" + safety, "--session-dir=" + filepath.Join(dir, "sessions")}
+	args := []string{"--mode=rpc", "--no-ui", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-pty", "--no-title", "--config=" + safety, "--session-dir=" + filepath.Join(dir, "sessions")}
 	if a.GenerationDraft {
-		args = append(args, "--no-prewalk")
+		args = append(args, "--no-tools", "--approval-mode=always-ask", "--no-prewalk")
+	} else {
+		// Full access: builtin tools run without approval prompts.
+		args = append(args, "--approval-mode=yolo")
 	}
 	if a.SessionID != "" {
 		args = append(args, "--resume="+a.SessionID)
@@ -382,6 +385,20 @@ func sameJSON(a, b json.RawMessage) bool {
 	return json.Unmarshal(a, &left) == nil && json.Unmarshal(b, &right) == nil && reflect.DeepEqual(left, right)
 }
 
+func containsCatalog(actual, trusted []model.ToolDefinition) bool {
+	byName := make(map[string]model.ToolDefinition, len(actual))
+	for _, d := range actual {
+		byName[d.Name] = d
+	}
+	for _, d := range trusted {
+		found, ok := byName[d.Name]
+		if !ok || found.Description != d.Description || !sameJSON(found.InputSchema, d.InputSchema) {
+			return false
+		}
+	}
+	return true
+}
+
 func sameCatalog(a, b []model.ToolDefinition) bool {
 	if len(a) != len(b) {
 		return false
@@ -446,8 +463,9 @@ func (r *runtime) setHostTools(ctx context.Context, definitions []model.ToolDefi
 	for _, d := range state.Tools {
 		actual = append(actual, model.ToolDefinition{Name: d.Name, Description: d.Description, InputSchema: d.Parameters})
 	}
-	if !sameCatalog(definitions, actual) {
-		return hostUnavailable("native tool catalog differs from the trusted catalog")
+	// Full access keeps native builtins; the trusted catalog must be present intact.
+	if !containsCatalog(actual, definitions) {
+		return hostUnavailable("native tool catalog is missing trusted host tools")
 	}
 	return nil
 }

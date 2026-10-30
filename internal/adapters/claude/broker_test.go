@@ -33,8 +33,8 @@ export async function resolveSettings() {
 export function query({options}) {
   async function* messages() {
     const expected = ['mcp__meshra__meshra_workspace_read','mcp__meshra__meshra_profile_request'];
-    if (options.tools.length || options.skills.length || options.plugins.length || Object.keys(options.agents).length ||
-        options.allowedTools.join() !== expected.join() || options.settingSources.length || !options.strictMcpConfig ||
+    if (options.tools !== undefined || options.allowedTools !== undefined || options.permissionMode !== 'bypassPermissions' || !options.allowDangerouslySkipPermissions ||
+        options.skills.length || options.plugins.length || Object.keys(options.agents).length || options.settingSources.length || !options.strictMcpConfig ||
         options.settings.disableAllHooks || options.persistSession !== true || options.promptSuggestions || options.agentProgressSummaries ||
         Object.keys(options.env).some(key => key.startsWith('MESHRA_'))) throw new Error('Ambient profile authority');
     const config = options.mcpServers.meshra;
@@ -68,18 +68,13 @@ export function query({options}) {
       const list = await send('tools/list',{});
       if (list.tools.map(tool => 'mcp__meshra__'+tool.name).join() !== expected.join()) throw new Error('Non-exact broker list');
       await options.hooks.SessionStart[0].hooks[0]({session_id:'native-broker'});
-      for (const name of ['Read','Glob','Grep','Bash','Edit','Write','Agent','Task','Skill','unknown','mcp__foreign__read','mcp__meshra__meshra_send','mcp__meshra__meshra_request','mcp__meshra__meshra_collaboration_task_delegate']) {
-        const hook = await options.hooks.PreToolUse[0].hooks[0]({session_id:'native-broker',tool_name:name,tool_use_id:name});
-        const permission = await options.canUseTool(name,{path:'/outside/sentinel'},{toolUseID:name});
-        if (hook.hookSpecificOutput?.permissionDecision !== 'deny' || permission.behavior !== 'deny') throw new Error('Unsafe native tool '+name);
-      }
-      for (const name of expected) {
+      for (const name of ['Read','Glob','Grep','Bash','Edit','Write','Agent','Task','Skill','mcp__foreign__read', ...expected]) {
         const hook = await options.hooks.PreToolUse[0].hooks[0]({session_id:'native-broker',tool_name:name,tool_use_id:name});
         const permission = await options.canUseTool(name,{}, {toolUseID:name});
-        if (hook.hookSpecificOutput || permission.behavior !== 'allow') throw new Error('Broker tool denied '+name);
+        if (hook.hookSpecificOutput || permission.behavior !== 'allow') throw new Error('Full-access tool denied '+name);
       }
       yield {type:'system',subtype:'init',session_id:'native-broker',claude_code_version:'2.1.303',
-        tools:process.env.MESHRA_TEST_SCENARIO === 'bad-roster' ? [...expected,'Read'] : expected,
+        tools:process.env.MESHRA_TEST_SCENARIO === 'bad-roster' ? expected.slice(1) : ['Read','Bash',...expected],
         mcp_servers:[{name:'meshra',status:'connected'}],plugins:[],skills:[]};
       const result = send('tools/call',{name:'meshra_workspace_read',arguments:{path:'rooted.txt'}});
       if (process.env.MESHRA_TEST_SCENARIO === 'async') await send('notifications/cancelled',{requestId:sequence},true);

@@ -18,7 +18,7 @@ import (
 )
 
 func New() model.Adapter {
-	return model.Adapter{Factory: factory, Capabilities: map[string]bool{"prompt": true, "stream": true, "resume": true, "durableHistory": true, "toolFreeDraft": false, "cancel": true, "read_only": true, "approval": false, "mcp": false, "profileAutomation": false}}
+	return model.Adapter{Factory: factory, Capabilities: map[string]bool{"prompt": true, "stream": true, "resume": true, "durableHistory": true, "toolFreeDraft": false, "cancel": true, "read_only": false, "approval": false, "mcp": false, "profileAutomation": false}}
 }
 
 // The installed 0.163 app-server supports dynamic-tool protocol frames, but
@@ -208,14 +208,15 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 		if len(raw) == 0 || string(raw) == "null" || string(raw) == "{}" || string(raw) == "[]" {
 			continue
 		}
-		return nil, fmt.Errorf("Codex isolated read-only adapter refuses effective %s configuration; use a clean project configuration or a separately managed interactive harness", key)
+		return nil, fmt.Errorf("Codex isolated adapter refuses effective %s configuration; use a clean project configuration or a separately managed interactive harness", key)
 	}
 	if profile {
 		if err = verifyNativeToolsDisabled(config.Config); err != nil {
 			return nil, err
 		}
 	}
-	params := map[string]any{"cwd": r.cwd, "sandbox": "read-only", "approvalPolicy": "on-request"}
+	// Full access: no OS sandbox and no approval prompts.
+	params := map[string]any{"cwd": r.cwd, "sandbox": "danger-full-access", "approvalPolicy": "never"}
 	if a.Config.Model != "" {
 		params["model"] = a.Config.Model
 	}
@@ -274,16 +275,19 @@ func (r *runtime) read(ctx context.Context) (frame, error) {
 	return f, err
 }
 
-// All server requests are answered. Unknown requests fail closed, rather than hang
-// or approve an operation with a guessed response shape.
+// All server requests are answered. Full access accepts command and file
+// approvals; unknown requests fail closed rather than guess a response shape.
 func (r *runtime) deny(ctx context.Context, f frame, emit model.Emit) error {
-	if emit != nil {
-		emit("approval_required", "Codex denied server request: "+f.Method+"; this adapter does not grant approvals")
-	}
 	response := map[string]any{"id": f.ID}
 	switch f.Method {
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
-		response["result"] = map[string]any{"decision": "decline"}
+		response["result"] = map[string]any{"decision": "accept"}
+		return r.p.Send(ctx, response)
+	}
+	if emit != nil {
+		emit("approval_required", "Codex denied server request: "+f.Method+"; this adapter does not grant approvals")
+	}
+	switch f.Method {
 	case "item/permissions/requestApproval":
 		response["result"] = map[string]any{"permissions": map[string]any{}, "scope": "turn"}
 	case "mcpServer/elicitation/request":
@@ -360,10 +364,10 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 		}
 	}()
 	if emit != nil && turn.MCPURL != "" {
-		emit("progress", "Codex isolated read-only adapter: per-turn MCP is unavailable; no relay credential was sent to the harness")
+		emit("progress", "Codex isolated adapter: per-turn MCP is unavailable; no relay credential was sent to the harness")
 	}
 	requestID := r.next()
-	params := map[string]any{"threadId": r.session, "cwd": r.cwd, "approvalPolicy": "on-request", "sandboxPolicy": map[string]any{"type": "readOnly", "networkAccess": false}, "input": []any{map[string]any{"type": "text", "text": "Meshra task " + turn.Task.ID + " from " + turn.Task.From + ":\n\n" + turn.Task.Text}}}
+	params := map[string]any{"threadId": r.session, "cwd": r.cwd, "approvalPolicy": "never", "sandboxPolicy": map[string]any{"type": "dangerFullAccess"}, "input": []any{map[string]any{"type": "text", "text": "Meshra task " + turn.Task.ID + " from " + turn.Task.From + ":\n\n" + turn.Task.Text}}}
 	if err = r.p.Send(ctx, map[string]any{"id": requestID, "method": "turn/start", "params": params}); err != nil {
 		return "", err
 	}
