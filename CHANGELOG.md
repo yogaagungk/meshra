@@ -37,6 +37,7 @@
 
 ### Developer Console (v0.4)
 
+- Add **New folder** to the workspace folder chooser: create a single child directory, open it for explicit selection, and show invalid-name, conflict and filesystem errors without overwriting existing entries.
 - Add a production-embedded React/TypeScript/Vite console with Tailwind tokens, locally owned shadcn/ui Radix primitives, Lucide icons and TanStack Query.
 - Make Chat the default: named-agent selection, exact recipients, durable task timelines, SSE replay/resync, saved drafts/send keys, bounded history, context attachments and execution provenance.
 - Add a localhost-only human-operator session with HttpOnly/SameSite cookies, absolute expiry, CSRF protection, strict Host/Origin/Fetch Metadata checks and CSP; retain legacy bearer API browser restrictions.

@@ -33,6 +33,11 @@ login rate-limit protections. Use HTTPS for remote access.
 
 The responsive React/TypeScript console is embedded in the Go executable, with
 light/dark/system themes, durable replay, saved drafts and guarded retries.
+In **Choose a workspace folder**, browse to the parent directory, choose **New
+folder**, enter a name, and select **Create**. The chooser opens the new directory;
+select **Use this folder** to confirm it. Folders are created on the machine running
+Meshra, not the browser's machine.
+
 Rebuild UI changes with `npm ci --prefix web && npm run build --prefix web` before
 `go build`. Native OMP/Codex/OpenCode browser chat was exercised; Claude native
 verification remains waived. [Console guide/demo](docs/V0.4_CONSOLE.md),

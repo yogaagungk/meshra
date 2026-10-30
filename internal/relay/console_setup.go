@@ -136,3 +136,36 @@ func browseDirectories(q model.ConsoleRequest) (any, error) {
 	}
 	return map[string]any{"path": path, "parent": filepath.Dir(path), "entries": entries, "nextAfter": after, "hasMore": more}, nil
 }
+
+// Create exactly one child through an open parent handle, never following an
+// existing child symlink or creating missing parent directories.
+func createDirectory(q model.ConsoleRequest) (any, error) {
+	name := q.Name
+	if name == "" || name == "." || name == ".." || len(name) > 255 ||
+		!safeRegistryText(name) || strings.TrimSpace(name) != name ||
+		strings.ContainsAny(name, "/\\<>:\"|?*") || strings.HasSuffix(name, ".") {
+		return nil, model.Err(400, "invalid folder name")
+	}
+	if !filepath.IsAbs(q.Path) || len(q.Path) > 4096 || !safeRegistryText(q.Path) {
+		return nil, model.Err(400, "invalid parent directory path")
+	}
+	parent, err := canonicalWorkspace(q.Path)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := os.OpenRoot(parent)
+	if err != nil {
+		return nil, model.Err(403, "parent directory cannot be opened")
+	}
+	defer dir.Close()
+	if err := dir.Mkdir(name, 0700); err != nil {
+		if os.IsExist(err) {
+			return nil, model.Err(409, "a file or folder with this name already exists")
+		}
+		if os.IsPermission(err) {
+			return nil, model.Err(403, "folder cannot be created in this directory")
+		}
+		return nil, model.Err(500, "folder could not be created")
+	}
+	return map[string]string{"path": filepath.Join(parent, name)}, nil
+}

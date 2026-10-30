@@ -296,7 +296,7 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result, err = svc.Console(p, path, q)
-	case path == "quota" || path == "preferences/save" || path == "workspaces/add" || path == "workspaces/remove" || path == "workspace/tree" || path == "workspace/file" || path == "workspace/git" || path == "workspace/diff" || path == "models" || path == "send" || path == "context-check" || path == "regenerate" || path == "chat-create" || path == "directories":
+	case path == "quota" || path == "preferences/save" || path == "workspaces/add" || path == "workspaces/remove" || path == "workspace/tree" || path == "workspace/file" || path == "workspace/git" || path == "workspace/diff" || path == "models" || path == "send" || path == "context-check" || path == "regenerate" || path == "chat-create" || path == "directories" || path == "directories/create":
 		if r.Method != "POST" {
 			method(w, "POST")
 			return
@@ -312,7 +312,7 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 		}
 		result, err = svc.Console(p, path, q)
 		status = 202
-		if path == "directories" || path == "preferences/save" || strings.HasPrefix(path, "workspace") || path == "models" || path == "quota" {
+		if path == "directories" || path == "directories/create" || path == "preferences/save" || strings.HasPrefix(path, "workspace") || path == "models" || path == "quota" {
 			status = 200
 		}
 	case path == "events":

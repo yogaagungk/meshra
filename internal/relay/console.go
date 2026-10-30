@@ -30,6 +30,9 @@ func (r *Relay) Console(p model.Principal, op string, q model.ConsoleRequest) (a
 	if op == "directories" {
 		return browseDirectories(q)
 	}
+	if op == "directories/create" {
+		return createDirectory(q)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {

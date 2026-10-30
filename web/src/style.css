@@ -3781,6 +3781,33 @@ h3 {
 .directory-location svg {
   flex-shrink: 0;
 }
+.directory-create {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  margin-bottom: 12px;
+}
+.directory-create-entry {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+.directory-create-entry label {
+  font-size: var(--font-label);
+}
+.directory-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.directory-create-actions input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.directory-create-entry p {
+  margin: 0;
+  font-size: var(--font-ui);
+}
 .directory-list {
   height: min(320px, 40vh);
   overflow-y: auto;
