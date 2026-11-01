@@ -400,7 +400,7 @@ test("touch viewport keeps chat composer and back navigation usable", async ({
   }
 });
 
-test("workspace field opens a bounded folder explorer and registers the selected path", async ({
+test("agent registration offers a general workspace without browsing arbitrary folders", async ({
   page,
 }) => {
   await login(page);
@@ -412,20 +412,10 @@ test("workspace field opens a bounded folder explorer and registers the selected
     .getByRole("button", { name: "Register agent", exact: true })
     .click();
   await page.getByLabel("Instance name").fill("folder-picker-test");
-  await page.getByLabel("Existing workspace directory").click();
-  await expect(
-    page.getByRole("heading", { name: "Choose a workspace folder" }),
-  ).toBeVisible();
-  await page.getByLabel("Directory path", { exact: true }).fill("/tmp");
-  await page.getByRole("button", { name: "Go", exact: true }).click();
-  await expect(page.locator(".directory-location")).toHaveText("/tmp");
-  expect(
-    await page.locator(".directory-list > button").count(),
-  ).toBeLessThanOrEqual(100);
-  await page.getByRole("button", { name: "Use this folder" }).click();
-  await expect(page.getByLabel("Existing workspace directory")).toHaveValue(
-    "/tmp",
-  );
+  await expect(page.getByLabel("Workspace", { exact: true })).toHaveValue("");
+  await expect(page.getByRole("heading", { name: "Choose a workspace folder" })).toHaveCount(0);
+  await page.getByRole("radio", { name: "Orbit" }).click();
+  await page.getByLabel("Icon color").fill("#336699");
   await page
     .getByRole("button", { name: "Register agent", exact: true })
     .last()
@@ -433,4 +423,28 @@ test("workspace field opens a bounded folder explorer and registers the selected
   await expect(
     page.locator(".agent-card").filter({ hasText: "codex:folder-picker-test" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: /codex:folder-picker-test/ }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete agent" }).click();
+  await expect(page.getByRole("dialog", { name: "Delete this agent?" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.locator(".agent-card").filter({ hasText: "codex:folder-picker-test" })).toBeVisible();
+  await page.getByRole("button", { name: /codex:folder-picker-test/ }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete agent" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete agent" }).click();
+  await expect(page.locator(".agent-card").filter({ hasText: "codex:folder-picker-test" })).toHaveCount(0);
+});
+
+test("chat renders Mermaid diagrams and tables without losing source", async ({ page }) => {
+  await login(page);
+  await create(page, "Diagram rendering", ["omp:adsengine"]);
+  await target(page, "omp:adsengine");
+  await page.getByLabel("Message selected agents").fill(
+    "```mermaid\ngraph TD\n  A[Start] --> B[Done]\n```\n\n| Item | Status |\n| --- | --- |\n| Diagram | Ready |",
+  );
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  const preview = page.frameLocator('iframe[title="Mermaid diagram preview"]').first();
+  await expect(preview.locator("svg")).toBeVisible({ timeout: 20000 });
+  await expect(page.locator(".markdown table").first()).toContainText("Ready");
+  await page.getByRole("button", { name: "Code", exact: true }).first().click();
+  await expect(page.locator(".code-block").first()).toContainText("A[Start] --> B[Done]");
 });

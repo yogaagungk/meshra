@@ -24,7 +24,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { api, collab, localRead, localWrite, setCSRF } from "./api";
+import { api, collab, draftKey, localRead, localWrite, setCSRF } from "./api";
 import type {
   Agent,
   Conversation,
@@ -348,6 +348,8 @@ function Shell({
   const client = useQueryClient();
   const [current, setCurrent] = useState(route);
   const [newChat, setNewChat] = useState(false);
+  const [deletingChat, setDeletingChat] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [projectChat, setProjectChat] = useState("");
   const preferences = useQuery({
     queryKey: ["preferences"],
@@ -430,6 +432,34 @@ function Shell({
     setPins(next);
     localWrite("pins", next);
   }
+  async function deleteChat(id: string, title: string) {
+    if (deletingChat || !window.confirm(`Delete “${title}”? This permanently removes its transcript and conversation-scoped memory. Shared files, contexts, usage records, operator memory, and workspace change audits are retained. Stop profile bindings, close browser sessions, and finish or cancel active tasks first.`)) return;
+    setDeletingChat(true);
+    setDeleteError("");
+    try {
+      await api("chat-delete", { conversationId: id, confirm: true });
+      const nextPins = pins.filter((value) => value !== id);
+      setPins(nextPins);
+      localWrite("pins", nextPins);
+      try {
+        localStorage.removeItem("meshra:" + draftKey(id));
+        localStorage.removeItem("meshra:last-viewed:" + id);
+      } catch { /* Local storage may be unavailable. */ }
+      if (route().view === "chat" && route().id === id) go("chat");
+      client.removeQueries({ queryKey: ["conversation", id] });
+      client.removeQueries({ queryKey: ["timeline", id] });
+      client.removeQueries({ queryKey: ["chat-state", id] });
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["inbox"] }),
+        client.invalidateQueries({ queryKey: ["automation"] }),
+        client.invalidateQueries({ queryKey: ["tasks"] }),
+      ]);
+    } catch (error) {
+      setDeleteError((error as Error).message);
+    } finally {
+      setDeletingChat(false);
+    }
+  }
   return (
     <div
       className={
@@ -462,7 +492,7 @@ function Shell({
           title="Search (Ctrl+K)"
         >
           <Search size={16} />
-          <span>Quick search</span>
+          <span>Search</span>
           <kbd>⌘ K</kbd>
         </Button>
         <span className="nav-label">WORKSPACE</span>
@@ -471,6 +501,7 @@ function Shell({
             <a
               key={key}
               href={"#" + key}
+              data-nav={key}
               aria-label={label}
               aria-current={current.view === key ? "page" : undefined}
               title={collapsed ? label : undefined}
@@ -503,7 +534,7 @@ function Shell({
             aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
           >
             <PanelLeftClose size={17} />
-            <span>Collapse sidebar</span>
+            <span>Collapse</span>
           </Button>
           <div className="operator">
             <span className="operator-avatar">
@@ -539,11 +570,14 @@ function Shell({
             onFilter={setConversationFilter}
             pins={pins}
             onPin={pin}
+            onDelete={(id, title) => void deleteChat(id, title)}
+            deleting={deletingChat}
             onNew={() => setNewChat(true)}
             loading={inbox.isLoading || search.trim() !== conversationSearch}
             error={inbox.isError}
             onRetry={() => void inbox.refetch()}
           />
+          {deleteError && <Notice>{deleteError}</Notice>}
           <div className="inbox-footer">
             <ShieldCheck size={14} />
             <span>Private by default. Shared by choice.</span>
@@ -733,6 +767,7 @@ function Shell({
           <a
             href={"#" + key}
             key={key}
+            data-nav={key}
             aria-current={current.view === key ? "page" : undefined}
           >
             <Icon size={19} />

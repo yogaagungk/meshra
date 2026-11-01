@@ -73,7 +73,7 @@ func (r *Relay) conversation(p model.Principal, id string) (model.Conversation, 
 		return c, err
 	}
 	bindings, err := r.db.Query(`SELECT b.context_id,b.version FROM context_bindings b JOIN contexts c ON c.id=b.context_id
- WHERE b.conversation_id=? AND (? OR c.owner=? OR EXISTS(SELECT 1 FROM context_acl a WHERE a.context_id=c.id AND a.agent_id=?)) ORDER BY b.context_id,b.version`, id, p.Admin, p.AgentID, p.AgentID)
+ WHERE b.conversation_id=? AND NOT EXISTS(SELECT 1 FROM deleted_contexts d WHERE d.context_id=c.id) AND (? OR c.owner=? OR EXISTS(SELECT 1 FROM context_acl a WHERE a.context_id=c.id AND a.agent_id=?)) ORDER BY b.context_id,b.version`, id, p.Admin, p.AgentID, p.AgentID)
 	if err != nil {
 		return c, err
 	}

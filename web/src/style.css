@@ -41,6 +41,14 @@
   --warning: #e7bd79;
   --error: #f29c9c;
   --error-bg: #362425;
+  --positive-button-bg: #1b3528;
+  --positive-button-hover: #284b39;
+  --warning-button-bg: #382b17;
+  --warning-button-hover: #514024;
+  --error-button-hover: #513334;
+  --danger-button-bg: #a82d38;
+  --danger-button-hover: #c03945;
+  --danger-button-text: #fff;
   --ring: #b6c6ff;
   --code-symbol: #abaff0;
   --nav: #141618;
@@ -74,6 +82,14 @@
   --warning: #855914;
   --error: #b73636;
   --error-bg: #fff0f0;
+  --positive-button-bg: #e6f5eb;
+  --positive-button-hover: #d2ebdb;
+  --warning-button-bg: #fff3da;
+  --warning-button-hover: #f7e4bd;
+  --error-button-hover: #f9dede;
+  --danger-button-bg: #a62532;
+  --danger-button-hover: #861d28;
+  --danger-button-text: #fff;
   --ring: #4058a3;
   --code-symbol: #57458f;
   --nav: #f8f9fa;
@@ -267,10 +283,38 @@ kbd {
   background: var(--hover);
   color: var(--text);
 }
-.button-danger {
+.button-positive {
+  background: var(--positive-button-bg);
+  color: var(--success);
+  border-color: var(--success);
+}
+.button-positive:hover:not(:disabled) {
+  background: var(--positive-button-hover);
+}
+.button-warning {
+  background: var(--warning-button-bg);
+  color: var(--warning);
+  border-color: var(--warning);
+}
+.button-warning:hover:not(:disabled) {
+  background: var(--warning-button-hover);
+}
+.button-error {
   background: var(--error-bg);
   color: var(--error);
   border-color: var(--error);
+}
+.button-error:hover:not(:disabled) {
+  background: var(--error-button-hover);
+}
+.button-danger {
+  background: var(--danger-button-bg);
+  color: var(--danger-button-text);
+  border-color: var(--danger-button-bg);
+}
+.button-danger:hover:not(:disabled) {
+  background: var(--danger-button-hover);
+  border-color: var(--danger-button-hover);
 }
 .button-sm {
   min-height: 30px;

@@ -6,6 +6,7 @@ export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   plugins: [react(), tailwindcss()],
   base: "/console/",
+  worker: { format: "es" },
   build: {
     outDir: "../internal/consoleui/dist",
     emptyOutDir: true,

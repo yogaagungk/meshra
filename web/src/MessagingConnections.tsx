@@ -95,9 +95,9 @@ export function MessagingConnections() {
         <Button variant="outline" disabled={busy} onClick={() => edit(value)}>Edit credentials</Button>
         <Button variant="outline" disabled={busy} onClick={() => { setSelected(value); setRoutes(value.routes.map((route) => ({ ...route, allow: { ...route.allow } }))); }}>Review routes</Button>
         <Button variant="outline" disabled={busy} onClick={() => void control(value, "test")}>Test credentials</Button>
-        <Button variant="outline" disabled={busy} onClick={() => void control(value, "enable")}>{value.enabled ? "Disable" : "Review and enable"}</Button>
+        <Button variant={value.enabled ? "warning" : "positive"} disabled={busy} onClick={() => void control(value, "enable")}>{value.enabled ? "Disable" : "Review and enable"}</Button>
         <Button variant="outline" onClick={() => setDeliveryID(value.id)}>Deliveries</Button>
-        <Button variant="ghost" disabled={busy || value.enabled} onClick={() => void control(value, "remove")}>Remove</Button>
+        <Button variant="danger" disabled={busy || value.enabled} onClick={() => void control(value, "remove")}>Remove</Button>
       </div>
     </article>)}
     <Dialog open={editing} onOpenChange={(open) => { if (!busy) { setEditing(open); if (!open) { setToken(""); setAppToken(""); } } }} title={selected ? "Edit connector" : "Add connector"} description="Credentials are write-only. Saving disables the connector until you review and enable it again.">
@@ -125,7 +125,7 @@ export function MessagingConnections() {
     </Dialog>
     <Dialog open={!!deliveryID} onOpenChange={(open) => { if (!open) setDeliveryID(""); }} title="Connector deliveries" description="Reply posting is separate from model execution. An uncertain delivery requires explicit duplicate-risk confirmation." wide>
       {deliveries.isError && <Notice>{deliveries.error.message}</Notice>}
-      {deliveries.data?.pages.flat().map((delivery) => <article className="automation-card" key={delivery.id}><strong>{delivery.state}</strong><p>Task {delivery.taskId} · chunk {delivery.chunk}</p>{delivery.error && <Notice>{delivery.error}</Notice>}{["failed", "uncertain_delivery"].includes(delivery.state) && <Button disabled={busy} variant="outline" onClick={() => void retry(delivery.id)}>Retry posting with duplicate risk</Button>}</article>)}
+      {deliveries.data?.pages.flat().map((delivery) => <article className="automation-card" key={delivery.id}><strong>{delivery.state}</strong><p>Task {delivery.taskId} · chunk {delivery.chunk}</p>{delivery.error && <Notice>{delivery.error}</Notice>}{["failed", "uncertain_delivery"].includes(delivery.state) && <Button disabled={busy} variant="warning" onClick={() => void retry(delivery.id)}>Retry posting with duplicate risk</Button>}</article>)}
       <div className="automation-actions"><Button variant="outline" onClick={() => void deliveries.refetch()}>Refresh deliveries</Button>{deliveries.hasNextPage && <Button disabled={deliveries.isFetchingNextPage} onClick={() => void deliveries.fetchNextPage()}>More deliveries</Button>}</div>
     </Dialog>
   </section>;

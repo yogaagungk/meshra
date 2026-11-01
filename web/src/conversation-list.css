@@ -200,7 +200,7 @@
   align-items: flex-start;
   gap: 6px;
   min-height: 21px;
-  padding: 0 30px 0 0;
+  padding: 0 60px 0 0;
 }
 .inbox .conversation-item-title strong {
   display: -webkit-box;
@@ -258,10 +258,11 @@
   border-radius: 50%;
   background: var(--list-accent);
 }
-.conversation-pin {
+.conversation-pin,
+.conversation-delete {
   position: absolute;
   top: 5px;
-  right: 5px;
+  right: 35px;
   display: grid;
   place-items: center;
   width: 30px;
@@ -269,8 +270,11 @@
   border-radius: 7px;
   color: var(--muted);
 }
+.conversation-delete { right: 5px; }
 .conversation-pin:hover,
-.conversation-pin:focus-visible {
+.conversation-pin:focus-visible,
+.conversation-delete:hover,
+.conversation-delete:focus-visible {
   color: var(--list-accent);
   background: var(--surface);
 }
@@ -366,15 +370,17 @@
     gap: 10px;
   }
   .inbox .conversation-item-title {
-    padding-right: 40px;
+    padding-right: 80px;
   }
   .inbox .conversation-item-title strong {
     font-size: 0.9375rem;
   }
-  .conversation-pin {
+  .conversation-pin,
+  .conversation-delete {
     width: 40px;
     height: 44px;
     top: 1px;
-    right: 5px;
+    right: 45px;
   }
+  .conversation-delete { right: 5px; }
 }

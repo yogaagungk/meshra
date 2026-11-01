@@ -46,7 +46,7 @@ func TestConsoleFixture(t *testing.T) {
 	ids := []string{"claude:apmobileprod", "claude:apmobilewallet", "omp:adsengine", "codex:reviewer", "opencode:builder"}
 	for _, id := range ids {
 		parts := strings.Split(id, ":")
-		a, err := r.Create(p, model.CreateAgent{Harness: parts[0], Name: parts[1], Cwd: t.TempDir()})
+		a, err := r.Create(p, model.CreateAgent{Harness: parts[0], Name: parts[1]})
 		if err != nil {
 			t.Fatal(err)
 		}

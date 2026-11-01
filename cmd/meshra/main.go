@@ -40,7 +40,7 @@ Commands:
   serve [--retention DURATION] [--max-delivery-attempts N]
         [--retry-base DURATION] [--retry-cap DURATION]
         [--context-bytes N] [--artifact-bytes N] [--delegation-fanout N]
-  agent create --harness H --name N --cwd DIR
+  agent create --harness H --name N [--workspace-id ID]
        [--model M] [--provider P] [--display-name N]
        [--allow-to ID,...] [--allow-operation OP,...] [--delegate]
        [--allow-from ID,...] [--allow-inbound-operation OP,...]
@@ -113,7 +113,7 @@ func globals(args []string) (options, []string, bool, error) {
 		// equal a global flag such as --json or --help.
 		commandValue := false
 		switch name {
-		case "--harness", "--name", "--cwd", "--model", "--provider", "--display-name", "--allow-to", "--allow-operation", "--allow-from", "--allow-inbound-operation", "--from", "--to", "--message", "--idempotency-key", "--timeout", "--parent-task", "--max-hops", "--after", "--retention", "--max-delivery-attempts", "--retry-base", "--retry-cap", "--context-bytes", "--artifact-bytes", "--delegation-fanout":
+		case "--harness", "--name", "--workspace-id", "--model", "--provider", "--display-name", "--allow-to", "--allow-operation", "--allow-from", "--allow-inbound-operation", "--from", "--to", "--message", "--idempotency-key", "--timeout", "--parent-task", "--max-hops", "--after", "--retention", "--max-delivery-attempts", "--retry-base", "--retry-cap", "--context-bytes", "--artifact-bytes", "--delegation-fanout":
 			commandValue = true
 		}
 		if commandValue && !has {
@@ -440,7 +440,7 @@ func command(args []string) (method, path string, body any, follow bool, err err
 		sub := args[1]
 		if sub == "create" {
 			var f flags
-			f, err = parse(args[2:], map[string]bool{"--harness": false, "--name": false, "--cwd": false, "--model": false, "--provider": false, "--display-name": false, "--allow-to": false, "--allow-operation": false, "--allow-from": false, "--allow-inbound-operation": false, "--delegate": true, "--worktree-writes": true})
+			f, err = parse(args[2:], map[string]bool{"--harness": false, "--name": false, "--workspace-id": false, "--model": false, "--provider": false, "--display-name": false, "--allow-to": false, "--allow-operation": false, "--allow-from": false, "--allow-inbound-operation": false, "--delegate": true, "--worktree-writes": true})
 			if err != nil {
 				return
 			}
@@ -448,15 +448,10 @@ func command(args []string) (method, path string, body any, follow bool, err err
 				err = usage("agent create takes flags, not positional arguments")
 				return
 			}
-			if err = f.required("--harness", "--name", "--cwd"); err != nil {
+			if err = f.required("--harness", "--name"); err != nil {
 				return
 			}
-			var cwd string
-			cwd, err = filepath.Abs(f.get("--cwd"))
-			if err != nil {
-				return
-			}
-			body = model.CreateAgent{Harness: f.get("--harness"), Name: f.get("--name"), DisplayName: f.get("--display-name"), Cwd: cwd, Config: model.Config{Model: f.get("--model"), Provider: f.get("--provider")}, Policy: model.Policy{Destinations: f.list("--allow-to"), Operations: f.list("--allow-operation"), Delegate: f.get("--delegate") == "true", Senders: f.optionalList("--allow-from"), InboundOperations: f.optionalList("--allow-inbound-operation"), WorktreeWrites: f.get("--worktree-writes") == "true"}}
+			body = model.CreateAgent{Harness: f.get("--harness"), Name: f.get("--name"), DisplayName: f.get("--display-name"), WorkspaceID: f.get("--workspace-id"), Config: model.Config{Model: f.get("--model"), Provider: f.get("--provider")}, Policy: model.Policy{Destinations: f.list("--allow-to"), Operations: f.list("--allow-operation"), Delegate: f.get("--delegate") == "true", Senders: f.optionalList("--allow-from"), InboundOperations: f.optionalList("--allow-inbound-operation"), WorktreeWrites: f.get("--worktree-writes") == "true"}}
 			method = http.MethodPost
 			path = "/v1/agents"
 			return

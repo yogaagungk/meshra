@@ -1,0 +1,22 @@
+.agent-avatar {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+}
+.agent-avatar-symbol { animation: agent-avatar-float 3s ease-in-out infinite; }
+@keyframes agent-avatar-float {
+  0%, 100% { transform: translateY(0) rotate(-4deg); }
+  50% { transform: translateY(-2px) rotate(4deg); }
+}
+.avatar-picker { border: 0; margin: 0; padding: 0; min-width: 0; }
+.avatar-picker legend { margin-bottom: 8px; }
+.avatar-picker-options { display: flex; gap: 6px; flex-wrap: wrap; }
+.avatar-picker-options button { padding: 3px; border: 1px solid transparent; border-radius: 15px; background: transparent; cursor: pointer; }
+.avatar-picker-options button[aria-checked="true"] { border-color: var(--accent, #8b7cf6); }
+.avatar-picker-options button:focus-visible { outline: 2px solid var(--accent, #8b7cf6); outline-offset: 2px; }
+.avatar-color { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.avatar-color input { width: 36px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .agent-avatar-symbol { animation: none; } }

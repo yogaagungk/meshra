@@ -4,6 +4,16 @@ This pass refines the existing Meshra console in Operate mode: readable chat,
 consistent controls, and clear navigation. It preserves Manrope, the mint primary
 action color, existing harness marks, workflows, themes, and bounded chat history.
 
+## Flat glass shell
+
+The console uses restrained, flat glass surfaces in both dark and light themes:
+adjacent navigation, conversation, and content panes are separated by subtle
+rules rather than floating, heavily shaded cards. Dialogs retain a translucent
+backdrop, with solid-surface fallbacks when blur is unavailable or reduced
+transparency is requested. Each primary navigation destination has its own icon
+color in both themes; text labels, keyboard navigation, the collapsible rail,
+and mobile navigation remain available.
+
 ## Typography
 
 The locally bundled Manrope variable font is the UI family. Monospace is reserved
@@ -38,9 +48,12 @@ or icons. Blue values are explicit in each theme:
 | `--secondary-border` | `#465a83` | `#a3b3de` |
 
 Text selection, carets, scrollbars, and focus indicators use the same palette.
-Thinking retains its CSS dot animation with a readable solid label. Reduced-motion
-support remains. No extra animation timers, font services, or image dependencies
-were introduced.
+Thinking retains its CSS dot animation with a readable solid label. Named agents
+can choose one of seven animated icons and a color when created; the choice is
+stored with the agent and appears in agent and conversation views. Existing agents
+without a choice use the default icon and color. Icon animation stops when the
+system requests reduced motion. No animation timers or external image services
+are required.
 
 ## Flow corrections
 

@@ -4,6 +4,8 @@ export type Agent = {
   id: string;
   harness: string;
   name: string;
+  avatarIcon?: string;
+  avatarColor?: string;
   cwd: string;
   state: string;
   sessionId?: string;

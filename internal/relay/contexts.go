@@ -16,7 +16,8 @@ func (r *Relay) contextAccess(p model.Principal, op, id string, version int, wri
 	}
 
 	var owner string
-	err := r.db.QueryRow("SELECT owner FROM contexts WHERE id=?", id).Scan(&owner)
+	err := r.db.QueryRow(`SELECT owner FROM contexts WHERE id=? AND
+		(?='context.audit' OR NOT EXISTS(SELECT 1 FROM deleted_contexts WHERE context_id=contexts.id))`, id, op).Scan(&owner)
 	allowed := err == nil && (p.Admin || owner == p.AgentID)
 	if err == nil && !allowed && !write {
 		var n int
@@ -155,6 +156,12 @@ func (r *Relay) contextOperation(p model.Principal, op string, q model.Collabora
 		return r.getContext(p, id, version, false)
 	case "context.get":
 		return r.getContext(p, q.ContextID, q.Version, true)
+	case "context.delete":
+		if err := r.contextAccess(p, op, q.ContextID, 0, true); err != nil {
+			return nil, err
+		}
+		_, err := r.db.Exec("INSERT INTO deleted_contexts(context_id,deleted_by,deleted_at) VALUES(?,?,?)", q.ContextID, actor(p), now().Format(time.RFC3339Nano))
+		return map[string]bool{"deleted": err == nil}, err
 	case "context.grant", "context.revoke":
 		if err := r.contextAccess(p, op, q.ContextID, 0, true); err != nil {
 			return nil, err
@@ -260,7 +267,7 @@ func (r *Relay) contextOperation(p model.Principal, op string, q model.Collabora
 			return nil, model.Err(400, "limit must be 1..100")
 		}
 		rows, err := r.db.Query(`SELECT c.id,max(v.version) FROM contexts c JOIN context_versions v ON v.context_id=c.id
- WHERE c.id>? AND (? OR c.owner=? OR EXISTS(SELECT 1 FROM context_acl a WHERE a.context_id=c.id AND a.agent_id=?))
+ WHERE c.id>? AND NOT EXISTS(SELECT 1 FROM deleted_contexts d WHERE d.context_id=c.id) AND (? OR c.owner=? OR EXISTS(SELECT 1 FROM context_acl a WHERE a.context_id=c.id AND a.agent_id=?))
  AND (?='' OR c.scope=?) AND (?='' OR c.type=?) AND instr(c.title,?)>0 GROUP BY c.id ORDER BY c.id LIMIT ?`, q.After, p.Admin, p.AgentID, p.AgentID, q.Scope, q.Scope, q.Type, q.Type, q.Keyword, limit)
 		if err != nil {
 			return nil, err

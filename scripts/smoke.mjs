@@ -2,7 +2,7 @@
 // Real CLI/daemon smoke. Provider turns require explicit MESHRA_NATIVE_SMOKE=1.
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,10 +64,8 @@ async function cli(...args) {
 try {
   await start();
   for (const [harness, name] of [['claude', 'exampleone'], ['claude', 'exampletwo'], ['omp', 'exampleworker'], ['codex', 'reviewer'], ['opencode', 'testengine']]) {
-    const cwd = join(directory, `${harness}-${name}`);
-    await mkdir(cwd);
     const policy = harness === 'omp' ? ['--allow-to', 'codex:reviewer', '--allow-operation', 'request,status,events'] : [];
-    const agent = await cli('agent', 'create', '--harness', harness, '--name', name, '--cwd', cwd, ...policy);
+    const agent = await cli('agent', 'create', '--harness', harness, '--name', name, ...policy);
     assert.equal(agent.id, `${harness}:${name}`);
   }
   const request = ['request', '--from', 'omp:exampleworker', '--to', 'claude:exampleone', '--message', 'durable offline smoke', '--idempotency-key', 'smoke-001'];

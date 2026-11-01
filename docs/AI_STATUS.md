@@ -69,6 +69,15 @@ and may omit intermediate calls. Native-default model rows do not identify the
 actual model unless the harness reports it separately. Provider billing, costs,
 and monetary budgets are not inferred.
 
+Settings → Models & usage also shows the most recent 100 recorded attempts,
+with coverage counts for each token and cost total and a notice when older
+records exist. These totals describe only the displayed attempts, not an entire
+billing period. Claude SDK result `total_cost_usd`, when present, is recorded
+as runtime-reported USD; other runtimes may not report cost. The figure is not
+necessarily the amount billed, and subscriptions or other charges may be absent.
+Missing cost, currency, and token values remain unknown; currencies are not
+converted and cached input must not be added to input totals.
+
 Warnings appear at 80% and identify exhausted reports at 100%. They inform the
 operator and never silently pause, reroute, or restart work. Meshra's daily turn
 budget is displayed separately and keeps its existing dispatch enforcement.

@@ -33,6 +33,10 @@ func (r *Relay) Console(p model.Principal, op string, q model.ConsoleRequest) (a
 	if op == "directories/create" {
 		return createDirectory(q)
 	}
+	if op == "chat-delete" {
+		r.lifecycle.Lock()
+		defer r.lifecycle.Unlock()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
@@ -55,6 +59,8 @@ func (r *Relay) Console(p model.Principal, op string, q model.ConsoleRequest) (a
 		return r.usageHistory(q)
 	}
 	switch op {
+	case "chat-delete":
+		return r.deleteConversation(q)
 	case "harnesses":
 		out := []map[string]string{}
 		for _, h := range []string{"codex", "claude", "opencode", "omp", "openai", "acp"} {
@@ -125,13 +131,16 @@ func (r *Relay) Console(p model.Principal, op string, q model.ConsoleRequest) (a
 			tasks = append(tasks, task)
 		}
 		return map[string]any{"tasks": tasks, "errors": failures}, nil
-	case "timeline", "tasks":
+	case "timeline", "tasks", "activity":
 		if op == "timeline" {
 			if err := r.member(p, q.ConversationID, false); err != nil {
 				return nil, err
 			}
 		}
-		rows, err := r.db.Query(`SELECT seq,body FROM tasks WHERE (?='' OR json_extract(body,'$.conversationId')=?) AND (?=0 OR seq<?) AND (?='' OR state=?) AND (instr(body,?)>0) ORDER BY seq DESC LIMIT ?`, q.ConversationID, q.ConversationID, q.Before, q.Before, q.Status, q.Status, q.Keyword, limit+1)
+		// Activity is a projection of execution tasks, not a separate event log.
+		// Conversation tasks belong to Chat, except for independently admitted
+		// connector messages and routine steps.
+		rows, err := r.db.Query(`SELECT seq,body FROM tasks WHERE (?<>'activity' OR coalesce(json_extract(body,'$.conversationId'),'')='' OR sender LIKE 'connector:%' OR EXISTS (SELECT 1 FROM routine_steps s WHERE s.task_id=tasks.id)) AND (?='' OR json_extract(body,'$.conversationId')=?) AND (?=0 OR seq<?) AND (?='' OR state=?) AND (instr(body,?)>0) ORDER BY seq DESC LIMIT ?`, op, q.ConversationID, q.ConversationID, q.Before, q.Before, q.Status, q.Status, q.Keyword, limit+1)
 		if err != nil {
 			return nil, err
 		}

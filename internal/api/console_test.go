@@ -36,6 +36,17 @@ func TestConsoleSessionOriginCSRFAndStatic(t *testing.T) {
 	if w := request("GET", "/console/", "", "", "", nil); w.Code != 200 || w.Header().Get("Content-Security-Policy") == "" {
 		t.Fatal("embedded console unavailable", w.Code)
 	}
+	if w := request("GET", "/console/assets/example.js", "null", "", "", nil); w.Header().Get("Access-Control-Allow-Origin") != "null" {
+		t.Fatal("sandboxed module cannot load", w.Code)
+	}
+	for _, path := range []string{"/console/api/agents", "/console/assets/example.css", "/console/"} {
+		if w := request("GET", path, "null", "", "", nil); w.Code != 403 || w.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("opaque origin admitted to %s: %d", path, w.Code)
+		}
+	}
+	if w := request("POST", "/console/assets/example.js", "null", "", "", nil); w.Code != 403 {
+		t.Fatal("opaque origin can mutate assets", w.Code)
+	}
 	if w := request("POST", "/console/api/login", "https://evil.example", "admin", "", nil); w.Code != 403 {
 		t.Fatal("foreign origin admitted", w.Code)
 	}
@@ -63,6 +74,15 @@ func TestConsoleSessionOriginCSRFAndStatic(t *testing.T) {
 	}
 	if w = request("GET", "/console/api/agents", "http://127.0.0.1:7331", "", "", cookie); w.Code != 200 {
 		t.Fatal("same-origin query failed", w.Code)
+	}
+	if w = request("POST", "/console/api/agents/claude:one/remove", "http://127.0.0.1:7331", "", "", cookie); w.Code != 403 {
+		t.Fatal("agent removal bypassed CSRF", w.Code)
+	}
+	if w = request("GET", "/console/api/agents/claude:one/remove", "http://127.0.0.1:7331", "", csrf, cookie); w.Code != 405 {
+		t.Fatal("agent removal accepted GET", w.Code)
+	}
+	if w = request("POST", "/console/api/agents/claude:one/remove", "http://127.0.0.1:7331", "", csrf, cookie); w.Code != 200 {
+		t.Fatal("agent removal failed", w.Code, w.Body.String())
 	}
 	if w = request("POST", "/console/api/logout", "http://127.0.0.1:7331", "", csrf, cookie); w.Code != 200 {
 		t.Fatal("logout failed", w.Code)

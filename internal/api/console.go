@@ -11,6 +11,7 @@ import (
 	"meshra/internal/model"
 	"net"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -65,6 +66,23 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	if r.URL.Path == "/console/api/automation/mcp-oauth-callback" {
 		s.mcpOAuthCallback(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/console/assets/") && strings.HasSuffix(r.URL.Path, ".js") {
+		w.Header().Add("Vary", "Origin")
+	}
+	// Sandboxed Mermaid previews have an opaque ("null") origin. Their module
+	// scripts and imports need CORS, but may only read public bundled JS assets,
+	// never console API responses or other static files.
+	if r.Header.Get("Origin") == "null" &&
+		(r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		loopbackHost(r.Host) &&
+		strings.HasPrefix(r.URL.Path, "/console/assets/") &&
+		strings.HasSuffix(r.URL.Path, ".js") &&
+		path.Clean(r.URL.Path) == r.URL.Path {
+		w.Header().Set("Access-Control-Allow-Origin", "null")
+		assets, _ := fs.Sub(consoleui.Assets, "dist")
+		http.StripPrefix("/console/", http.FileServer(http.FS(assets))).ServeHTTP(w, r)
 		return
 	}
 	if !localConsoleRequest(r) {
@@ -280,7 +298,7 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 2 && parts[0] == "automation" && parts[1] != "":
 		s.automation(w, r, p, parts[1])
 		return
-	case path == "ai-status" || path == "usage-history" || path == "preferences" || path == "resources" || path == "usage" || path == "workspaces" || path == "conversations" || path == "tasks" || path == "timeline" || path == "chat-state" || path == "harnesses":
+	case path == "ai-status" || path == "usage-history" || path == "preferences" || path == "resources" || path == "usage" || path == "workspaces" || path == "conversations" || path == "tasks" || path == "activity" || path == "timeline" || path == "chat-state" || path == "harnesses":
 		if r.Method != "GET" {
 			method(w, "GET")
 			return
@@ -296,7 +314,7 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result, err = svc.Console(p, path, q)
-	case path == "quota" || path == "preferences/save" || path == "workspaces/add" || path == "workspaces/remove" || path == "workspace/tree" || path == "workspace/file" || path == "workspace/git" || path == "workspace/diff" || path == "models" || path == "send" || path == "context-check" || path == "regenerate" || path == "chat-create" || path == "directories" || path == "directories/create":
+	case path == "quota" || path == "preferences/save" || path == "workspaces/add" || path == "workspaces/remove" || path == "workspace/tree" || path == "workspace/file" || path == "workspace/git" || path == "workspace/diff" || path == "models" || path == "send" || path == "context-check" || path == "regenerate" || path == "chat-create" || path == "chat-delete" || path == "directories" || path == "directories/create":
 		if r.Method != "POST" {
 			method(w, "POST")
 			return
@@ -312,7 +330,7 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 		}
 		result, err = svc.Console(p, path, q)
 		status = 202
-		if path == "directories" || path == "directories/create" || path == "preferences/save" || strings.HasPrefix(path, "workspace") || path == "models" || path == "quota" {
+		if path == "directories" || path == "directories/create" || path == "chat-delete" || path == "preferences/save" || strings.HasPrefix(path, "workspace") || path == "models" || path == "quota" {
 			status = 200
 		}
 	case path == "events":
@@ -336,6 +354,13 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 			method(w, "GET, POST")
 			return
 		}
+	case len(parts) == 3 && parts[0] == "agents" && parts[2] == "remove":
+		if r.Method != "POST" {
+			method(w, "POST")
+			return
+		}
+		err = s.service.Remove(p, parts[1])
+		result = map[string]bool{"removed": err == nil}
 	case len(parts) == 3 && parts[0] == "agents" && (parts[2] == "start" || parts[2] == "stop" || parts[2] == "restart"):
 		if r.Method != "POST" {
 			method(w, "POST")

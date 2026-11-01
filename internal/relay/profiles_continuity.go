@@ -110,7 +110,7 @@ func (r *Relay) profilePinnedContexts(p model.Principal, conversationID string) 
 	rows, err := r.db.Query(`SELECT c.id,v.version,c.title,v.digest,a.size FROM context_bindings b
  JOIN contexts c ON c.id=b.context_id JOIN context_versions v ON v.context_id=b.context_id AND v.version=b.version
  JOIN artifacts a ON a.digest=v.digest
- WHERE b.conversation_id=? AND (? OR c.owner=? OR EXISTS(SELECT 1 FROM context_acl acl WHERE acl.context_id=c.id AND acl.agent_id=?))
+ WHERE b.conversation_id=? AND NOT EXISTS(SELECT 1 FROM deleted_contexts d WHERE d.context_id=c.id) AND (? OR c.owner=? OR EXISTS(SELECT 1 FROM context_acl acl WHERE acl.context_id=c.id AND acl.agent_id=?))
  ORDER BY c.id,v.version`, conversationID, p.Admin, p.AgentID, p.AgentID)
 	if err != nil {
 		return nil, err

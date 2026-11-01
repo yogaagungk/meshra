@@ -8,6 +8,7 @@ import { Connections } from "./Connections";
 import { Notice } from "./App";
 import { HarnessLogo, harnessName } from "./HarnessLogo";
 import { Button } from "./components/ui/button";
+import { UsageDashboard } from "./UsageDashboard";
 import type { ModelOption, PersonalPreferences } from "./types";
 
 type Session = {
@@ -259,7 +260,7 @@ function PersonalControls({ access }: { access: boolean }) {
           <div className="personal-section-heading">
             <h2>Signed-in browsers</h2>
             <Button
-              variant="outline"
+              variant="warning"
               size="sm"
               disabled={busy || !sessions.data?.some((s) => !s.current)}
               onClick={() => void revoke()}
@@ -292,7 +293,7 @@ function PersonalControls({ access }: { access: boolean }) {
                 {!s.current && (
                   <Button
                     size="sm"
-                    variant="outline"
+                    variant="warning"
                     disabled={busy}
                     onClick={() => void revoke(s.id)}
                   >
@@ -366,6 +367,7 @@ function ModelsUsage() {
   });
   return (
     <div className="preferences personal-preferences">
+      <UsageDashboard />
       <section>
         <div className="personal-section-heading">
           <h2>Available models</h2>

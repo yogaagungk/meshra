@@ -6,6 +6,7 @@ type ConsoleService interface {
 }
 type ConsoleRequest struct {
 	Refresh        bool              `json:"refresh,omitempty"`
+	Confirm        bool              `json:"confirm,omitempty"`
 	ID             string            `json:"id,omitempty"`
 	Name           string            `json:"name,omitempty"`
 	WorkspaceID    string            `json:"workspaceId,omitempty"`

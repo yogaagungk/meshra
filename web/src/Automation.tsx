@@ -209,7 +209,7 @@ function QueuePanel() {
                     )}
                     {state.paused ? (
                       <Button
-                        variant="outline"
+                        variant="positive"
                         size="sm"
                         disabled={busy === state.agentId}
                         onClick={() => void run(state, "queue.resume")}
@@ -219,7 +219,7 @@ function QueuePanel() {
                       </Button>
                     ) : (
                       <Button
-                        variant="outline"
+                        variant="warning"
                         size="sm"
                         disabled={busy === state.agentId}
                         onClick={() => void run(state, "queue.pause")}
@@ -406,7 +406,7 @@ function RoutinesPanel() {
                     Run now
                   </Button>
                   <Button
-                    variant="outline"
+                    variant={routine.enabled ? "warning" : "positive"}
                     size="sm"
                     disabled={busy === routine.id || !routine.id}
                     onClick={() => void setEnabled(routine, !routine.enabled)}

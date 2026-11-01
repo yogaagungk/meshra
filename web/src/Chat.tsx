@@ -32,6 +32,7 @@ import {
 import { ChatAIStatus } from "./AIStatus";
 import { api, collab, draftKey, localRead, localWrite } from "./api";
 import { Harness, Status, Empty, Notice, go } from "./App";
+import { AgentAvatar } from "./components/AgentAvatar";
 import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { Markdown } from "./Markdown";
@@ -459,7 +460,7 @@ function LegacyChat({
                 onClick={() => setParticipants(true)}
                 title={a.id + " · " + a.cwd + " · " + a.state}
               >
-                <Harness id={a.id} />
+                <AgentAvatar icon={a.avatarIcon} color={a.avatarColor} size={28} />
                 <span>{a.id}</span>
                 <span className={"status-dot state-" + a.state} />
                 <span className="sr-only">{a.state}</span>
@@ -583,7 +584,7 @@ function LegacyChat({
                       {t.from === "human:operator" ? (
                         <UserRound size={14} />
                       ) : (
-                        <SquareAgent id={t.from} />
+                        <ChatAgentAvatar id={t.from} agents={agents} />
                       )}
                     </div>
                     <div className="message-body">
@@ -621,7 +622,7 @@ function LegacyChat({
                   </div>
                   <div className="message message-response">
                     <div className="message-avatar">
-                      <Harness id={t.to} />
+                      <ChatAgentAvatar id={t.to} agents={agents} />
                     </div>
                     <div className="message-body">
                       <div className="message-heading">
@@ -939,7 +940,7 @@ function LegacyChat({
               </h3>
               {members.map((a) => (
                 <div className="inspector-agent" key={a.id}>
-                  <Harness id={a.id} />
+                  <ChatAgentAvatar id={a.id} agents={agents} />
                   <div>
                     <strong>{isChat ? harnessName(a.id) : a.id}</strong>
                     {!isChat && <small>{a.cwd}</small>}
@@ -1078,8 +1079,10 @@ function LegacyChat({
     </div>
   );
 }
-function SquareAgent({ id }: { id: string }) {
-  return <Harness id={id} />;
+function ChatAgentAvatar({ id, agents }: { id: string; agents: Agent[] }) {
+  const agent = agents.find((item) => item.id === id);
+  if (!agent || agent.managedChat || agent.profileManaged) return <Harness id={id} />;
+  return <AgentAvatar icon={agent.avatarIcon} color={agent.avatarColor} size={28} />;
 }
 export function Delivery({ task }: { task: Task }) {
   return (
@@ -1153,7 +1156,7 @@ function ParticipantManager({
         const member = conversation.participants.includes(a.id);
         return (
           <div className="managed-agent" key={a.id}>
-            <Harness id={a.id} />
+            <ChatAgentAvatar id={a.id} agents={agents} />
             <div>
               <strong>{a.id}</strong>
               <small>{a.cwd}</small>

@@ -103,7 +103,7 @@ func TestLocalEndToEndIdentityMCPAndStreamReplay(t *testing.T) {
 	for _, name := range []string{"claude:exampleone", "claude:exampletwo", "omp:exampleworker", "codex:reviewer", "opencode:testengine"} {
 		parts := strings.Split(name, ":")
 		var a model.Agent
-		httpJSON(t, client, server.URL, admin, "POST", "/v1/agents", model.CreateAgent{Harness: parts[0], Name: parts[1], Cwd: t.TempDir(), Policy: model.Policy{Destinations: []string{"claude:exampleone", "codex:reviewer"}, Operations: []string{"list", "send", "request", "status", "events", "cancel"}, Delegate: true}}, &a, 201)
+		httpJSON(t, client, server.URL, admin, "POST", "/v1/agents", model.CreateAgent{Harness: parts[0], Name: parts[1], Policy: model.Policy{Destinations: []string{"claude:exampleone", "codex:reviewer"}, Operations: []string{"list", "send", "request", "status", "events", "cancel"}, Delegate: true}}, &a, 201)
 		if a.ID != name {
 			t.Fatalf("identity changed: %+v", a)
 		}

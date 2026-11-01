@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Console revamp
+
+- Refresh the light and dark glass surfaces with flat backgrounds and colored navigation.
+- Render Mermaid diagrams and tables in chat, and add seven selectable animated agent icons with custom colors.
+- Show reported usage and cost coverage without inventing prices or unreported totals.
+- Create general agents in private working directories or assign them to registered workspaces by ID; reject arbitrary directory paths for new public agent registrations. Existing agents keep their working directories.
+
+### Console management
+
+- Add confirmed conversation and agent deletion, with active-work safeguards and explicit retention of shared or audit data.
+- Add confirmed context deletion with owner/admin authorization; immutable artifacts and audit history remain retained.
+- Exclude chat-origin tasks from the Activity view without removing the chat execution records needed for history and recovery.
+- Add semantic positive, warning, error and danger button styles.
+
 ### Full-access harnesses
 
 - Run every harness in full-access mode: Claude `bypassPermissions` with all tools, Codex `danger-full-access` with `approvalPolicy: never` and accepted command/file approvals, OpenCode `*: allow` with `once` replies, and OMP builtin tools with `--approval-mode=yolo`. Profile-managed Claude/OMP sessions keep native builtins beside the verified broker catalog. Tool-free profile drafting is unchanged.

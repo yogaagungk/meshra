@@ -142,4 +142,12 @@ test("conversation list groups pins, filters chat types, clears search and prese
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
     .analyze();
   expect(audit.violations).toEqual([]);
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "Delete " + longTitle, exact: true }).click();
+  await expect(page.getByRole("button", { name: "Delete " + longTitle, exact: true })).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete " + longTitle, exact: true }).click();
+  await expect(page.getByRole("button", { name: "Delete " + longTitle, exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Delete " + longTitle, exact: true })).toHaveCount(0);
 });

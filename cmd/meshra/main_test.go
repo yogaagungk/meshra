@@ -56,12 +56,12 @@ func TestLoopbackBindingValidation(t *testing.T) {
 	}
 }
 func TestCommandCreatePoliciesAndTaskFlags(t *testing.T) {
-	method, path, body, _, err := command([]string{"agent", "create", "--harness", "claude", "--name", "one", "--cwd", ".", "--allow-to", "codex:reviewer,omp:origin", "--allow-to=claude:two", "--allow-operation", "send,request", "--allow-operation", "agents_list", "--delegate", "--model", "test", "--provider", "test-provider"})
+	method, path, body, _, err := command([]string{"agent", "create", "--harness", "claude", "--name", "one", "--workspace-id", "workspace-1", "--allow-to", "codex:reviewer,omp:origin", "--allow-to=claude:two", "--allow-operation", "send,request", "--allow-operation", "agents_list", "--delegate", "--model", "test", "--provider", "test-provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := body.(model.CreateAgent)
-	if method != "POST" || path != "/v1/agents" || len(req.Policy.Destinations) != 3 || len(req.Policy.Operations) != 3 || !req.Policy.Delegate || !filepath.IsAbs(req.Cwd) || req.Config.Model != "test" {
+	if method != "POST" || path != "/v1/agents" || len(req.Policy.Destinations) != 3 || len(req.Policy.Operations) != 3 || !req.Policy.Delegate || req.WorkspaceID != "workspace-1" || req.Config.Model != "test" {
 		t.Fatalf("wrong create request %+v", req)
 	}
 	_, path, _, follow, err := command([]string{"task", "events", "task-1", "--follow", "--after", "42"})
@@ -179,7 +179,7 @@ func TestMCPProxyAgentOnlyAndProtocolStdout(t *testing.T) {
 }
 
 func TestInboundPolicyExplicitEmpty(t *testing.T) {
-	base := []string{"agent", "create", "--harness", "omp", "--name", "one", "--cwd", "."}
+	base := []string{"agent", "create", "--harness", "omp", "--name", "one"}
 	_, _, body, _, err := command(base)
 	if err != nil {
 		t.Fatal(err)
@@ -308,11 +308,11 @@ func TestMCPProxyAcceptsLargeBoundedTrace(t *testing.T) {
 	}
 	defer core.Close()
 	admin := model.Principal{Admin: true}
-	origin, err := core.Create(admin, model.CreateAgent{Harness: "omp", Name: "origin", Cwd: t.TempDir(), Policy: model.Policy{Operations: []string{"status", "events"}}})
+	origin, err := core.Create(admin, model.CreateAgent{Harness: "omp", Name: "origin", Policy: model.Policy{Operations: []string{"status", "events"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dest, err := core.Create(admin, model.CreateAgent{Harness: "codex", Name: "dest", Cwd: t.TempDir()})
+	dest, err := core.Create(admin, model.CreateAgent{Harness: "codex", Name: "dest"})
 	if err != nil {
 		t.Fatal(err)
 	}

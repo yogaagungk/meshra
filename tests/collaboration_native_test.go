@@ -48,7 +48,7 @@ func nativeCollaboration(t *testing.T, publisher string) {
 		case "claude":
 			config.Model = os.Getenv("MESHRA_CLAUDE_MODEL")
 		}
-		if _, err = r.Create(p, model.CreateAgent{Harness: parts[0], Name: parts[1], Cwd: t.TempDir(), Config: config}); err != nil {
+		if _, err = r.Create(p, model.CreateAgent{Harness: parts[0], Name: parts[1], Config: config}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -166,7 +166,7 @@ func TestNativeLifecycle(t *testing.T) {
 		if parts[0] == "omp" {
 			config = model.Config{Model: os.Getenv("MESHRA_OMP_MODEL"), Provider: os.Getenv("MESHRA_OMP_PROVIDER")}
 		}
-		if _, err = r.Create(p, model.CreateAgent{Harness: parts[0], Name: parts[1], Cwd: t.TempDir(), Config: config}); err != nil {
+		if _, err = r.Create(p, model.CreateAgent{Harness: parts[0], Name: parts[1], Config: config}); err != nil {
 			t.Fatal(err)
 		}
 	}

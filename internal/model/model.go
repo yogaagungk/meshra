@@ -26,7 +26,10 @@ type CreateAgent struct {
 	Harness         string `json:"harness"`
 	Name            string `json:"name"`
 	DisplayName     string `json:"displayName,omitempty"`
+	AvatarIcon      string `json:"avatarIcon,omitempty"`
+	AvatarColor     string `json:"avatarColor,omitempty"`
 	Cwd             string `json:"cwd"`
+	WorkspaceID     string `json:"workspaceId,omitempty"`
 	Config          Config `json:"config"`
 	Policy          Policy `json:"policy"`
 	Concurrency     int    `json:"concurrency,omitempty"`
@@ -43,7 +46,10 @@ type Agent struct {
 	Harness       string          `json:"harness"`
 	Name          string          `json:"name"`
 	DisplayName   string          `json:"displayName"`
+	AvatarIcon    string          `json:"avatarIcon,omitempty"`
+	AvatarColor   string          `json:"avatarColor,omitempty"`
 	Cwd           string          `json:"cwd"`
+	WorkspaceID   string          `json:"workspaceId,omitempty"`
 	Config        Config          `json:"config"`
 	Policy        Policy          `json:"policy"`
 	Concurrency   int             `json:"concurrency"`

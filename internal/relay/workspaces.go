@@ -82,13 +82,13 @@ func (r *Relay) workspaceOperation(op string, q model.ConsoleRequest) (any, erro
 		}
 		return w, nil
 	case "workspaces/remove":
-		// Profile and legacy conversation workspace references remain valid.
+		// Keep explicitly assigned agents, profiles and conversations attached.
 		var count int
-		if err := r.db.QueryRow("SELECT (SELECT count(*) FROM chat_settings WHERE json_extract(body,'$.workspaceId')=?) + (SELECT count(*) FROM agent_profiles WHERE json_extract(body,'$.workspaceId')=?)", q.ID, q.ID).Scan(&count); err != nil {
+		if err := r.db.QueryRow("SELECT (SELECT count(*) FROM chat_settings WHERE json_extract(body,'$.workspaceId')=?) + (SELECT count(*) FROM agent_profiles WHERE json_extract(body,'$.workspaceId')=?) + (SELECT count(*) FROM agents WHERE json_extract(body,'$.workspaceId')=?)", q.ID, q.ID, q.ID).Scan(&count); err != nil {
 			return nil, err
 		}
 		if count > 0 {
-			return nil, model.Err(409, "workspace is used by a conversation or profile")
+			return nil, model.Err(409, "workspace is used by an agent, conversation or profile")
 		}
 		_, err := r.db.Exec("DELETE FROM workspaces WHERE id=?", q.ID)
 		return map[string]bool{"removed": err == nil}, err

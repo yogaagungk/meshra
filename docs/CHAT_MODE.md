@@ -13,6 +13,12 @@ Interrupted or failed executions can be inspected and explicitly retried through
 the existing execution inspector. A new message can be sent after stopping a reply;
 the scheduler waits for the previous native execution to release its resources.
 
+Chat Markdown supports GitHub-flavored tables and Mermaid fenced code blocks.
+Tables scroll horizontally when needed; Mermaid blocks offer preview, source,
+and copy controls, and retain the source if a diagram cannot be rendered.
+Diagrams render in an isolated sandbox with network and image loading disabled;
+links and external images in model output are not rendered in the preview.
+
 ## Conversation context and memory
 
 Each chat turn runs in a fresh native session. Meshra closes the temporary runtime
@@ -46,6 +52,13 @@ shared result artifacts. SQLite history remains subject to the configured retent
 policy (30 days by default). Native harnesses can keep their own session files on
 disk; closing a runtime does not delete those files or impose an OS memory limit
 on a third-party process.
+
+The Activity view is a projection of operational tasks, not a separate stored
+activity log. Tasks belonging to conversations in Chat are excluded, including
+historical tasks; independently admitted connector messages and routine steps
+remain visible. Chat execution tasks, messages, and their events are still
+stored for conversation history, execution, recovery, and inspection. This
+setting does not make chat ephemeral or remove those required records.
 
 ## Response delivery
 
@@ -91,8 +104,9 @@ named agents and older conversations remain supported. Selecting a harness does
 not install it or establish provider authentication.
 
 Task execution views have been removed from the console. Stop and regenerate
-remain in chat, and Activity links directly to the associated conversations.
-CLI task diagnostics remain available for troubleshooting.
+remain in chat. Activity excludes chat-origin tasks; operational entries with
+an associated conversation link to it. CLI task diagnostics remain available
+for troubleshooting.
 
 The new-agent workspace field opens an in-app folder explorer for the daemon's
 filesystem. It does not upload folders or use a browser file-upload control.

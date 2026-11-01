@@ -20,6 +20,11 @@ conversation in **Chat**. Select recipients explicitly; nothing broadcasts by
 default. Publish/grant immutable context in **Contexts**, attach a version in chat,
 and use **Inspect execution** for task state, correlation, native session and trace.
 
+To delete a named agent, open its details in **Agents** and confirm **Delete
+agent**. Stop it first and cancel any outstanding tasks. Deletion revokes its
+credentials and removes its conversation and context access; task history
+remains, and the retired agent identity cannot be registered again.
+
 **Username and password:** sign in once with your local administrator token,
 then open **Settings → Personal access → Username and password**. Choose a
 username (3–64 letters, numbers, dots, underscores or hyphens) and a password
@@ -89,14 +94,13 @@ For an isolated run, pass matching options to server and client:
 
 ## Two Claude identities and one OMP identity
 
-Create actual directories first; these example paths are not assumed to exist:
+These examples create general agents with separate private working directories. To use a project instead, add it under Workspaces in the console, then pass its registered ID as `--workspace-id ID`. Existing agents keep their original directories.
 
 ```sh
-mkdir -p /tmp/meshra-work/prod /tmp/meshra-work/wallet /tmp/meshra-work/ads
-./meshra agent create --harness claude --name exampleone --cwd /tmp/meshra-work/prod \
+./meshra agent create --harness claude --name exampleone \
   --allow-to omp:exampleworker --allow-operation list,status,send,request,events,cancel
-./meshra agent create --harness claude --name exampletwo --cwd /tmp/meshra-work/wallet
-./meshra agent create --harness omp --name exampleworker --cwd /tmp/meshra-work/ads \
+./meshra agent create --harness claude --name exampletwo
+./meshra agent create --harness omp --name exampleworker \
   --allow-to claude:exampleone,claude:exampletwo \
   --allow-operation list,status,send,request,events,cancel
 ./meshra agent start omp:exampleworker
@@ -128,9 +132,8 @@ A reverse request is explicit and separate:
 The same workflow can use Codex/OpenCode destinations after registration:
 
 ```sh
-mkdir -p /tmp/meshra-work/reviewer /tmp/meshra-work/testengine
-./meshra agent create --harness codex --name reviewer --cwd /tmp/meshra-work/reviewer
-./meshra agent create --harness opencode --name testengine --cwd /tmp/meshra-work/testengine
+./meshra agent create --harness codex --name reviewer
+./meshra agent create --harness opencode --name testengine
 ./meshra agent start codex:reviewer
 ./meshra agent start opencode:testengine
 ```

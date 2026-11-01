@@ -199,6 +199,7 @@ export function Approvals({ profileId }: { profileId?: string } = {}) {
                 {pending && item.kind !== "question" && (
                   <div className="automation-actions">
                     <Button
+                      variant="positive"
                       onClick={() => void decide(item, "approve")}
                       disabled={busy === item.id}
                     >
@@ -206,7 +207,7 @@ export function Approvals({ profileId }: { profileId?: string } = {}) {
                       Approve this action
                     </Button>
                     <Button
-                      variant="outline"
+                      variant="error"
                       onClick={() => void decide(item, "deny")}
                       disabled={busy === item.id}
                     >

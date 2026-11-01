@@ -21,6 +21,18 @@ are released. The existing API limit of 100 results remains; title search can
 find older conversations. Local pin preferences and the user's saved sidebar
 width remain supported. New installations default to a 320px sidebar.
 
+Use the delete button on a conversation to confirm its permanent removal. The
+console API exposes this as `POST /console/api/chat-delete` with
+`{"conversationId":"…","confirm":true}`. The authenticated operator must
+stop profile bindings, close browser sessions, finish or cancel active tasks,
+resolve active tool invocations, and wait for pending connector deliveries first.
+Deletion removes the
+conversation, transcript, conversation-scoped memory and local pin/draft on
+the deleting browser. Shared contexts and files, operator memory, usage records,
+and workspace changeset audit records are retained; changeset-related task
+metadata and tool records can also remain. This is not secure erasure of
+backups, provider-side data, browser data, or copies already sent elsewhere.
+
 The component lives in `web/src/ConversationList.tsx`, with scoped styles in
 `web/src/conversation-list.css`. Header, row, and group spacing use a 4px rhythm;
 mobile pin controls and navigation preserve independent touch targets.

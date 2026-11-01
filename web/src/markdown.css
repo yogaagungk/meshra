@@ -1,0 +1,49 @@
+.markdown-table-wrap {
+  max-width: 100%;
+  margin: 15px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.markdown .markdown-table-wrap table {
+  display: table;
+  width: 100%;
+  min-width: max-content;
+  margin: 0;
+  overflow: visible;
+  border-collapse: collapse;
+}
+.markdown .markdown-table-wrap th,
+.markdown .markdown-table-wrap td {
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.markdown .markdown-table-wrap th {
+  background: var(--surface-3);
+  font-weight: 600;
+}
+.markdown .markdown-table-wrap tr:last-child td {
+  border-bottom: 0;
+}
+.mermaid-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mermaid-preview {
+  min-height: 100px;
+  background: var(--surface);
+}
+.mermaid-preview iframe {
+  display: block;
+  width: 100%;
+  border: 0;
+  pointer-events: none;
+}
+.mermaid-message {
+  padding: 16px;
+  color: var(--muted);
+}

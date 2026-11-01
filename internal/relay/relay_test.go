@@ -56,9 +56,16 @@ func openTest(t *testing.T, run func(context.Context, model.Turn, model.Emit) (s
 	})
 	return r, dir
 }
+func createWithWorkspaceTest(t *testing.T, r *Relay, p model.Principal, c model.CreateAgent) (model.Agent, error) {
+	t.Helper()
+	// Existing fixtures exercise agents created before workspace assignment was introduced.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.createLocked(p, c)
+}
 func createTest(t *testing.T, r *Relay, h, n string) model.Agent {
 	t.Helper()
-	a, err := r.Create(admin, model.CreateAgent{Harness: h, Name: n, Cwd: t.TempDir(), Policy: model.Policy{Destinations: []string{"*"}, Operations: []string{"list", "send", "request", "status", "events", "cancel"}, Delegate: true}})
+	a, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: h, Name: n, Cwd: t.TempDir(), Policy: model.Policy{Destinations: []string{"*"}, Operations: []string{"list", "send", "request", "status", "events", "cancel"}, Delegate: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,10 +189,10 @@ func TestRegistryIdentityIsolationAndReplyOwnership(t *testing.T) {
 func TestRegistryValidationAndLifecycle(t *testing.T) {
 	r, dir := openTest(t, nil)
 	a := createTest(t, r, "claude", "prod")
-	_, err := r.Create(admin, model.CreateAgent{Harness: "claude", Name: "prod", Cwd: a.Cwd})
+	_, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "claude", Name: "prod", Cwd: a.Cwd})
 	requireStatus(t, err, 409)
 	for _, c := range []model.CreateAgent{{Harness: "claude", Name: "Upper", Cwd: a.Cwd}, {Harness: "bad", Name: "prod", Cwd: a.Cwd}, {Harness: "omp", Name: "missing", Cwd: filepath.Join(a.Cwd, "missing")}, {Harness: "omp", Name: "many", Cwd: a.Cwd, Concurrency: 2}} {
-		_, err = r.Create(admin, c)
+		_, err = createWithWorkspaceTest(t, r, admin, c)
 		requireStatus(t, err, 400)
 	}
 	_, err = Open(dir, fakeAdapters(nil))
@@ -207,7 +214,7 @@ func TestRegistryValidationAndLifecycle(t *testing.T) {
 	if err = r.Remove(admin, a.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, err = r.Create(admin, model.CreateAgent{Harness: "claude", Name: "prod", Cwd: a.Cwd})
+	_, err = createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "claude", Name: "prod", Cwd: a.Cwd})
 	requireStatus(t, err, 409)
 	info, err := os.Stat(filepath.Join(dir, "admin.token"))
 	if err != nil || info.Mode().Perm() != 0600 {
@@ -230,7 +237,7 @@ func TestBusyQueueAndRepositorySerialization(t *testing.T) {
 	})
 	source := createTest(t, r, "omp", "source")
 	a := createTest(t, r, "claude", "one")
-	b, err := r.Create(admin, model.CreateAgent{Harness: "codex", Name: "two", Cwd: a.Cwd})
+	b, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "codex", Name: "two", Cwd: a.Cwd})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +478,7 @@ func TestDelegationCorrelationPermissionsAndCycleSafety(t *testing.T) {
 	p := model.Principal{AgentID: middle.ID, SessionID: child.FromSessionID}
 	_, err = r.Send(p, model.SendRequest{From: o.ID, To: leaf.ID, Text: "impersonate"})
 	requireStatus(t, err, 403)
-	restricted, err := r.Create(admin, model.CreateAgent{Harness: "omp", Name: "restricted", Cwd: t.TempDir(), Policy: model.Policy{Operations: []string{"send", "status"}}})
+	restricted, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "omp", Name: "restricted", Cwd: t.TempDir(), Policy: model.Policy{Operations: []string{"send", "status"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,4 +662,62 @@ func TestInterruptedRuntimePausesInboxUntilExplicitRestart(t *testing.T) {
 	if done.State != "completed" || done.Result != "second completed" || done.Attempts != 1 {
 		t.Fatalf("restart did not release queued work: %+v", done)
 	}
+}
+
+func TestAgentWorkspaceAssignment(t *testing.T) {
+	r, _ := openTest(t, nil)
+	general, err := r.Create(admin, model.CreateAgent{Harness: "omp", Name: "general"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if general.WorkspaceID != "" || general.Cwd == "" {
+		t.Fatalf("invalid general agent workspace: %+v", general)
+	}
+	info, err := os.Stat(general.Cwd)
+	if err != nil || info.Mode().Perm() != 0700 {
+		t.Fatalf("general workspace must be private: %v", err)
+	}
+	other, err := r.Create(admin, model.CreateAgent{Harness: "omp", Name: "general-two"})
+	if err != nil || other.Cwd == general.Cwd {
+		t.Fatalf("general agents must have separate private workspaces: %v", err)
+	}
+	_, err = r.Create(admin, model.CreateAgent{Harness: "omp", Name: "arbitrary", Cwd: t.TempDir()})
+	requireStatus(t, err, 400)
+	_, err = r.Create(admin, model.CreateAgent{Harness: "omp", Name: "missing", WorkspaceID: "missing"})
+	requireStatus(t, err, 404)
+	path := t.TempDir()
+	value, err := r.workspaceOperation("workspaces/add", model.ConsoleRequest{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := value.(model.Workspace)
+	assigned, err := r.Create(admin, model.CreateAgent{Harness: "omp", Name: "assigned", WorkspaceID: workspace.ID})
+	if err != nil || assigned.WorkspaceID != workspace.ID || assigned.Cwd != workspace.Path {
+		t.Fatalf("invalid assigned workspace: %+v, %v", assigned, err)
+	}
+	stored, err := r.Agent(admin, assigned.ID)
+	if err != nil || stored.WorkspaceID != workspace.ID {
+		t.Fatalf("workspace assignment not persisted: %+v, %v", stored, err)
+	}
+	_, err = r.workspaceOperation("workspaces/remove", model.ConsoleRequest{ID: workspace.ID})
+	requireStatus(t, err, 409)
+	original := filepath.Join(t.TempDir(), "project")
+	if err := os.Mkdir(original, 0700); err != nil {
+		t.Fatal(err)
+	}
+	value, err = r.workspaceOperation("workspaces/add", model.ConsoleRequest{Path: original})
+	if err != nil {
+		t.Fatal(err)
+	}
+	redirected := value.(model.Workspace)
+	if err := os.Remove(original); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), original); err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.Create(admin, model.CreateAgent{Harness: "omp", Name: "redirected", WorkspaceID: redirected.ID})
+	requireStatus(t, err, 400)
+	_, err = r.Create(model.Principal{}, model.CreateAgent{Harness: "omp", Name: "unauthorized"})
+	requireStatus(t, err, 403)
 }

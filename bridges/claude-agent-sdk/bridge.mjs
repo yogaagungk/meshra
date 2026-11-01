@@ -224,6 +224,7 @@ try {
         if ((generationDraft || profileManaged) && !draftInitialized) throw new Error('Claude restricted profile received a result without an enforced native tool roster');
         await session(message.session_id);
         if (message.usage) emit('usage', JSON.stringify({ inputTokens: message.usage.input_tokens + (message.usage.cache_read_input_tokens || 0) + (message.usage.cache_creation_input_tokens || 0), outputTokens: message.usage.output_tokens, cachedInputTokens: (message.usage.cache_read_input_tokens || 0) + (message.usage.cache_creation_input_tokens || 0) }));
+        if (Number.isFinite(message.total_cost_usd) && message.total_cost_usd >= 0) emit('usage', JSON.stringify({ reportedCost: message.total_cost_usd, currency: 'USD' }));
         const modelInfo = latestAssistant && message.modelUsage?.[latestAssistant.model];
         if (latestAssistant && modelInfo?.contextWindow > 0) {
           const u = latestAssistant.usage;

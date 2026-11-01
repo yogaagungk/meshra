@@ -31,7 +31,7 @@ func TestCollaborationHTTPMCPAuthorization(t *testing.T) {
 	tokens := map[string]string{}
 	for _, name := range []string{"claude:apmobileprod", "claude:apmobilewallet", "opencode:reader"} {
 		parts := strings.Split(name, ":")
-		httpJSON(t, client, server.URL, admin, "POST", "/v1/agents", model.CreateAgent{Harness: parts[0], Name: parts[1], Cwd: t.TempDir()}, nil, 201)
+		httpJSON(t, client, server.URL, admin, "POST", "/v1/agents", model.CreateAgent{Harness: parts[0], Name: parts[1]}, nil, 201)
 		var v map[string]string
 		httpJSON(t, client, server.URL, admin, "POST", "/v1/agents/"+name+"/token", nil, &v, 200)
 		tokens[name] = v["token"]

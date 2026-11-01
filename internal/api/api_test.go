@@ -413,7 +413,7 @@ func TestOperatorAccessAndTrace(t *testing.T) {
 		t.Fatal("MCP trace bypassed task authorization")
 	}
 	for _, tc := range []struct{ name, args string }{
-		{"meshra_agent_register", `{"harness":"omp","name":"new","cwd":"/tmp"}`},
+		{"meshra_agent_register", `{"harness":"omp","name":"new","workspaceId":"workspace-id"}`},
 		{"meshra_task_retry", `{"taskId":"t"}`},
 		{"meshra_metrics", `{}`}, {"meshra_doctor", `{}`},
 	} {

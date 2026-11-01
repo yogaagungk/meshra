@@ -35,16 +35,16 @@ Retention removes terminal tasks and their events together, never active work or
 
 ## Named agents and policy
 
-Names are lowercase `[a-z][a-z0-9_-]{0,62}`. Canonical IDs are `<harness>:<name>`, with harness `omp`, `claude`, `codex`, or `opencode`. Each identity owns a separate native session. Cwd must already exist; use independent repositories/worktrees when parallel writes are needed.
+Names are lowercase `[a-z][a-z0-9_-]{0,62}`. Canonical IDs are `<harness>:<name>`, with harness `omp`, `claude`, `codex`, or `opencode`. Each identity owns a separate native session. Omit `--workspace-id` for a private general working directory, or register a project in the console and pass its workspace ID. Existing agents retain their original directories; new registrations cannot supply arbitrary paths. Use independent repositories/worktrees when parallel writes are needed.
 
 ```sh
-meshra agent create --harness claude --name exampleone --cwd "$HOME/projects/exampleone" \
+meshra agent create --harness claude --name exampleone --workspace-id WORKSPACE_ID \
   --allow-to codex:reviewer --allow-operation list,status,request,events,cancel --delegate
-meshra agent create --harness claude --name exampletwo --cwd "$HOME/projects/exampletwo"
-meshra agent create --harness omp --name exampleworker --cwd "$HOME/projects/exampleworker" \
+meshra agent create --harness claude --name exampletwo
+meshra agent create --harness omp --name exampleworker \
   --allow-to claude:exampleone,claude:exampletwo \
   --allow-operation list,status,send,request,events,cancel
-meshra agent create --harness codex --name reviewer --cwd "$HOME/projects/review" \
+meshra agent create --harness codex --name reviewer \
   --model MODEL_ID --provider PROVIDER_ID
 meshra agent list
 meshra agent status claude:exampleone
@@ -121,7 +121,7 @@ Every endpoint, including MCP and identity, requires `Authorization: Bearer TOKE
 CreateAgent example (provider/model may be omitted):
 
 ```json
-{"harness":"omp","name":"source","cwd":"/absolute/existing/repository","config":{"model":"MODEL_ID","provider":"PROVIDER_ID"},"policy":{"destinations":["claude:target"],"operations":["list","status","send","request","events","cancel"],"delegate":true}}
+{"harness":"omp","name":"source","workspaceId":"REGISTERED_WORKSPACE_ID","config":{"model":"MODEL_ID","provider":"PROVIDER_ID"},"policy":{"destinations":["claude:target"],"operations":["list","status","send","request","events","cancel"],"delegate":true}}
 ```
 
 SendRequest properties: `from` (administrator-selected or matching authenticated agent), required `to`, required `text`, optional `idempotencyKey`, `timeoutSeconds`, `parentTaskId`, `maxHops`. The endpoint determines `type` (`send` or `request`). The service authenticates ownership/ancestry, never a caller-provided origin record. Responses are JSON: 201 for agent creation, 202 for admitted asynchronous send/request tasks, otherwise 200 except the opt-in waiting semantics below. Failures are `{"error":"actionable explanation"}` with the model service's status (400/401/403/404/409/413/429/503 as applicable); internal errors return a generic 500. Invalid methods use 405 and Allow; unsupported JSON media types use 415.

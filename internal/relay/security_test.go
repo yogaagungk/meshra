@@ -36,7 +36,7 @@ func TestRecipientAuthorization(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r, _ := openTest(t, nil)
 			origin := createTest(t, r, "omp", "origin")
-			dest, err := r.Create(admin, model.CreateAgent{Harness: "claude", Name: "recipient", Cwd: t.TempDir(), Policy: model.Policy{Senders: tc.senders, InboundOperations: tc.operations}})
+			dest, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "claude", Name: "recipient", Cwd: t.TempDir(), Policy: model.Policy{Senders: tc.senders, InboundOperations: tc.operations}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -81,7 +81,7 @@ func TestInboundPolicyJSONRoundTrip(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.policy), &policy); err != nil {
 				t.Fatal(err)
 			}
-			a, err := r.Create(admin, model.CreateAgent{Harness: "omp", Name: tc.name, Cwd: t.TempDir(), Policy: policy})
+			a, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "omp", Name: tc.name, Cwd: t.TempDir(), Policy: policy})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -118,7 +118,7 @@ func TestInboundPolicyJSONRoundTrip(t *testing.T) {
 func TestAuthorizationAuditContainsMetadataOnly(t *testing.T) {
 	r, _ := openTest(t, nil)
 	origin := createTest(t, r, "omp", "origin")
-	dest, err := r.Create(admin, model.CreateAgent{Harness: "claude", Name: "recipient", Cwd: t.TempDir(), Policy: model.Policy{Senders: []string{}}})
+	dest, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "claude", Name: "recipient", Cwd: t.TempDir(), Policy: model.Policy{Senders: []string{}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestAuthorizationAuditContainsMetadataOnly(t *testing.T) {
 		t.Fatal("denied message leaked to structured log")
 	}
 	// Untrusted routing fields are not safe audit metadata until normalized.
-	blocked, err := r.Create(admin, model.CreateAgent{Harness: "omp", Name: "blocked", Cwd: t.TempDir()})
+	blocked, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "omp", Name: "blocked", Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,11 +164,11 @@ func TestAuthorizationAuditContainsMetadataOnly(t *testing.T) {
 
 func TestRecipientPolicyDoesNotGrantOutboundPermission(t *testing.T) {
 	r, _ := openTest(t, nil)
-	origin, err := r.Create(admin, model.CreateAgent{Harness: "omp", Name: "origin", Cwd: t.TempDir(), Policy: model.Policy{Operations: []string{"send"}}})
+	origin, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "omp", Name: "origin", Cwd: t.TempDir(), Policy: model.Policy{Operations: []string{"send"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dest, err := r.Create(admin, model.CreateAgent{Harness: "claude", Name: "recipient", Cwd: t.TempDir(), Policy: model.Policy{Senders: []string{"*"}, InboundOperations: []string{"*"}}})
+	dest, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "claude", Name: "recipient", Cwd: t.TempDir(), Policy: model.Policy{Senders: []string{"*"}, InboundOperations: []string{"*"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestCreateRejectsUnsafePolicyAndRegistryValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := model.CreateAgent{Harness: "omp", Name: "unsafe", Cwd: t.TempDir()}
 			tc.change(&c)
-			_, err := r.Create(admin, c)
+			_, err := createWithWorkspaceTest(t, r, admin, c)
 			requireStatus(t, err, 400)
 		})
 	}
@@ -265,7 +265,7 @@ func TestStartRevalidatesCanonicalWorkspace(t *testing.T) {
 	if err := os.Mkdir(workspace, 0700); err != nil {
 		t.Fatal(err)
 	}
-	a, err := r.Create(admin, model.CreateAgent{Harness: "omp", Name: "workspace", Cwd: workspace})
+	a, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "omp", Name: "workspace", Cwd: workspace})
 	if err != nil {
 		t.Fatal(err)
 	}

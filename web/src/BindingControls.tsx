@@ -23,7 +23,7 @@ export function BindingControls({ profileId, conversationId, agentId }: { profil
     finally { setBusy(false); }
   }
   return <div className="form-stack" aria-label={"Profile binding " + (agentId || profileId)}>
-    <div className="automation-actions">{(["start", "stop", "restart"] as const).map((action) => <Button key={action} type="button" variant="outline" disabled={busy} onClick={() => void run(action)}>{action === "start" ? "Start binding" : action === "stop" ? "Stop binding" : "Restart binding"}</Button>)}</div>
+    <div className="automation-actions">{(["start", "stop", "restart"] as const).map((action) => <Button key={action} type="button" variant={action === "start" ? "positive" : "warning"} disabled={busy} onClick={() => void run(action)}>{action === "start" ? "Start binding" : action === "stop" ? "Stop binding" : "Restart binding"}</Button>)}</div>
     {error && <Notice>{error}</Notice>}
   </div>;
 }

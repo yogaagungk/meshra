@@ -225,7 +225,7 @@ export function Profiles() {
                     Edit
                   </Button>
                   <Button
-                    variant="outline"
+                    variant={profile.archived ? "positive" : "warning"}
                     size="sm"
                     onClick={() => void archive(profile)}
                   >

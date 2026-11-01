@@ -36,7 +36,7 @@ import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { Markdown } from "./Markdown";
 import { Delivery } from "./Chat";
-import { DirectoryPicker } from "./DirectoryPicker";
+import { AgentAvatar, AvatarPicker, defaultAvatar } from "./components/AgentAvatar";
 import { harnessName } from "./HarnessLogo";
 import {
   mergeTasks,
@@ -47,6 +47,7 @@ import {
   type SharedContext,
   type Task,
   type TraceEvent,
+  type Workspace,
 } from "./types";
 import { SettingsPanels } from "./Personal";
 import { Automation } from "./Automation";
@@ -196,6 +197,22 @@ function Agents({
   const [action, setAction] = useState("");
   const [failure, setFailure] = useState("");
   const [stopping, setStopping] = useState<Agent | null>(null);
+  const [removing, setRemoving] = useState<Agent | null>(null);
+  async function remove(a: Agent) {
+    setAction(a.id);
+    setFailure("");
+    try {
+      await api("agents/" + encodeURIComponent(a.id) + "/remove", {});
+      await client.invalidateQueries({ queryKey: ["agents"] });
+      setRemoving(null);
+      setSelected(null);
+    } catch (e) {
+      setFailure((e as Error).message);
+      setRemoving(null);
+    } finally {
+      setAction("");
+    }
+  }
   async function lifecycle(a: Agent, op: string) {
     setAction(a.id);
     setFailure("");
@@ -261,15 +278,14 @@ function Agents({
             )
           }
         >
-          Register an installed harness with a unique name and an existing
-          workspace directory.
+          Register an installed harness as a general agent or assign it to a registered workspace.
         </Empty>
       ) : (
         <div className="agent-grid">
           {rows.map((a) => (
             <article className="agent-card" key={a.id}>
               <div className="agent-card-top">
-                <Harness id={a.id} />
+                <AgentAvatar icon={a.avatarIcon} color={a.avatarColor} />
                 <Status state={a.state} />
               </div>
               <button
@@ -365,6 +381,11 @@ function Agents({
               Human operator requests use your console session. Agent-to-agent
               requests retain their own policies.
             </div>
+            <div className="dialog-footer">
+              <Button variant="destructive" disabled={!!action} onClick={() => { setRemoving(selected); setSelected(null); }}>
+                Delete agent
+              </Button>
+            </div>
           </div>
         )}
       </Dialog>
@@ -389,6 +410,20 @@ function Agents({
           </Button>
         </div>
       </Dialog>
+      <Dialog
+        open={!!removing}
+        onOpenChange={() => setRemoving(null)}
+        title="Delete this agent?"
+        description="The agent must be stopped and have no outstanding tasks. Its credentials and access grants will be removed; its identity cannot be reused. Existing history remains."
+      >
+        <p className="mono">{removing?.id}</p>
+        <div className="dialog-footer">
+          <Button variant="outline" disabled={!!action} onClick={() => setRemoving(null)}>Cancel</Button>
+          <Button variant="destructive" disabled={!!action} onClick={() => removing && void remove(removing)}>
+            {action ? "Deleting…" : "Delete agent"}
+          </Button>
+        </div>
+      </Dialog>
       <RegisterAgent open={create} onOpenChange={setCreate} />
     </>
   );
@@ -403,8 +438,13 @@ function RegisterAgent({
   const client = useQueryClient();
   const [harness, setHarness] = useState("codex");
   const [name, setName] = useState("");
-  const [cwd, setCwd] = useState("");
-  const [browsing, setBrowsing] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [avatar, setAvatar] = useState(defaultAvatar);
+  const workspaces = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: () => api<Workspace[]>("workspaces"),
+    enabled: open,
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit(e: FormEvent) {
@@ -415,14 +455,16 @@ function RegisterAgent({
       await api("agents", {
         harness,
         name,
-        cwd,
+        workspaceId,
+        avatarIcon: avatar.icon,
+        avatarColor: avatar.color,
         config: {},
         policy: { destinations: [], operations: [], delegate: false },
       });
       client.invalidateQueries({ queryKey: ["agents"] });
       onOpenChange(false);
       setName("");
-      setCwd("");
+      setWorkspaceId("");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -434,7 +476,7 @@ function RegisterAgent({
       open={open}
       onOpenChange={onOpenChange}
       title="Register a named agent"
-      description="Use an installed harness and an existing local directory. Registration won’t start a model turn."
+      description="Use an installed harness, with a private general workspace or a registered project. Registration won’t start a model turn."
     >
       <form onSubmit={submit} className="form-stack">
         <label htmlFor="agent-harness">Harness</label>
@@ -459,46 +501,24 @@ function RegisterAgent({
         <small className="mono">
           Identity: {harness}:{name || "instance-name"}
         </small>
-        <label htmlFor="agent-cwd">Existing workspace directory</label>
-        <div className="workspace-picker">
-          <input
-            id="agent-cwd"
-            value={cwd}
-            placeholder="Choose a folder…"
-            readOnly
-            required
-            onClick={() => setBrowsing(true)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setBrowsing(true);
-              }
-            }}
-            aria-haspopup="dialog"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setBrowsing(true)}
-          >
-            <FolderOpen size={17} />
-            Browse…
-          </Button>
-        </div>
-        <DirectoryPicker
-          open={browsing}
-          onOpenChange={setBrowsing}
-          onSelect={setCwd}
-        />
+        <AvatarPicker value={avatar} onChange={setAvatar} />
+        <label htmlFor="agent-workspace">Workspace</label>
+        <select id="agent-workspace" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)}>
+          <option value="">General (private workspace)</option>
+          {workspaces.data?.map((workspace) => (
+            <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+          ))}
+        </select>
+        {workspaces.isError && <Notice>{workspaces.error.message}</Notice>}
 
         <div className="policy-note">
           <ShieldCheck size={16} />
-          Read-oriented tools. Agent-initiated delegation is disabled by
-          default. Set outbound policies when creating agents with the CLI.
+          Full filesystem, command and network access with your OS permissions.
+          The workspace is not a sandbox. Agent delegation is disabled by default.
         </div>
         {error && <Notice>{error}</Notice>}
         <div className="dialog-footer">
-          <Button type="submit" disabled={busy || !name || !cwd}>
+          <Button type="submit" disabled={busy || !name || (!!workspaceId && !workspaces.data?.some((workspace) => workspace.id === workspaceId))}>
             {busy ? "Registering…" : "Register agent"}
           </Button>
         </div>
@@ -510,7 +530,7 @@ function RecentActivity() {
   const [before, setBefore] = useState(0);
   const data = useQuery({
     queryKey: ["recent-activity", before],
-    queryFn: () => api<Page>("tasks?limit=20&before=" + before),
+    queryFn: () => api<Page>("activity?limit=20&before=" + before),
     refetchInterval: 15000,
     gcTime: 0,
   });
@@ -522,7 +542,7 @@ function RecentActivity() {
         <Notice>{data.error.message}</Notice>
       ) : !data.data.items.length ? (
         <Empty icon={Activity} title="Nothing here yet">
-          Your conversations will appear here.
+          Operational tasks will appear here. Chat stays in your conversations.
         </Empty>
       ) : (
         <div className="recent-activity">
@@ -573,6 +593,7 @@ export function ContextBrowser({
   onAttach?: (ref: Ref) => void;
   recipients?: string[];
 }) {
+  const client = useQueryClient();
   const [q, setQ] = useState("");
   const [type, setType] = useState("");
   const [selected, setSelected] = useState<SharedContext | null>(null);
@@ -581,6 +602,8 @@ export function ContextBrowser({
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
   const [publish, setPublish] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const data = useQuery({
     queryKey: ["contexts", q, type, after],
     queryFn: () =>
@@ -626,9 +649,43 @@ export function ContextBrowser({
       setChecking(false);
     }
   }
+  async function deleteContext() {
+    if (!selected) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await collab("context.delete", { contextId: selected.contextId });
+      client.removeQueries({ queryKey: ["context", selected.contextId] });
+      setConfirmDelete(false);
+      setSelected(null);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["contexts"] }),
+        client.invalidateQueries({ queryKey: ["conversation"] }),
+      ]);
+    } catch (e) {
+      setError((e as Error).message);
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
   return (
     <div className={"context-browser " + (compact ? "compact" : "")}>
       <PublishContext open={publish} onOpenChange={setPublish} />
+      <Dialog
+        open={confirmDelete}
+        onOpenChange={(open) => { if (!deleting) setConfirmDelete(open); }}
+        title="Delete this context?"
+        description="All versions become unavailable, including versions pinned to conversations or tasks. Existing task references and immutable artifacts remain in history; this does not erase stored content."
+      >
+        <p>{selected?.title || "Untitled context"} · <code>{selected?.contextId}</code></p>
+        <div className="dialog-footer">
+          <Button variant="outline" disabled={deleting} onClick={() => setConfirmDelete(false)}>Cancel</Button>
+          <Button variant="destructive" disabled={deleting} onClick={() => void deleteContext()}>
+            {deleting ? "Deleting…" : "Delete context"}
+          </Button>
+        </div>
+      </Dialog>
       <div className="section-toolbar">
         <div className="search-field">
           <Search size={16} />
@@ -769,6 +826,11 @@ export function ContextBrowser({
             </div>
           )}
           {error && <Notice>{error}</Notice>}
+          {!onAttach && (
+            <div className="dialog-footer">
+              <Button variant="destructive" onClick={() => setConfirmDelete(true)}>Delete context</Button>
+            </div>
+          )}
           {onAttach && (
             <div className="dialog-footer">
               <span className="muted">
@@ -1023,7 +1085,7 @@ function PublishContext({
                   )
                 }
               />
-              <Harness id={a.id} />
+              <AgentAvatar icon={a.avatarIcon} color={a.avatarColor} size={28} />
               <code>{a.id}</code>
             </label>
           ))}

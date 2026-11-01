@@ -110,11 +110,11 @@ func TestKilledNativeAdapterIsAmbiguousWithoutBlindReplay(t *testing.T) {
 	}
 	defer core.Close()
 	admin := model.Principal{Admin: true}
-	origin, err := core.Create(admin, model.CreateAgent{Harness: "omp", Name: "origin", Cwd: t.TempDir(), Policy: model.Policy{Operations: []string{"status", "events"}}})
+	origin, err := core.Create(admin, model.CreateAgent{Harness: "omp", Name: "origin", Policy: model.Policy{Operations: []string{"status", "events"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dest, err := core.Create(admin, model.CreateAgent{Harness: "codex", Name: "crash", Cwd: t.TempDir()})
+	dest, err := core.Create(admin, model.CreateAgent{Harness: "codex", Name: "crash"})
 	if err != nil {
 		t.Fatal(err)
 	}

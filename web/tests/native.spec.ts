@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mkdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 test("real browser chat with OMP, Codex and OpenCode", async ({ page }) => {
@@ -31,14 +31,11 @@ test("real browser chat with OMP, Codex and OpenCode", async ({ page }) => {
     .getByRole("link", { name: "Agents", exact: true })
     .click();
   for (const a of agents) {
-    const cwd = join(dir, "workspaces", a.n);
-    mkdirSync(cwd, { recursive: true });
     await page
       .getByRole("button", { name: "Register agent", exact: true })
       .click();
     await page.getByLabel("Harness", { exact: true }).selectOption(a.h);
     await page.getByLabel("Instance name").fill(a.n);
-    await page.getByLabel("Existing workspace directory").fill(cwd);
     await page
       .getByRole("dialog")
       .getByRole("button", { name: "Register agent", exact: true })

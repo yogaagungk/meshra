@@ -1,0 +1,6 @@
+.usage-dashboard-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 18px 0; }
+.usage-dashboard-stats > div { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.usage-dashboard-stats svg { color: var(--accent); }
+.usage-dashboard-stats span, .usage-dashboard-stats small { color: var(--muted); }
+.usage-dashboard-stats strong { font-size: 1.2rem; overflow-wrap: anywhere; }
+.usage-dashboard-table td, .usage-dashboard-table th { vertical-align: top; }

@@ -1,4 +1,4 @@
-import { MessageSquare, Pin, Plus, Search, Users, X } from "lucide-react";
+import { MessageSquare, Pin, Plus, Search, Trash2, Users, X } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { HarnessLogo, harnessName } from "./HarnessLogo";
 import { localRead } from "./api";
@@ -14,6 +14,8 @@ type Props = {
   onFilter: (value: ConversationFilter) => void;
   pins: string[];
   onPin: (id: string) => void;
+  onDelete: (id: string, title: string) => void;
+  deleting: boolean;
   onNew: () => void;
   loading: boolean;
   error: boolean;
@@ -45,6 +47,8 @@ export function ConversationList({
   onFilter,
   pins,
   onPin,
+  onDelete,
+  deleting,
   onNew,
   loading,
   error,
@@ -279,6 +283,16 @@ export function ConversationList({
                           onClick={() => onPin(c.conversationId)}
                         >
                           <Pin size={15} />
+                        </button>
+                        <button
+                          className="conversation-delete"
+                          type="button"
+                          aria-label={"Delete " + c.title}
+                          title="Delete conversation"
+                          disabled={deleting}
+                          onClick={() => onDelete(c.conversationId, c.title)}
+                        >
+                          <Trash2 size={15} />
                         </button>
                       </li>
                     );

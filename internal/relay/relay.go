@@ -79,6 +79,9 @@ var migrationV17 string
 //go:embed migrations/018.sql
 var migrationV18 string
 
+//go:embed migrations/019.sql
+var migrationV19 string
+
 // schemaMigrations lists every embedded schema step in order. A new feature
 // appends its own step; existing steps are never renumbered.
 var schemaMigrations = []struct {
@@ -86,10 +89,11 @@ var schemaMigrations = []struct {
 	source  string
 }{
 	{10, migrationV10}, {11, migrationV11}, {12, migrationV12}, {13, migrationV13},
-	{14, migrationV14}, {15, migrationV15}, {16, migrationV16}, {17, migrationV17}, {18, migrationV18},
+	{14, migrationV14}, {15, migrationV15}, {16, migrationV16}, {17, migrationV17}, {18, migrationV18}, {19, migrationV19},
 }
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+var avatarColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
 type slot struct {
 	lastUsed   time.Time
@@ -336,13 +340,47 @@ func (r *Relay) agents() ([]model.Agent, error) {
 func (r *Relay) Create(p model.Principal, c model.CreateAgent) (model.Agent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.createLocked(p, c)
+	if err := requireAdmin(p); err != nil {
+		return model.Agent{}, err
+	}
+	if r.closed {
+		return model.Agent{}, model.Err(503, "relay is stopping")
+	}
+	if c.Cwd != "" {
+		return model.Agent{}, model.Err(400, "choose a registered workspace by ID, not a directory")
+	}
+	if c.WorkspaceID != "" {
+		w, err := r.workspace(c.WorkspaceID)
+		if err != nil {
+			return model.Agent{}, err
+		}
+		if err := validateWorkspace(model.Agent{Cwd: w.Path}); err != nil {
+			return model.Agent{}, err
+		}
+		c.Cwd = w.Path
+		return r.createLocked(p, c)
+	}
+	root := filepath.Join(filepath.Dir(r.lock.Name()), "agent-workspaces")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return model.Agent{}, err
+	}
+	dir, err := os.MkdirTemp(root, "agent-")
+	if err != nil {
+		return model.Agent{}, err
+	}
+	c.Cwd = dir
+	a, err := r.createLocked(p, c)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+	}
+	return a, err
 }
 func (r *Relay) createLocked(p model.Principal, c model.CreateAgent) (model.Agent, error) {
 	a, err := r.prepareAgentLocked(p, c)
 	if err != nil {
 		return a, err
 	}
+	a.WorkspaceID = c.WorkspaceID
 	b, _ := json.Marshal(a)
 	if _, err = r.db.Exec("INSERT INTO agents(id,body) VALUES(?,?)", a.ID, string(b)); err != nil {
 		if _, e := r.agent(a.ID); e == nil {
@@ -366,6 +404,14 @@ func (r *Relay) prepareAgentLocked(p model.Principal, c model.CreateAgent) (mode
 	}
 	if c.Harness != "omp" && c.Harness != "claude" && c.Harness != "codex" && c.Harness != "opencode" && c.Harness != "openai" && c.Harness != "acp" {
 		return a, model.Err(400, "unsupported harness")
+	}
+	switch c.AvatarIcon {
+	case "", "spark", "orbit", "bot", "star", "hex", "flower", "bolt":
+	default:
+		return a, model.Err(400, "unsupported avatar icon")
+	}
+	if c.AvatarColor != "" && !avatarColorPattern.MatchString(c.AvatarColor) {
+		return a, model.Err(400, "avatar color must be a six-digit hex color")
 	}
 	if c.Concurrency != 0 && c.Concurrency != 1 {
 		return a, model.Err(400, "MVP concurrency must be one")
@@ -423,7 +469,7 @@ func (r *Relay) prepareAgentLocked(p model.Principal, c model.CreateAgent) (mode
 			caps[k] = v
 		}
 	}
-	a = model.Agent{ManagedChat: c.ManagedChat, SchemaVersion: 1, ID: id, Harness: c.Harness, Name: c.Name, DisplayName: display, Cwd: cwd, Config: c.Config, Policy: c.Policy, Concurrency: 1, State: "registered", LastSeen: now(), Capabilities: caps}
+	a = model.Agent{ManagedChat: c.ManagedChat, SchemaVersion: 1, ID: id, Harness: c.Harness, Name: c.Name, DisplayName: display, AvatarIcon: c.AvatarIcon, AvatarColor: c.AvatarColor, Cwd: cwd, Config: c.Config, Policy: c.Policy, Concurrency: 1, State: "registered", LastSeen: now(), Capabilities: caps}
 	a.GenerationDraft = c.GenerationDraft
 	return a, nil
 }
