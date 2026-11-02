@@ -163,14 +163,17 @@ h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
   --icon-user: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8' r='3.6'/%3E%3Cpath d='M5 20c0-3.9 3.1-6 7-6s7 2.1 7 6'/%3E%3C/svg%3E");
 }
 /* Transcript: your prompt is a full-width quiet block led by ">", replies are plain text led by a colored bullet. */
+.chat-layout {
+  --chat-size: 14px; /* one knob for transcript and composer text */
+}
 .chat-layout .message-scroll .markdown {
-  font-size: 15px;
-  line-height: 1.7;
+  font-size: var(--chat-size);
+  line-height: 1.65;
 }
 .chat-layout .message-scroll code,
 .chat-layout .message-scroll pre {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: calc(var(--chat-size) - 1.5px);
 }
 .chat-layout .message {
   position: relative;
@@ -190,16 +193,16 @@ h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
   position: relative;
   background: var(--surface-2);
   border-radius: 8px;
-  padding: 10px 14px 10px 40px;
+  padding: 8px 14px 8px 38px;
   color: var(--text);
 }
 .chat-layout .message-request .message-body::before {
   content: "";
   position: absolute;
   left: 13px;
-  top: 14px;
-  width: 16px;
-  height: 16px;
+  top: 12px;
+  width: 15px;
+  height: 15px;
   background: var(--muted);
   -webkit-mask: var(--icon-user) center / contain no-repeat;
   mask: var(--icon-user) center / contain no-repeat;
@@ -230,10 +233,10 @@ h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
 .chat-layout .response-tools,
 .chat-layout .message-meta > button {
   font-family: var(--font-body-family, inherit);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 .chat-layout .composer textarea {
-  font-size: 15px;
+  font-size: var(--chat-size);
 }
 /* The latest reply wipes in top to bottom, like text arriving. */
 .message-scroll .message-group:last-child .message-response .message-body > .markdown,
