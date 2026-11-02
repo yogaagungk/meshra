@@ -450,6 +450,8 @@ func (r *Relay) routineOperation(ctx context.Context, p model.Principal, operati
 		return r.routineRuns(raw)
 	case "routines.cancelRun":
 		return r.routineCancelRun(raw)
+	case "flows.list":
+		return r.flowList(raw)
 	case "flows.get":
 		return r.flowGet(raw)
 	case "flows.save":

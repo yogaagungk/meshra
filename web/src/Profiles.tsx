@@ -25,6 +25,7 @@ import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { harnessName } from "./HarnessLogo";
+import { ProfileSkills } from "./AutomationSkills";
 import { terminal, type ModelOption, type Task, type TraceEvent, type Workspace } from "./types";
 
 type CapabilityKey = keyof ProfileCapabilities;
@@ -562,6 +563,7 @@ function ProfileDialog({
             Instructions: {new TextEncoder().encode(instructions).length}/16384 bytes.
             Instructions are sent to the selected provider. Do not include credentials.
           </small>
+          {profile && <ProfileSkills profileId={profile.id} />}
           <label htmlFor="profile-workspace">Workspace</label>
           <div className="automation-inline">
             <select
@@ -691,9 +693,9 @@ function ProfileDialog({
               config={binding.config}
               workspaceId={workspaceId}
               disabled={busy || (connectionHarness && !provider)}
+              startOpen={!profile}
               onApply={(draft) => { setName(draft.name); setInstructions(draft.instructions); }}
             />
-              startOpen={!profile}
           )}
           <fieldset className="automation-capabilities">
             <legend>Capabilities</legend>
@@ -898,16 +900,16 @@ function ProfileGeneration({
   config,
   workspaceId,
   disabled,
+  startOpen,
   onApply,
 }: {
-  startOpen,
   harness: ProfileHarness;
   config: ProfileConfig;
   workspaceId: string;
   disabled: boolean;
+  startOpen: boolean;
   onApply: (draft: ProfileDraft) => void;
 }) {
-  startOpen: boolean;
   const [description, setDescription] = useState("");
   const [taskId, setTaskId] = useState("");
   const [starting, setStarting] = useState(false);

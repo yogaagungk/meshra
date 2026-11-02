@@ -57,6 +57,11 @@ members of that chat. Queued messages appear in a strip above the composer with
 Pause, Run next and Cancel, and a failed turn offers **Try with another agent**.
 See [OpenBot comparison](docs/OPENBOT_COMPARISON.md).
 
+**Automation:** Queue, Routines, Runs, Flows, Skills and Templates live under
+**Automation** (`#automation/<tab>`). Write a skill and pin it to profiles, build a flow
+of steps with a live diagram, schedule it as a routine, and follow every occurrence
+in **Runs**, including why one was skipped.
+
 **One-to-one AI chat:** choose **Chat with an AI** when creating a conversation for
 a simpler chat view, contextual follow-ups, stop/regenerate controls, and bounded
 history loading. Each turn uses a fresh native session with a limited recent-history

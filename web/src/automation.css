@@ -326,3 +326,272 @@
   .profile-binding-bar { padding: 10px 14px; }
   .profile-composer { padding: 12px 14px; }
 }
+
+/* Automation revamp: tabs, queue, runs, flows, skills */
+.automation-attention-slim {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--font-meta);
+  color: var(--muted);
+}
+.tab-count {
+  margin-left: 8px;
+  padding: 0 7px;
+  min-width: 20px;
+  border-radius: 999px;
+  background: var(--secondary-tint);
+  color: var(--secondary-strong);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--secondary);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.queue-state {
+  display: block;
+  color: var(--muted);
+}
+.queue-state.is-paused {
+  color: var(--warning, var(--text));
+}
+.automation-task-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.queue-position {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--secondary-tint);
+  color: var(--secondary-strong);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+.automation-task-body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.automation-task-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.routine-last-run {
+  margin: 4px 0 0;
+  font-size: var(--font-meta);
+}
+
+/* Master/detail layout shared by Flows and Skills */
+.automation-split {
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.automation-pick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.automation-pick-list button {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.automation-pick-list button[aria-pressed="true"] {
+  background: var(--secondary-tint);
+  border-color: var(--secondary-border);
+}
+.automation-split-hint {
+  padding: 24px 0;
+}
+.automation-sticky-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.automation-used-by {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.automation-used-by ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.automation-used-by li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Flow editor and diagram */
+.flow-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.flow-step {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.flow-step header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.flow-follows {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.flow-follows legend {
+  float: left;
+  margin-right: 12px;
+  padding: 0;
+  font-size: var(--font-label);
+}
+.flow-follows label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.flow-follows label.is-disabled {
+  opacity: 0.5;
+}
+.flow-graph-scroll {
+  overflow-x: auto;
+  padding: 4px 0;
+}
+.flow-graph {
+  display: block;
+  max-width: none;
+}
+.flow-edge {
+  stroke: var(--border-strong, var(--muted));
+  stroke-width: 1.5;
+}
+.flow-arrow-head {
+  fill: var(--muted);
+}
+.flow-node rect {
+  fill: var(--surface);
+  stroke: var(--border-strong, var(--border));
+  stroke-width: 1.2;
+}
+.flow-node-title {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.flow-node-sub {
+  fill: var(--muted);
+  font-size: 12px;
+}
+.flow-node-completed rect { stroke: var(--success); }
+.flow-node-failed rect { stroke: var(--error); }
+.flow-node-admitted rect { stroke: var(--secondary); stroke-width: 2; }
+.flow-node-skipped rect, .flow-node-cancelled rect { stroke-dasharray: 4 3; }
+
+/* Runs timeline */
+.run-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.run-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.run-badge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: var(--font-meta);
+  border: 1px solid var(--border);
+}
+.run-ok { color: var(--success); border-color: currentColor; }
+.run-bad { color: var(--error); border-color: currentColor; }
+.run-warn { color: var(--secondary); border-color: currentColor; }
+.run-detail {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 4px;
+}
+.run-detail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+@media (max-width: 760px) {
+  .automation-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .automation-task-list li {
+    flex-wrap: wrap;
+  }
+}
+.run-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}

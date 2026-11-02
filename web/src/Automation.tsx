@@ -14,7 +14,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Sparkles,
-  Trash2,
+  X,
 } from "lucide-react";
 import {
   automation,
@@ -29,9 +29,13 @@ import {
 } from "./automation-api";
 import type { RoutineToken, Template, TemplatePreview } from "./automation-api";
 import { downloadAttachment, uploadAttachment } from "./automation-api";
-import { api, collab } from "./api";
+import { api, collab, localRead, localWrite } from "./api";
 import type { Agent, Conversation } from "./types";
 import { Approvals } from "./Approvals";
+import { SkillsPanel } from "./AutomationSkills";
+import { FlowsPanel } from "./AutomationFlows";
+import { RunBadge, RunsPanel, useRecentRuns } from "./AutomationRuns";
+import { goAutomation, relativeTime, skipReasons, useProfiles } from "./automationShared";
 import { Empty, Notice } from "./App";
 import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
@@ -54,39 +58,52 @@ function randomKey() {
 }
 
 /**
- * Automation is the durable surface: queued work, scheduled routines, flow
- * graphs, reviewed skills and reusable templates.
+ * Automation is the durable surface: queued work, scheduled routines and their
+ * runs, flow graphs, reviewed skills and reusable templates.
  */
-export function Automation() {
-  const [tab, setTab] = useState("queue");
+const TABS = [
+  ["queue", "Queue"],
+  ["routines", "Routines"],
+  ["runs", "Runs"],
+  ["flows", "Flows"],
+  ["skills", "Skills"],
+  ["templates", "Templates"],
+] as const;
+
+export function Automation({ tab }: { tab?: string }) {
+  const current = TABS.some(([key]) => key === tab) ? (tab as string) : "queue";
+  const item = decodeURIComponent(location.hash.slice(1).split("/")[2] || "");
+  const queue = useQuery({ queryKey: ["queue"], queryFn: () => automation("queue.list", {}), refetchInterval: 5000, refetchIntervalInBackground: false });
+  const routines = useQuery({ queryKey: ["routines"], queryFn: () => automation("routines.list", { limit: 50 }) });
+  const flows = useQuery({ queryKey: ["flows"], queryFn: () => automation("flows.list", { limit: 100 }) });
+  const skills = useQuery({ queryKey: ["skills"], queryFn: () => automation("skills.list", { limit: 100 }) });
+  const counts: Record<string, number | undefined> = {
+    queue: queue.data?.items.reduce((n, s) => n + s.tasks.length, 0),
+    routines: routines.data?.items?.length,
+    flows: flows.data?.items.length,
+    skills: skills.data?.items.length,
+  };
   return (
     <div className="automation-page">
       <Approvals />
       <div className="automation-tabs" role="group" aria-label="Automation sections">
-        {[
-          ["queue", "Queue"],
-          ["routines", "Routines"],
-          ["flows", "Flows"],
-          ["skills", "Skills"],
-          ["templates", "Templates"],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            aria-pressed={tab === key}
-            onClick={() => setTab(key)}
-          >
+        {TABS.map(([key, label]) => (
+          <button key={key} aria-pressed={current === key} onClick={() => goAutomation(key)}>
             {label}
+            {!!counts[key] && <span className="tab-count">{counts[key]}</span>}
           </button>
         ))}
       </div>
-      {tab === "queue" ? (
+      {current === "queue" ? (
         <QueuePanel />
-      ) : tab === "routines" ? (
+      ) : current === "routines" ? (
         <RoutinesPanel />
-      ) : tab === "flows" ? (
-        <FlowsPanel />
-      ) : tab === "skills" ? (
-        <SkillsPanel />
+      ) : current === "runs" ? (
+        <RunsPanel />
+      ) : current === "flows" ? (
+        <FlowsPanel focus={item || undefined} />
+      ) : current === "skills" ? (
+        <SkillsPanel focus={item || undefined} />
       ) : (
         <TemplatesPanel />
       )}
@@ -98,26 +115,22 @@ function QueuePanel() {
   const client = useQueryClient();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
-  const [orders, setOrders] = useState<Record<string, string[]>>({});
   const queues = useQuery({
     queryKey: ["queue"],
     queryFn: () => automation("queue.list", {}),
-    refetchInterval: 15000,
+    refetchInterval: 5000,
     refetchIntervalInBackground: false,
   });
-  const items = queues.data?.items || [];
+  const all = queues.data?.items || [];
+  const items = all.filter((s) => s.tasks.length > 0 || s.paused);
+  const queued = items.reduce((n, s) => n + s.tasks.length, 0);
+  const idle = all.length - items.length;
 
-  async function run(
-    state: QueueState,
-    operation: "queue.pause" | "queue.resume",
-  ) {
-    setBusy(state.agentId);
+  async function act(key: string, work: () => Promise<unknown>) {
+    setBusy(key);
     setError("");
     try {
-      await automation(operation, {
-        agentId: state.agentId,
-        expectedRevision: state.revision,
-      });
+      await work();
       await client.invalidateQueries({ queryKey: ["queue"] });
     } catch (e) {
       setError((e as Error).message);
@@ -125,47 +138,24 @@ function QueuePanel() {
       setBusy("");
     }
   }
-
-  async function reorder(state: QueueState, taskIds: string[]) {
-    setBusy(state.agentId);
-    setError("");
-    try {
-      await automation("queue.reorder", {
-        agentId: state.agentId,
-        expectedRevision: state.revision,
-        taskIds,
-      });
-      setOrders((v) => {
-        const next = { ...v };
-        delete next[state.agentId];
-        return next;
-      });
-      await client.invalidateQueries({ queryKey: ["queue"] });
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy("");
-    }
-  }
-
-  function order(state: QueueState) {
-    return orders[state.agentId] || state.tasks.map((t) => t.taskId);
-  }
-
-  function move(state: QueueState, index: number, delta: number) {
-    const current = [...order(state)];
-    const target = index + delta;
-    if (target < 0 || target >= current.length) return;
-    const [moved] = current.splice(index, 1);
-    current.splice(target, 0, moved);
-    setOrders((v) => ({ ...v, [state.agentId]: current }));
+  const control = (state: QueueState, operation: "queue.pause" | "queue.resume") =>
+    act(state.agentId, () => automation(operation, { agentId: state.agentId, expectedRevision: state.revision }));
+  const reorder = (state: QueueState, taskIds: string[]) =>
+    act(state.agentId, () => automation("queue.reorder", { agentId: state.agentId, expectedRevision: state.revision, taskIds }));
+  function moved(state: QueueState, index: number, to: number) {
+    const ids = state.tasks.map((t) => t.taskId);
+    const [id] = ids.splice(index, 1);
+    ids.splice(to, 0, id);
+    return ids;
   }
 
   return (
     <>
       <div className="section-toolbar">
-        <span className="muted">
-          Queued work per recipient. Reordering changes dispatch order only.
+        <span className="muted" role="status">
+          {queued
+            ? `${queued} message${queued === 1 ? "" : "s"} waiting across ${items.length} agent${items.length === 1 ? "" : "s"}. Changes apply immediately.`
+            : "Messages wait here when an agent is busy, offline or paused."}
         </span>
         <Button variant="outline" onClick={() => void queues.refetch()}>
           <RefreshCw size={15} />
@@ -178,117 +168,101 @@ function QueuePanel() {
         <p role="status">Loading queues…</p>
       ) : !items.length ? (
         <Empty icon={ListOrdered} title="Nothing is queued">
-          Queued tasks appear here with their recipient, so you can pause a
-          recipient or reorder its pending work.
+          When you message an agent that is busy or stopped, the message waits here. You can pause an agent, send a message first, or cancel it.
         </Empty>
       ) : (
         <div className="automation-queue-list">
-          {items.map((state) => {
-            const current = order(state);
-            const changed =
-              current.join(",") !== state.tasks.map((t) => t.taskId).join(",");
-            return (
-              <section className="automation-card" key={state.agentId}>
-                <header className="automation-card-head">
-                  <div>
-                    <strong>{state.agentId}</strong>
-                    {state.profileId && (
-                      <small className="muted">Profile {state.profileId}</small>
-                    )}
-                  </div>
-                  <div className="automation-actions">
-                    <span className="automation-attention-status">
-                      {state.paused ? "Paused" : "Dispatching"}
-                    </span>
-                    {state.profileId && state.tasks[0]?.conversationId && (
-                      <BindingControls
-                        profileId={state.profileId}
-                        conversationId={state.tasks[0].conversationId}
-                        agentId={state.agentId}
-                      />
-                    )}
-                    {state.paused ? (
-                      <Button
-                        variant="positive"
-                        size="sm"
-                        disabled={busy === state.agentId}
-                        onClick={() => void run(state, "queue.resume")}
-                      >
-                        <Play size={13} />
-                        Resume
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="warning"
-                        size="sm"
-                        disabled={busy === state.agentId}
-                        onClick={() => void run(state, "queue.pause")}
-                      >
-                        <Pause size={13} />
-                        Pause
-                      </Button>
-                    )}
-                  </div>
-                </header>
-                {!state.tasks.length ? (
-                  <p className="muted">No queued tasks for this recipient.</p>
-                ) : (
-                  <ol className="automation-task-list">
-                    {current.map((taskId, index) => {
-                      const task = state.tasks.find((t) => t.taskId === taskId);
-                      return (
-                        <li key={taskId}>
-                          <div className="automation-task-body">
-                            <span className="automation-task-text">
-                              {task?.text || taskId}
-                            </span>
-                            <small className="muted">
-                              {task ? stateLabel(task) : taskId}
-                            </small>
-                          </div>
-                          <div className="automation-actions">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={"Move " + taskId + " up"}
-                              disabled={index === 0}
-                              onClick={() => move(state, index, -1)}
-                            >
-                              <ArrowUp size={14} />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={"Move " + taskId + " down"}
-                              disabled={index === current.length - 1}
-                              onClick={() => move(state, index, 1)}
-                            >
-                              <ArrowDown size={14} />
-                            </Button>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                )}
-                <footer className="automation-card-foot">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!changed || busy === state.agentId}
-                    onClick={() => void reorder(state, current)}
-                  >
-                    Apply new order
-                  </Button>
-                  {changed && (
-                    <span className="muted">
-                      The order must name every queued task of this recipient.
-                    </span>
+          {items.map((state) => (
+            <section className="automation-card" key={state.agentId} aria-label={"Queue for " + state.agentId}>
+              <header className="automation-card-head">
+                <div>
+                  <strong>{state.agentId}</strong>
+                  <small className={"queue-state " + (state.paused ? "is-paused" : "")}>
+                    {state.paused
+                      ? "Paused: nothing is sent to this agent until you resume."
+                      : `${state.tasks.length} waiting, sent one at a time.`}
+                  </small>
+                </div>
+                <div className="automation-actions">
+                  {state.profileId && state.tasks[0]?.conversationId && (
+                    <BindingControls profileId={state.profileId} conversationId={state.tasks[0].conversationId} agentId={state.agentId} />
                   )}
-                </footer>
-              </section>
-            );
-          })}
+                  {state.paused ? (
+                    <Button variant="positive" size="sm" disabled={busy === state.agentId} onClick={() => void control(state, "queue.resume")}>
+                      <Play size={13} />
+                      Resume
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" disabled={busy === state.agentId} onClick={() => void control(state, "queue.pause")}>
+                      <Pause size={13} />
+                      Pause
+                    </Button>
+                  )}
+                </div>
+              </header>
+              <ol className="automation-task-list">
+                {state.tasks.map((task, index) => {
+                  const snippet = task.text.length > 40 ? task.text.slice(0, 40) + "…" : task.text;
+                  return (
+                    <li key={task.taskId}>
+                      <span className="queue-position" aria-hidden="true">
+                        {index + 1}
+                      </span>
+                      <div className="automation-task-body">
+                        <span className="automation-task-text">{task.text}</span>
+                        <small className="muted">
+                          {index === 0 && !state.paused ? "Next to send" : "Waiting"} · added {relativeTime(task.createdAt)}
+                          {task.conversationId && (
+                            <>
+                              {" · "}
+                              <a href={"#chat/" + task.conversationId}>Open conversation</a>
+                            </>
+                          )}
+                        </small>
+                      </div>
+                      <div className="automation-actions">
+                        {index > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy === state.agentId}
+                            aria-label={`Send “${snippet}” next`}
+                            onClick={() => void reorder(state, moved(state, index, 0))}
+                          >
+                            <ArrowUp size={13} />
+                            Send next
+                          </Button>
+                        )}
+                        {index < state.tasks.length - 1 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busy === state.agentId}
+                            aria-label={`Move “${snippet}” later`}
+                            onClick={() => void reorder(state, moved(state, index, index + 1))}
+                          >
+                            <ArrowDown size={13} />
+                            Later
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busy === task.taskId}
+                          aria-label={`Cancel “${snippet}”`}
+                          onClick={() => void act(task.taskId, () => api("tasks/" + encodeURIComponent(task.taskId) + "/cancel", {}))}
+                        >
+                          <X size={13} />
+                          Cancel
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          ))}
+          {idle > 0 && <p className="muted">{idle} other agent{idle === 1 ? " has" : "s have"} nothing queued.</p>}
         </div>
       )}
     </>
@@ -301,11 +275,25 @@ function RoutinesPanel() {
   const [busy, setBusy] = useState("");
   const [run, setRun] = useState<RoutineRun | null>(null);
   const [creating, setCreating] = useState(false);
+  const [prefill, setPrefill] = useState<RoutinePrefill | undefined>();
+  useEffect(() => {
+    // "Schedule this" in a profile chat hands its message over here.
+    const handed = localRead<RoutinePrefill | null>("routine-prefill", null);
+    if (handed && typeof handed === "object" && handed.instruction) {
+      setPrefill(handed);
+      setCreating(true);
+    }
+    localWrite("routine-prefill", null);
+  }, []);
   const routines = useQuery({
     queryKey: ["routines"],
     queryFn: () => automation("routines.list", { limit: 50 }),
   });
   const items = routines.data?.items || [];
+  const profiles = useProfiles();
+  const flows = useQuery({ queryKey: ["flows"], queryFn: () => automation("flows.list", { limit: 100 }) });
+  const runs = useRecentRuns(items, 3);
+  const lastRun = (id?: string) => runs.data?.find((r) => r.routineId === id);
 
   async function setEnabled(routine: Routine, enabled: boolean) {
     if (!routine.id || routine.revision === undefined) return;
@@ -417,37 +405,70 @@ function RoutinesPanel() {
               </header>
               <p className="automation-card-text">{routine.instruction}</p>
               <div className="agent-card-details">
-                <span>Profile {routine.profileId}</span>
-                {routine.flowId && <span>Flow {routine.flowId}</span>}
+                <span>Runs {profiles.name(routine.profileId)}</span>
+                {routine.flowId && (
+                  <button className="link-button" onClick={() => goAutomation("flows", routine.flowId)}>
+                    Flow: {flows.data?.items.find((f) => f.id === routine.flowId)?.name || "Untitled flow"}
+                  </button>
+                )}
                 <span>
                   {routine.autoStart
-                    ? "Starts its own bindings"
-                    : "Keeps bindings stopped"}
+                    ? "Starts the agent if it is stopped"
+                    : "Skips when the agent is stopped"}
                 </span>
-                {routine.webhookSecretStatus && (
+                {routine.trigger?.kind === "webhook" && routine.webhookSecretStatus && (
                   <span>Webhook secret {routine.webhookSecretStatus}</span>
                 )}
               </div>
+              {(() => {
+                const last = lastRun(routine.id);
+                return (
+                  <p className="routine-last-run">
+                    {last ? (
+                      <>
+                        Last run <RunBadge state={last.state} /> {relativeTime(last.scheduledAt || last.createdAt)}
+                        {last.reason && <span className="muted"> · {skipReasons[last.reason] || last.reason}</span>}{" "}
+                      </>
+                    ) : (
+                      <span className="muted">Has not run yet. </span>
+                    )}
+                    <button className="link-button" onClick={() => goAutomation("runs")}>
+                      All runs
+                    </button>
+                  </p>
+                );
+              })()}
             </section>
           ))}
         </div>
       )}
-      <RoutineDialog open={creating} onClose={() => setCreating(false)} />
+      <RoutineDialog open={creating} initial={prefill} onClose={() => { setCreating(false); setPrefill(undefined); }} />
     </>
   );
 }
 
+export type RoutinePrefill = { name?: string; profileId?: string; instruction?: string };
+
 function RoutineDialog({
   open,
   onClose,
+  initial,
 }: {
   open: boolean;
   onClose: () => void;
+  initial?: RoutinePrefill;
 }) {
   const client = useQueryClient();
-  const [name, setName] = useState("");
-  const [profileId, setProfileId] = useState("");
-  const [instruction, setInstruction] = useState("");
+  const [name, setName] = useState(initial?.name || "");
+  const [profileId, setProfileId] = useState(initial?.profileId || "");
+  const [instruction, setInstruction] = useState(initial?.instruction || "");
+  useEffect(() => {
+    if (open && initial) {
+      setName(initial.name || "");
+      setProfileId(initial.profileId || "");
+      setInstruction(initial.instruction || "");
+    }
+  }, [open, initial]);
   const [kind, setKind] = useState<RoutineTrigger["kind"]>("interval");
   const [everySeconds, setEverySeconds] = useState("3600");
   const [expression, setExpression] = useState("");
@@ -613,341 +634,6 @@ function RoutineDialog({
         </div>
       </form>
     </Dialog>
-  );
-}
-
-function FlowsPanel() {
-  const [id, setId] = useState("");
-  const [flow, setFlow] = useState<Flow | null>(null);
-  const [nodes, setNodes] = useState<FlowNode[]>([]);
-  const [edges, setEdges] = useState<FlowEdge[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function load(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const result = await automation("flows.get", { id: id.trim() });
-      setFlow(result);
-      setNodes(result.nodes || []);
-      setEdges(result.edges || []);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function save() {
-    setBusy(true);
-    setError("");
-    try {
-      const result = await automation("flows.save", {
-        ...(flow ? { id: flow.id, expectedRevision: flow.revision } : {}),
-        nodes,
-        edges,
-      });
-      setFlow(result);
-      setNodes(result.nodes || []);
-      setEdges(result.edges || []);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <>
-      <div className="section-toolbar">
-        <form className="automation-inline" onSubmit={load}>
-          <label htmlFor="flow-id" className="sr-only">
-            Flow id
-          </label>
-          <input
-            id="flow-id"
-            value={id}
-            placeholder="Flow id"
-            onChange={(e) => setId(e.target.value)}
-          />
-          <Button type="submit" variant="outline" disabled={busy || !id.trim()}>
-            Load flow
-          </Button>
-        </form>
-        <Button onClick={() => void save()} disabled={busy}>
-          Save flow
-        </Button>
-      </div>
-      {error && <Notice>{error}</Notice>}
-      {flow && (
-        <p className="muted">
-          Flow {flow.id} · revision {flow.revision}
-        </p>
-      )}
-      <div className="automation-flow-grid">
-        <section className="automation-card">
-          <header className="automation-card-head">
-            <strong>Nodes</strong>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                setNodes((v) => [
-                  ...v,
-                  { id: "node-" + (v.length + 1), profileId: "", instruction: "" },
-                ])
-              }
-            >
-              <Plus size={13} />
-              Add node
-            </Button>
-          </header>
-          <ul className="automation-node-list">
-            {nodes.map((node, index) => (
-              <li key={node.id}>
-                <div className="automation-inline">
-                  <input
-                    aria-label={"Node " + (index + 1) + " id"}
-                    value={node.id}
-                    onChange={(e) =>
-                      setNodes((v) =>
-                        v.map((n, i) =>
-                          i === index ? { ...n, id: e.target.value } : n,
-                        ),
-                      )
-                    }
-                  />
-                  <input
-                    aria-label={"Node " + (index + 1) + " profile"}
-                    placeholder="Profile id"
-                    value={node.profileId}
-                    onChange={(e) =>
-                      setNodes((v) =>
-                        v.map((n, i) =>
-                          i === index ? { ...n, profileId: e.target.value } : n,
-                        ),
-                      )
-                    }
-                  />
-                  <input
-                    aria-label={"Node " + (index + 1) + " instruction"}
-                    placeholder="Instruction"
-                    value={node.instruction}
-                    onChange={(e) =>
-                      setNodes((v) =>
-                        v.map((n, i) =>
-                          i === index
-                            ? { ...n, instruction: e.target.value }
-                            : n,
-                        ),
-                      )
-                    }
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={"Remove node " + (index + 1)}
-                    onClick={() =>
-                      setNodes((v) => v.filter((_, i) => i !== index))
-                    }
-                  >
-                    <Trash2 size={14} />
-                  </Button>
-                </div>
-              </li>
-            ))}
-            {!nodes.length && <li className="muted">No nodes yet.</li>}
-          </ul>
-        </section>
-        <section className="automation-card">
-          <header className="automation-card-head">
-            <strong>Edges</strong>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                setEdges((v) => [...v, { from: "", to: "" }])
-              }
-            >
-              <Plus size={13} />
-              Add edge
-            </Button>
-          </header>
-          <ul className="automation-node-list">
-            {edges.map((edge, index) => (
-              <li key={index}>
-                <div className="automation-inline">
-                  <input
-                    aria-label={"Edge " + (index + 1) + " from"}
-                    placeholder="From node"
-                    value={edge.from}
-                    onChange={(e) =>
-                      setEdges((v) =>
-                        v.map((edgeValue, i) =>
-                          i === index ? { ...edgeValue, from: e.target.value } : edgeValue,
-                        ),
-                      )
-                    }
-                  />
-                  <input
-                    aria-label={"Edge " + (index + 1) + " to"}
-                    placeholder="To node"
-                    value={edge.to}
-                    onChange={(e) =>
-                      setEdges((v) =>
-                        v.map((edgeValue, i) =>
-                          i === index ? { ...edgeValue, to: e.target.value } : edgeValue,
-                        ),
-                      )
-                    }
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={"Remove edge " + (index + 1)}
-                    onClick={() =>
-                      setEdges((v) => v.filter((_, i) => i !== index))
-                    }
-                  >
-                    <Trash2 size={14} />
-                  </Button>
-                </div>
-              </li>
-            ))}
-            {!edges.length && <li className="muted">No edges yet.</li>}
-          </ul>
-        </section>
-      </div>
-    </>
-  );
-}
-
-function SkillsPanel() {
-  const client = useQueryClient();
-  const [selected, setSelected] = useState<Skill | null>(null);
-  const [markdown, setMarkdown] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const skills = useQuery({
-    queryKey: ["skills"],
-    queryFn: () => automation("skills.list", {}),
-  });
-  const items = skills.data?.items || [];
-
-  async function read(skill: Skill) {
-    if (!skill.id) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await automation("skills.read", { id: skill.id });
-      setSelected(result);
-      setMarkdown(result.markdown || "");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function save() {
-    if (!selected?.id) return;
-    setBusy(true);
-    setError("");
-    try {
-      await automation("skills.save", {
-        id: selected.id,
-        ...(selected.revision !== undefined
-          ? { expectedRevision: selected.revision }
-          : {}),
-        name: selected.name || "",
-        description: selected.description || "",
-        markdown,
-      });
-      await client.invalidateQueries({ queryKey: ["skills"] });
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <>
-      <div className="section-toolbar">
-        <span className="muted">
-          Reviewed instructions a profile can be pinned to. Nothing here runs
-          on its own.
-        </span>
-      </div>
-      {error && <Notice>{error}</Notice>}
-      {skills.isError && <Notice>{skills.error.message}</Notice>}
-      {skills.isPending ? (
-        <p role="status">Loading skills…</p>
-      ) : !items.length ? (
-        <Empty icon={Sparkles} title="No skills yet">
-          Skills are local, reviewed instruction documents. They never install
-          packages or grant execution rights.
-        </Empty>
-      ) : (
-        <div className="automation-card-list">
-          {items.map((skill) => (
-            <section className="automation-card" key={skill.id || skill.name}>
-              <header className="automation-card-head">
-                <div>
-                  <strong>{skill.name}</strong>
-                  <small className="muted">{skill.description}</small>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy || !skill.id}
-                  onClick={() => void read(skill)}
-                >
-                  <BookOpen size={13} />
-                  Open
-                </Button>
-              </header>
-              {skill.version !== undefined && (
-                <div className="agent-card-details">
-                  <span>Version {skill.version}</span>
-                </div>
-              )}
-            </section>
-          ))}
-        </div>
-      )}
-      {selected && (
-        <section className="automation-card">
-          <header className="automation-card-head">
-            <strong>{selected.name}</strong>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => void save()}
-            >
-              Save skill
-            </Button>
-          </header>
-          <label htmlFor="skill-markdown" className="sr-only">
-            Skill instructions
-          </label>
-          <textarea
-            id="skill-markdown"
-            rows={10}
-            value={markdown}
-            onChange={(e) => setMarkdown(e.target.value)}
-          />
-          {markdown && (
-            <div className="automation-preview">
-              <Markdown text={markdown} />
-            </div>
-          )}
-        </section>
-      )}
-    </>
   );
 }
 

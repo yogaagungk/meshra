@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Automation revamp
+
+- Skills can now be written in the console and pinned to profiles from the skill editor or the profile editor; updating a skill shows which profiles still pin an older version.
+- Flows have a list, names (`flows.list`, optional `name`), a plain-language step editor with "Starts after" choices that refuse loops, and a live diagram.
+- Add a Runs tab: a receipt for every routine occurrence, skip reasons in plain language, and a per-step status diagram with Cancel run.
+- Queue shows only agents with work, applies reordering immediately, and offers Send next, Later and Cancel with real labels, ages and conversation links.
+- Routine cards show profile and flow names, the last run and links; "Schedule this" in a profile chat pre-fills a new routine.
+- Collapse the approvals block to one line when nothing is waiting, add count badges to tabs and deep-linkable tabs (`#automation/flows`).
+
 ### Routing and coordination
 
 - Address agents with `@name` or `@everyone`, with keyboard autocomplete; a lone member or the agents last addressed receive plain messages, and the composer shows why. Nothing is ever broadcast implicitly.

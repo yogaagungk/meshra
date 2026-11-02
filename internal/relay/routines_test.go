@@ -1069,3 +1069,46 @@ func TestAutomaticConversationMemoryScopeSurvivesFollowupRetentionAndSwitch(t *t
 		t.Fatal("retention or provider switch erased automatic-conversation memory scope")
 	}
 }
+
+func TestFlowListReturnsLatestRevisionWithNamesAndPages(t *testing.T) {
+	r, _ := routineOpenTest(t, nil)
+	profile := routineProfile(t, r, "Flow lister")
+	node := func(text string) []map[string]any {
+		return []map[string]any{{"id": "a", "profileId": profile.ID, "instruction": text}}
+	}
+	first, err := routineCall(t, r, "flows.save", map[string]any{"name": "Release checklist", "nodes": node("one")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := first.(routineFlow)
+	if _, err = routineCall(t, r, "flows.save", map[string]any{"id": f.ID, "expectedRevision": f.Revision, "name": "Release checklist v2", "nodes": node("two")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = routineCall(t, r, "flows.save", map[string]any{"nodes": node("other")}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := routineCall(t, r, "flows.list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := listed.(model.AutomationPage[routineFlow])
+	if len(page.Items) != 2 || page.HasMore {
+		t.Fatalf("expected two flows, got %+v", page)
+	}
+	for _, item := range page.Items {
+		if item.ID == f.ID && (item.Revision != 2 || item.Name != "Release checklist v2") {
+			t.Fatalf("list returned a stale revision: %+v", item)
+		}
+	}
+	paged, err := routineCall(t, r, "flows.list", map[string]any{"limit": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := paged.(model.AutomationPage[routineFlow]); len(p.Items) != 1 || !p.HasMore || p.NextAfter != p.Items[0].ID {
+		t.Fatalf("paging failed: %+v", p)
+	}
+	_, err = routineCall(t, r, "flows.save", map[string]any{"name": strings.Repeat("n", 129), "nodes": node("x")})
+	requireStatus(t, err, 400)
+	_, err = routineCall(t, r, "flows.list", map[string]any{"limit": 101})
+	requireStatus(t, err, 400)
+}

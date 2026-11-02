@@ -127,7 +127,7 @@ export function Operations({
       ) : view === "agents" ? (
         <AgentsWorkspace agents={agents} loading={loading} error={error} />
       ) : view === "automation" ? (
-        <Automation />
+        <Automation tab={resourceId} />
       ) : view === "contexts" ? (
         <ContextBrowser />
       ) : view === "settings" ? (
