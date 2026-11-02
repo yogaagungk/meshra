@@ -113,6 +113,18 @@ function LegacyChat({
   const nearBottom = useRef(true);
   const restoredScroll = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
+  const dock = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // The composer floats over the transcript; publish its height so the transcript can leave room.
+    const el = dock.current;
+    const host = el?.closest<HTMLElement>(".chat-main");
+    if (!el || !host || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() =>
+      host.style.setProperty("--dock-h", el.offsetHeight + "px"),
+    );
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [id]);
   const conversation = useQuery({
     queryKey: ["conversation", id],
     gcTime: 0,
@@ -810,8 +822,8 @@ function LegacyChat({
             New messages · jump to latest
           </Button>
         )}
-        {!isChat && <ChatQueue conversationId={id} members={members} />}
-        <div className="composer-area">
+        <div className="composer-area" ref={dock}>
+          {!isChat && <ChatQueue conversationId={id} members={members} />}
           {error && (
             <Notice>
               {error}
