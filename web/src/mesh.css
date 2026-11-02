@@ -330,3 +330,14 @@ textarea:focus-visible, select:focus-visible, summary:focus-visible {
     min-height: 36px;
   }
 }
+
+/* The conversation list follows the mesh palette (it used to carry its own warm one). */
+:root .inbox,
+:root[data-theme="light"] .inbox {
+  --list-accent: var(--secondary);
+  --list-accent-strong: var(--secondary-strong);
+  --list-accent-bg: var(--secondary-tint);
+  --list-accent-border: var(--secondary-border);
+  --list-hover: var(--hover);
+  background: var(--inbox);
+}
