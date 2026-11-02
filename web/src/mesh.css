@@ -453,3 +453,21 @@ textarea:focus-visible, select:focus-visible, summary:focus-visible {
 .chat-layout .message-scroll::-webkit-scrollbar {
   display: none;
 }
+
+/* Jump-to-latest: a solid pill so it never reads through to the transcript. */
+.chat-layout .jump-button,
+.chat-layout .jump-button:hover {
+  background: var(--surface-3);
+  color: var(--text);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  opacity: 1;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.22);
+  z-index: 12;
+  min-height: 32px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
