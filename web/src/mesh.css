@@ -159,51 +159,61 @@ h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }
 }
-/* Terminal-like transcript: your prompt is a quiet block, replies are plain text led by a colored bullet. */
-.chat-layout {
-  --chat-font: var(--mono);
+/* Transcript: your prompt is a full-width quiet block led by ">", replies are plain text led by a colored bullet. */
+.chat-layout .message-scroll .markdown {
+  font-size: 15px;
+  line-height: 1.7;
 }
-.chat-layout .message-scroll,
-.chat-layout .composer-area textarea {
-  font-family: var(--chat-font);
-  font-size: 14px;
-  line-height: 1.65;
-  letter-spacing: 0;
+.chat-layout .message-scroll code,
+.chat-layout .message-scroll pre {
+  font-family: var(--mono);
+  font-size: 13px;
 }
 .chat-layout .message {
   position: relative;
   gap: 0;
 }
 .chat-layout .message-request .message-avatar,
-.chat-layout.direct-chat .message-response .message-avatar {
+.chat-layout.direct-chat .message-response .message-avatar,
+.chat-layout.direct-chat .message-heading {
   display: none;
 }
+.chat-layout.direct-chat .message-request {
+  margin: 0;
+  width: 100%;
+  max-width: none;
+}
 .chat-layout .message-request .message-body {
+  position: relative;
   background: var(--surface-2);
-  border-radius: 6px;
-  padding: 8px 12px;
+  border-radius: 8px;
+  padding: 10px 14px 10px 36px;
   color: var(--text);
 }
 .chat-layout .message-request .message-body::before {
   content: ">";
   position: absolute;
-  left: -18px;
+  left: 14px;
+  top: 10px;
+  font: 600 14px/1.7 var(--mono);
   color: var(--muted);
 }
 .chat-layout .message-response .message-body {
-  padding-left: 18px;
   position: relative;
+  padding-left: 22px;
 }
 .chat-layout .message-response .message-body::before {
-  content: "●";
+  content: "";
   position: absolute;
-  left: 0;
-  top: 0.15em;
-  font-size: 11px;
-  color: var(--dept, var(--secondary));
+  left: 4px;
+  top: 0.62em;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dept, var(--secondary));
 }
-.chat-layout.direct-chat .message-response .message-body::before {
-  color: var(--accent-strong);
+.chat-layout.direct-chat .message-response {
+  margin-top: 14px;
 }
 .chat-layout .message-response .message-avatar {
   width: 22px;
@@ -211,26 +221,13 @@ h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
   margin: 0 8px 0 0;
   box-shadow: none;
 }
-.chat-layout.direct-chat .message-heading {
-  min-height: 0;
-  margin: 0 0 2px;
+.chat-layout .response-tools,
+.chat-layout .message-meta > button {
+  font-family: var(--font-body-family, inherit);
+  font-size: 12.5px;
 }
-.chat-layout.direct-chat .message-heading strong,
-.chat-layout.direct-chat .message-heading .harness-label {
-  display: none;
-}
-.chat-layout .message-heading time {
-  font: 400 11px var(--mono);
-  opacity: 0;
-  transition: opacity 120ms;
-}
-.chat-layout .message:hover .message-heading time,
-.chat-layout .message:focus-within .message-heading time {
-  opacity: 1;
-}
-.chat-layout .message-scroll code,
-.chat-layout .message-scroll pre {
-  font-family: var(--mono);
+.chat-layout .composer textarea {
+  font-size: 15px;
 }
 /* The latest reply wipes in top to bottom, like text arriving. */
 .message-scroll .message-group:last-child .message-response .message-body > .markdown,
