@@ -7,6 +7,7 @@ import {
 import {
   ArrowDown,
   ArrowLeft,
+  ArrowUp,
   ArrowUpRight,
   BookOpen,
   Check,
@@ -768,12 +769,16 @@ function LegacyChat({
                           chatState.data.canRegenerate && (
                             <button
                               disabled={regenerating || sending}
+                              aria-label="Regenerate response"
+                              title="Regenerate response"
                               onClick={() => void regenerateReply(t.taskId)}
                             >
-                              <RotateCcw size={13} />{" "}
-                              {regenerating
-                                ? "Regenerating…"
-                                : "Regenerate response"}
+                              <RotateCcw size={15} />
+                              <span className="tool-label">
+                                {regenerating
+                                  ? "Regenerating…"
+                                  : "Regenerate response"}
+                              </span>
                             </button>
                           )}
                       </div>
@@ -1018,7 +1023,7 @@ function LegacyChat({
                   disabled={sending || refs.length >= 16}
                 >
                   <Paperclip size={16} />
-                  Attach context
+                  <span className="attach-label">Attach context</span>
                 </Button>
                 <span className="composer-shortcut">
                   {sendKey === "enter" ? "↵ to send" : "⌘ ↵ to send"} · ⇧ ↵ new
@@ -1047,14 +1052,16 @@ function LegacyChat({
                   }
                   size="sm"
                 >
-                  {routingBusy
-                    ? "Lead is choosing…"
-                    : sending
-                    ? "Sending…"
-                    : sendIds.length > 1
-                      ? "Send to " + sendIds.length + " agents"
-                      : "Send message"}
-                  <Send size={14} />
+                  <span className="send-label">
+                    {routingBusy
+                      ? "Lead is choosing…"
+                      : sending
+                      ? "Sending…"
+                      : sendIds.length > 1
+                        ? "Send to " + sendIds.length + " agents"
+                        : "Send message"}
+                  </span>
+                  <ArrowUp size={16} />
                 </Button>
               )}
             </div>
@@ -1260,6 +1267,8 @@ function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
+      aria-label={copied ? "Copied" : "Copy response"}
+      title="Copy response"
       onClick={() =>
         navigator.clipboard.writeText(text).then(() => {
           setCopied(true);
@@ -1267,8 +1276,8 @@ function CopyButton({ text }: { text: string }) {
         })
       }
     >
-      {copied ? <Check size={13} /> : <Copy size={13} />}{" "}
-      {copied ? "Copied" : "Copy"}
+      {copied ? <Check size={15} /> : <Copy size={15} />}
+      <span className="tool-label">{copied ? "Copied" : "Copy"}</span>
     </button>
   );
 }

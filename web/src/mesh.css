@@ -159,12 +159,9 @@ h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }
 }
+/* Transcript: your prompt is a soft right-aligned bubble, replies are plain text, tools are icon-only. */
 .chat-layout {
-  --icon-user: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8' r='3.6'/%3E%3Cpath d='M5 20c0-3.9 3.1-6 7-6s7 2.1 7 6'/%3E%3C/svg%3E");
-}
-/* Transcript: your prompt is a full-width quiet block led by ">", replies are plain text led by a colored bullet. */
-.chat-layout {
-  --chat-size: 14px; /* one knob for transcript and composer text */
+  --chat-size: 14.5px; /* one knob for transcript and composer text */
 }
 .chat-layout .message-scroll .markdown {
   font-size: var(--chat-size);
@@ -176,7 +173,6 @@ h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
   font-size: calc(var(--chat-size) - 1.5px);
 }
 .chat-layout .message {
-  position: relative;
   gap: 0;
 }
 .chat-layout .message-request .message-avatar,
@@ -185,44 +181,21 @@ h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
   display: none;
 }
 .chat-layout.direct-chat .message-request {
-  margin: 0;
-  width: 100%;
-  max-width: none;
+  margin: 0 0 0 auto;
+  width: fit-content;
+  max-width: 86%;
 }
 .chat-layout .message-request .message-body {
-  position: relative;
   background: var(--surface-2);
-  border-radius: 8px;
-  padding: 8px 14px 8px 38px;
+  border-radius: 20px;
+  padding: 10px 16px;
   color: var(--text);
 }
-.chat-layout .message-request .message-body::before {
-  content: "";
-  position: absolute;
-  left: 13px;
-  top: 12px;
-  width: 15px;
-  height: 15px;
-  background: var(--muted);
-  -webkit-mask: var(--icon-user) center / contain no-repeat;
-  mask: var(--icon-user) center / contain no-repeat;
-}
 .chat-layout .message-response .message-body {
-  position: relative;
-  padding-left: 22px;
-}
-.chat-layout .message-response .message-body::before {
-  content: "";
-  position: absolute;
-  left: 4px;
-  top: 0.62em;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--dept, var(--secondary));
+  padding-left: 0;
 }
 .chat-layout.direct-chat .message-response {
-  margin-top: 14px;
+  margin-top: 18px;
 }
 .chat-layout .message-response .message-avatar {
   width: 22px;
@@ -230,13 +203,66 @@ h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
   margin: 0 8px 0 0;
   box-shadow: none;
 }
-.chat-layout .response-tools,
-.chat-layout .message-meta > button {
-  font-family: var(--font-body-family, inherit);
-  font-size: 12px;
+.chat-layout .response-tools {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.chat-layout.direct-chat .response-tools button,
+.chat-layout.direct-chat .message-meta > button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.chat-layout.direct-chat .response-tools button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.chat-layout.direct-chat .tool-label,
+.chat-layout.direct-chat .send-label,
+.chat-layout.direct-chat .attach-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Composer: one rounded card, round + on the left, round send on the right. */
+.chat-layout.direct-chat .composer {
+  border-radius: 24px;
+  padding: 14px 12px 10px 18px;
 }
 .chat-layout .composer textarea {
   font-size: var(--chat-size);
+}
+.chat-layout.direct-chat .composer-toolbar > div {
+  display: flex;
+  align-items: center;
+}
+.chat-layout.direct-chat .composer-shortcut {
+  display: none;
+}
+.chat-layout.direct-chat .composer-toolbar button[type="button"]:first-child:not(.stop),
+.chat-layout.direct-chat .composer-toolbar > div > button {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  justify-content: center;
+}
+.chat-layout.direct-chat .composer-toolbar button[type="submit"] {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  justify-content: center;
 }
 /* The latest reply wipes in top to bottom, like text arriving. */
 .message-scroll .message-group:last-child .message-response .message-body > .markdown,
