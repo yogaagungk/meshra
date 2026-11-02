@@ -470,13 +470,14 @@ function LegacyChat({
                   className={
                     "status-dot " + (connection === "Live" ? "" : "offline-dot")
                   }
+                  role="img"
+                  aria-label={
+                    connection === "Live" ? "Connected to local relay" : connection
+                  }
+                  title={
+                    connection === "Live" ? "Connected to local relay" : connection
+                  }
                 />
-                <span>
-                  {connection === "Live"
-                    ? "Connected to local relay"
-                    : connection}
-                </span>
-                <span>·</span>
                 <span>
                   {isChat
                     ? harnessName(
@@ -490,6 +491,15 @@ function LegacyChat({
             </div>
           </div>
           <div className="chat-header-actions">
+            {isChat && conversation.data && (
+              <ChatAIStatus
+                conversationId={id}
+                harness={
+                  conversation.data.participants[0]?.split(":")[0] || "codex"
+                }
+                revision={chatState.data?.state || ""}
+              />
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -659,12 +669,12 @@ function LegacyChat({
                     </div>
                     <div className="message-body">
                       <div className="message-heading">
-                        <strong>
-                          {t.from === "human:operator" ? "You" : t.from}
-                        </strong>
-                        <span className="message-target">
-                          to <code>{t.to}</code>
-                        </span>
+                        {t.from !== "human:operator" && <strong>{t.from}</strong>}
+                        {!isChat && (
+                          <span className="message-target">
+                            → <code>{t.to}</code>
+                          </span>
+                        )}
                         <time dateTime={t.createdAt}>
                           {formatTime(t.createdAt)}
                         </time>
@@ -797,15 +807,6 @@ function LegacyChat({
         )}
         {!isChat && <ChatQueue conversationId={id} members={members} />}
         <div className="composer-area">
-          {isChat && conversation.data && (
-            <ChatAIStatus
-              conversationId={id}
-              harness={
-                conversation.data.participants[0]?.split(":")[0] || "codex"
-              }
-              revision={chatState.data?.state || ""}
-            />
-          )}
           {error && (
             <Notice>
               {error}

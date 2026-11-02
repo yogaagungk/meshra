@@ -159,16 +159,78 @@ h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }
 }
-.message-request .message-body {
-  background: var(--surface-2);
-  border-radius: 16px 16px 4px 16px;
-  padding: 9px 14px 6px;
+/* Terminal-like transcript: your prompt is a quiet block, replies are plain text led by a colored bullet. */
+.chat-layout {
+  --chat-font: var(--mono);
 }
-.message-avatar > .harness,
-.message-avatar .agent-avatar { color: var(--dept, var(--accent)); }
-.message-response .message-avatar {
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dept, var(--edge)) 70%, transparent);
+.chat-layout .message-scroll,
+.chat-layout .composer-area textarea {
+  font-family: var(--chat-font);
+  font-size: 14px;
+  line-height: 1.65;
+  letter-spacing: 0;
+}
+.chat-layout .message {
+  position: relative;
+  gap: 0;
+}
+.chat-layout .message-request .message-avatar,
+.chat-layout.direct-chat .message-response .message-avatar {
+  display: none;
+}
+.chat-layout .message-request .message-body {
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: var(--text);
+}
+.chat-layout .message-request .message-body::before {
+  content: ">";
+  position: absolute;
+  left: -18px;
+  color: var(--muted);
+}
+.chat-layout .message-response .message-body {
+  padding-left: 18px;
+  position: relative;
+}
+.chat-layout .message-response .message-body::before {
+  content: "●";
+  position: absolute;
+  left: 0;
+  top: 0.15em;
+  font-size: 11px;
+  color: var(--dept, var(--secondary));
+}
+.chat-layout.direct-chat .message-response .message-body::before {
+  color: var(--accent-strong);
+}
+.chat-layout .message-response .message-avatar {
+  width: 22px;
+  height: 22px;
+  margin: 0 8px 0 0;
+  box-shadow: none;
+}
+.chat-layout.direct-chat .message-heading {
+  min-height: 0;
+  margin: 0 0 2px;
+}
+.chat-layout.direct-chat .message-heading strong,
+.chat-layout.direct-chat .message-heading .harness-label {
+  display: none;
+}
+.chat-layout .message-heading time {
+  font: 400 11px var(--mono);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.chat-layout .message:hover .message-heading time,
+.chat-layout .message:focus-within .message-heading time {
+  opacity: 1;
+}
+.chat-layout .message-scroll code,
+.chat-layout .message-scroll pre {
+  font-family: var(--mono);
 }
 /* The latest reply wipes in top to bottom, like text arriving. */
 .message-scroll .message-group:last-child .message-response .message-body > .markdown,

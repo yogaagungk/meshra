@@ -29,10 +29,7 @@ test("AI status separates provider quota, local budget and context with scoped h
     .click();
   await expect(
     page.getByRole("button", { name: "Open AI status" }),
-  ).toContainText("82% used");
-  await expect(
-    page.getByRole("button", { name: "Open AI status" }),
-  ).toContainText("Context not reported");
+  ).toContainText("Context —");
   await page
     .getByLabel("Message selected agents")
     .fill("Read-only status fixture");

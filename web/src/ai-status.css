@@ -1,20 +1,17 @@
 .chat-ai-status {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  width: 100%;
-  padding: 6px 2px;
-  min-height: 32px;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  text-align: left;
-  border-radius: 5px;
-}
-.chat-ai-status > span:first-child {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 32px;
+  padding: 4px 10px;
+  color: var(--muted);
+  font: 500 12px var(--mono, monospace);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  white-space: nowrap;
+}
+.chat-ai-status svg {
   color: var(--secondary);
 }
 .chat-ai-status:hover {
@@ -174,7 +171,6 @@
 @media (max-width: 760px) {
   .chat-ai-status {
     min-height: 40px;
-    gap: 4px 10px;
   }
   .ai-status-facts {
     gap: 0 8px;
