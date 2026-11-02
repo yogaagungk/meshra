@@ -471,3 +471,26 @@ textarea:focus-visible, select:focus-visible, summary:focus-visible {
   font-size: 12.5px;
   white-space: nowrap;
 }
+
+/* Phone: Workspaces density + primary text weight */
+@media (max-width: 760px) {
+  .workspace-toolbar { margin-bottom: 10px; gap: 8px; }
+  .workspace-project-heading { margin-bottom: 8px; gap: 8px; }
+  .workspace-project-heading h2 { margin: 0; line-height: 1.2; }
+  .workspace-path { margin: 2px 0 0; }
+  .workspace-view-tabs { margin-block: 6px; }
+  .workspace-tree { max-height: none; padding: 4px 0; }
+  .workspace-tree li > button { min-height: 38px; padding: 4px 8px; }
+  .workspace-preview { padding: 6px 0; }
+  .workspace-preview-empty { min-height: 0; padding: 14px 0; gap: 4px; }
+  .workspace-split { min-height: 0; }
+}
+/* Primary text reads bolder; secondary stays regular */
+.workspace-tree li > button > span,
+.agent-card h3, .automation-card h3,
+.conversation-item strong, .conversation-title,
+.page-heading h1, .workspace-project-heading h2,
+.personal-form label, .workspace-toolbar > label,
+.workspace-view-tabs button, .mobile-nav > a, .mobile-nav > button,
+.chat-layout .chat-header h1, .chat-layout .chat-header h2 { font-weight: 600; }
+.workspace-path, .page-heading p { font-weight: 400; }
