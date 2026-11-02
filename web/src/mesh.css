@@ -443,3 +443,13 @@ textarea:focus-visible, select:focus-visible, summary:focus-visible {
 @media (max-width: 760px) {
   .chat-layout .composer-area { padding: 18px 10px 8px; }
 }
+
+/* Hide the transcript scrollbar; scrolling by touch, wheel and keyboard is unchanged. */
+.chat-layout .message-scroll {
+  scrollbar-width: none;
+  scrollbar-gutter: auto;
+  -ms-overflow-style: none;
+}
+.chat-layout .message-scroll::-webkit-scrollbar {
+  display: none;
+}
