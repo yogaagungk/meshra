@@ -341,3 +341,59 @@ textarea:focus-visible, select:focus-visible, summary:focus-visible {
   --list-hover: var(--hover);
   background: var(--inbox);
 }
+
+/* ---------- Phone density: tighter margins, padding and gaps on every page ---------- */
+@media (max-width: 760px) {
+  :root {
+    --font-title: 1.4rem;
+    --font-section: 1.0625rem;
+  }
+  /* Pages */
+  .operations { padding: 10px 12px 14px; }
+  .page-heading { margin-bottom: 12px; }
+  .page-heading h1 { font-size: 21px; margin: 0 0 4px; line-height: 1.2; }
+  .page-heading p { font-size: 13px; line-height: 1.5; }
+  .section-toolbar { gap: 8px; margin-bottom: 10px; }
+  .section-toolbar > select,
+  .section-toolbar .search-field { min-height: 38px; }
+  .automation-tabs,
+  .personal-tabs { margin-bottom: 8px; padding-bottom: 6px; gap: 2px; }
+  .automation-tabs button,
+  .personal-tabs button,
+  .workspace-view-tabs button { padding: 5px 10px; min-height: 34px; }
+  .personal-form { gap: 12px; margin-top: 10px; }
+  .personal-form label { gap: 4px; }
+  /* Cards and lists */
+  .agent-grid { gap: 10px; }
+  .agent-card { padding: 12px 14px; border-radius: 12px; }
+  .agent-card-top { margin-bottom: 8px; }
+  .agent-workspace { margin: 6px 0 10px; }
+  .agent-card-footer { margin-top: 12px; padding-top: 10px; }
+  .agent-card-details { gap: 6px; }
+  .automation-card { padding: 12px 14px; gap: 8px; }
+  .automation-card-list,
+  .automation-queue-list { gap: 10px; }
+  .automation-split { gap: 12px; }
+  .mesh-view { padding: 8px; }
+  /* Conversation list */
+  .conversation-list-header { padding: 10px 12px 6px; }
+  .new-conversation-button { margin-block: 8px 6px; min-height: 40px; }
+  .conversation-search { min-height: 38px; }
+  .inbox .conversation-item > a { padding: 8px 8px; }
+  .inbox-footer { padding: 6px 12px; }
+  .inspector-content { padding: 14px 14px; }
+  .dialog-content { padding: 16px; }
+  /* Bottom navigation */
+  .mobile-nav { min-height: 54px; padding: 4px 6px max(4px, env(safe-area-inset-bottom)); gap: 2px; }
+  .mobile-nav > a,
+  .mobile-nav > button { gap: 2px; min-height: 42px; }
+  .main-panel { padding-bottom: 56px; }
+  .is-chat:not(.conversation-open) .inbox { padding-bottom: 56px; }
+  /* Chat */
+  .chat-layout .timeline-inner { padding: 10px 12px 14px; }
+  .chat-layout .message-group { margin-bottom: 18px; }
+  .chat-layout.direct-chat .message-response { margin-top: 12px; }
+  .composer-area { padding: 6px 10px 8px; }
+  .chat-layout.direct-chat .composer { padding: 10px 10px 8px 14px; border-radius: 20px; }
+  .composer-footnote { display: none; }
+}
