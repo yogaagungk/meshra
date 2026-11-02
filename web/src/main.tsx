@@ -3,12 +3,16 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import "@fontsource-variable/manrope";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import "@fontsource-variable/bricolage-grotesque";
 import "./style.css";
 import "./conversation-list.css";
 import "./personal.css";
 import "./ai-status.css";
 import "./automation.css";
 import "./glass.css";
+import "./mesh.css";
 const client = new QueryClient({
   defaultOptions: {
     queries: {

@@ -114,8 +114,9 @@ func (r *Relay) queueOperation(p model.Principal, op string, raw json.RawMessage
 	}
 	if op == "queue.list" {
 		var q struct {
-			AgentID   string `json:"agentId"`
-			ProfileID string `json:"profileId"`
+			AgentID     string `json:"agentId"`
+			ProfileID   string `json:"profileId"`
+			IncludeChat bool   `json:"includeChat"`
 		}
 		if err := decodeAutomation(raw, &q); err != nil {
 			return nil, err
@@ -130,7 +131,7 @@ func (r *Relay) queueOperation(p model.Principal, op string, raw json.RawMessage
 				return nil, err
 			}
 		}
-		rows, err := r.db.Query(`SELECT a.id FROM agents a WHERE (?='' OR a.id=?) AND (?='' OR EXISTS(SELECT 1 FROM profile_bindings b WHERE b.agent_id=a.id AND b.profile_id=?)) ORDER BY a.id`, q.AgentID, q.AgentID, q.ProfileID, q.ProfileID)
+		rows, err := r.db.Query(`SELECT a.id FROM agents a WHERE (?='' OR a.id=?) AND (?='' OR EXISTS(SELECT 1 FROM profile_bindings b WHERE b.agent_id=a.id AND b.profile_id=?)) AND (?=1 OR ?<>'' OR coalesce(json_extract(a.body,'$.managedChat'),0)=0) ORDER BY a.id`, q.AgentID, q.AgentID, q.ProfileID, q.ProfileID, q.IncludeChat, q.AgentID)
 		if err != nil {
 			return nil, err
 		}
@@ -181,6 +182,13 @@ func (r *Relay) queueOperation(p model.Principal, op string, raw json.RawMessage
 	}
 	if q.ExpectedRevision == nil {
 		return nil, model.Err(400, "expectedRevision is required")
+	}
+	if op == "queue.pause" {
+		// A paused chat identity has no visible queue to resume it from, and every
+		// one-to-one chat message would wait until its deadline. Use Stop response.
+		if a, e := r.agent(q.AgentID); e == nil && a.ManagedChat {
+			return nil, model.Err(400, "one-to-one chat cannot be paused; stop the response instead")
+		}
 	}
 	state, err := r.queueState(q.AgentID)
 	if err != nil {

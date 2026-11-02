@@ -145,3 +145,40 @@ func TestQueueReorderPreservesRecipientOrderAndTranscript(t *testing.T) {
 		t.Fatal("queue inspection did not expose dispatch rank")
 	}
 }
+
+func queueIDs(t *testing.T, r *Relay, q any) map[string]bool {
+	t.Helper()
+	raw, _ := json.Marshal(q)
+	value, err := r.queueOperation(admin, "queue.list", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, v := range value.(map[string]any)["items"].([]queueView) {
+		ids[v.AgentID] = true
+	}
+	return ids
+}
+
+// Managed chat identities are internal. The Queue tab must not list them unless
+// a caller (the in-chat queue) asks for them.
+func TestQueueListHidesManagedChatAgents(t *testing.T) {
+	r, _ := openTest(t, nil)
+	named := createTest(t, r, "claude", "named")
+	r.mu.Lock()
+	chat, err := r.createLocked(admin, model.CreateAgent{Harness: "claude", Name: "chat-hidden", Cwd: t.TempDir(), ManagedChat: true})
+	r.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := queueIDs(t, r, map[string]any{}); !ids[named.ID] || ids[chat.ID] {
+		t.Fatalf("default listing: %v", ids)
+	}
+	raw, _ := json.Marshal(map[string]any{"agentId": chat.ID, "expectedRevision": 0})
+	if _, err = r.queueOperation(admin, "queue.pause", raw); err == nil {
+		t.Fatal("managed chat queue was pausable")
+	}
+	if ids := queueIDs(t, r, map[string]any{"includeChat": true}); !ids[named.ID] || !ids[chat.ID] {
+		t.Fatalf("includeChat listing: %v", ids)
+	}
+}

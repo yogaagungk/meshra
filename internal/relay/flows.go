@@ -35,6 +35,7 @@ type routineFlowEdge struct {
 
 type routineFlow struct {
 	ID       string            `json:"id"`
+	Name     string            `json:"name,omitempty"`
 	Revision int               `json:"revision"`
 	Nodes    []routineFlowNode `json:"nodes"`
 	Edges    []routineFlowEdge `json:"edges"`
@@ -66,6 +67,7 @@ func (r *Relay) flowGet(raw json.RawMessage) (any, error) {
 func (r *Relay) flowSave(raw json.RawMessage) (any, error) {
 	var q struct {
 		ID               string            `json:"id"`
+		Name             string            `json:"name"`
 		ExpectedRevision *int              `json:"expectedRevision"`
 		Nodes            []routineFlowNode `json:"nodes"`
 		Edges            []routineFlowEdge `json:"edges"`
@@ -75,7 +77,7 @@ func (r *Relay) flowSave(raw json.RawMessage) (any, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	flow := routineFlow{ID: q.ID, Nodes: q.Nodes, Edges: q.Edges}
+	flow := routineFlow{ID: q.ID, Name: strings.TrimSpace(q.Name), Nodes: q.Nodes, Edges: q.Edges}
 	if flow.ID == "" {
 		if q.ExpectedRevision != nil {
 			return nil, model.Err(400, "expectedRevision is not valid for a new flow")
@@ -143,6 +145,9 @@ func (r *Relay) loadRoutineFlow(id string, revision int) (routineFlow, error) {
 // validateRoutineFlow rejects cycles, duplicate node ids, unknown profiles and
 // oversized graphs before any revision is stored.
 func (r *Relay) validateRoutineFlow(flow routineFlow) error {
+	if len(flow.Name) > routineMaxNameBytes || !utf8.ValidString(flow.Name) || !safeRegistryText(flow.Name) || redact(flow.Name) != flow.Name {
+		return model.Err(400, "flow name must be at most 128 UTF-8 bytes without credentials or control characters")
+	}
 	if len(flow.Nodes) == 0 {
 		return model.Err(400, "a flow requires at least one node")
 	}
@@ -915,4 +920,51 @@ func (r *Relay) routineHandoff(taskIDs []string) string {
 		return ""
 	}
 	return routineTruncate(out.String(), routineMaxHandoff)
+}
+
+// flowList returns the latest revision of every flow, ordered by ID.
+func (r *Relay) flowList(raw json.RawMessage) (any, error) {
+	var q struct {
+		After string `json:"after"`
+		Limit int    `json:"limit"`
+	}
+	if err := decodeAutomation(raw, &q); err != nil {
+		return nil, err
+	}
+	if q.Limit == 0 {
+		q.Limit = 50
+	}
+	if q.Limit < 1 || q.Limit > 100 {
+		return nil, model.Err(400, "limit must be 1..100")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rows, err := r.db.Query(`SELECT body FROM routine_flow_versions v WHERE v.id>? AND v.revision=(SELECT max(revision) FROM routine_flow_versions WHERE id=v.id) ORDER BY v.id LIMIT ?`, q.After, q.Limit+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	page := model.AutomationPage[routineFlow]{Items: []routineFlow{}}
+	for rows.Next() {
+		var body string
+		var flow routineFlow
+		if err = rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(body), &flow); err != nil {
+			return nil, err
+		}
+		if len(page.Items) == q.Limit {
+			page.HasMore = true
+			break
+		}
+		page.Items = append(page.Items, flow)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	if page.HasMore {
+		page.NextAfter = page.Items[len(page.Items)-1].ID
+	}
+	return page, nil
 }

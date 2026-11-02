@@ -48,6 +48,20 @@ Rebuild UI changes with `npm ci --prefix web && npm run build --prefix web` befo
 verification remains waived. [Console guide/demo](docs/V0.4_CONSOLE.md),
 [API/UI contract](docs/API_UI_CONTRACT.md), and [test report/screenshots](docs/V0.4_TEST_REPORT.md).
 
+**Routing in collaboration chats:** you no longer have to tick a recipient. Start a
+message with `@name` (or `@everyone`), or just write: a lone member, or the agents you
+last wrote to, receive it, and the composer always shows why. Turn on **Auto-route**
+to let a lead agent (Claude, OMP or OpenAI-compatible) choose recipients when you
+address nobody; it runs in a disposable tool-free turn and can only narrow a send to
+members of that chat. Queued messages appear in a strip above the composer with
+Pause, Run next and Cancel, and a failed turn offers **Try with another agent**.
+See [OpenBot comparison](docs/OPENBOT_COMPARISON.md).
+
+**Automation:** Queue, Routines, Runs, Flows, Skills and Templates live under
+**Automation** (`#automation/<tab>`). Write a skill and pin it to profiles, build a flow
+of steps with a live diagram, schedule it as a routine, and follow every occurrence
+in **Runs**, including why one was skipped.
+
 **One-to-one AI chat:** choose **Chat with an AI** when creating a conversation for
 a simpler chat view, contextual follow-ups, stop/regenerate controls, and bounded
 history loading. Each turn uses a fresh native session with a limited recent-history

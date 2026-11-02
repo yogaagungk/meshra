@@ -123,46 +123,28 @@ export function ChatAIStatus({
   const [open, setOpen] = useState(false);
   const client = useQueryClient();
   const status = useStatus(conversationId);
-  const quota = useQuota(harness);
   useEffect(() => {
     void client.invalidateQueries({ queryKey: ["ai-status", conversationId] });
   }, [client, conversationId, revision]);
   const context = contextPercent(status.data);
-  const reported =
-    quota.data?.windows
-      .map((w) => w.usedPercent)
-      .filter((v): v is number => v != null) || [];
-  const used = reported.length ? Math.max(...reported) : undefined;
-  const warning =
-    (used != null && used >= 80) || (context != null && context >= 80);
+  const warning = context != null && context >= 80;
+  const label =
+    context == null
+      ? "Context not reported"
+      : (status.data?.latest.estimated ? "Context ≈ " : "Context ") +
+        context.toFixed(0) +
+        "%";
   return (
     <>
       <button
         type="button"
         className={"chat-ai-status" + (warning ? " ai-status-warning" : "")}
         onClick={() => setOpen(true)}
-        aria-label="Open AI status"
+        aria-label={"Open AI status. " + label}
+        title={label}
       >
-        <span>
-          <Gauge size={14} />
-          AI status
-        </span>
-        <span>
-          {used == null
-            ? quota.isFetching
-              ? "Checking quota…"
-              : "Quota not reported"
-            : (quota.data?.stale ? "Last highest window " : "Highest window ") +
-              used.toFixed(0) +
-              "% used"}
-        </span>
-        <span>
-          {context == null
-            ? "Context not reported"
-            : (status.data?.latest.estimated ? "Context ≈ " : "Context ") +
-              context.toFixed(0) +
-              "%"}
-        </span>
+        <Gauge size={14} />
+        <span>{context == null ? "Context —" : label}</span>
       </button>
       <Dialog
         open={open}

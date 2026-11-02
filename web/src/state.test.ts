@@ -34,10 +34,10 @@ describe("browser transport", () => {
     await api("send", { text: "hi" });
     const options = fetch.mock.calls[0][1];
     expect(options.credentials).toBe("same-origin");
-    expect(options.headers["X-Meshra-CSRF"]).toBe("csrf-test");
-    expect(options.headers.Authorization).toBeUndefined();
+    expect(options.headers.get("X-Meshra-CSRF")).toBe("csrf-test");
+    expect(options.headers.get("Authorization")).toBeNull();
     await api("agents");
-    expect(fetch.mock.calls[1][1].headers["X-Meshra-CSRF"]).toBeUndefined();
+    expect(fetch.mock.calls[1][1].headers.get("X-Meshra-CSRF")).toBeNull();
   });
   it("surfaces denied access without treating it as an empty successful response", async () => {
     vi.stubGlobal(

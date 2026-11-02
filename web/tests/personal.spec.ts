@@ -175,12 +175,11 @@ test("personal sessions, project inspection, model choice and resource controls 
     await expect(page.locator(".personal-model-list")).toContainText(
       "Fixture model",
     );
-    await expect(page.locator(".personal-usage-table")).toContainText(
-      "fixture-model",
-    );
-    await expect(page.locator(".personal-usage-table")).toContainText(
-      "120 / 40",
-    );
+    // Two usage tables share this class (recent attempts, usage by harness).
+    for (const text of ["fixture-model", "120 / 40"])
+      await expect(
+        page.locator(".personal-usage-table").filter({ hasText: text }).first(),
+      ).toBeVisible();
     await page.screenshot({
       path: join(evidence, "models-desktop-dark.png"),
       fullPage: true,

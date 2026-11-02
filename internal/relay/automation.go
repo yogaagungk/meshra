@@ -49,6 +49,8 @@ func (r *Relay) Automation(ctx context.Context, p model.Principal, operation str
 		return r.profileStoreOperation(p, operation, payload)
 	case "profiles.createConversation", "profiles.conversations", "profiles.bindingAction", "profiles.switch", "profiles.switchPreview", "profiles.generate", "profiles.generationDraft":
 		return r.profileContinuityOperation(ctx, p, operation, payload)
+	case "routing.route", "routing.result":
+		return r.routingOperation(ctx, p, operation, payload)
 	case "profiles.binding", "skills.bindings":
 		return r.automationBindingQuery(ctx, p, operation, payload)
 	case "profiles.send":
@@ -77,7 +79,7 @@ func (r *Relay) Automation(ctx context.Context, p model.Principal, operation str
 		return r.changesetOperation(ctx, p, operation, payload)
 	case "mcp.list", "mcp.save", "mcp.test", "mcp.setEnabled", "mcp.bind", "mcp.remove", "mcp.authStart", "mcp.authStatus", "mcp.signOut":
 		return r.mcpClientOperation(ctx, p, operation, payload)
-	case "routines.list", "routines.save", "routines.preview", "routines.setEnabled", "routines.run", "routines.runs", "routines.cancelRun", "flows.get", "flows.save", "routineTokens.create", "routineTokens.list", "routineTokens.revoke":
+	case "routines.list", "routines.save", "routines.preview", "routines.setEnabled", "routines.run", "routines.runs", "routines.cancelRun", "flows.list", "flows.get", "flows.save", "routineTokens.create", "routineTokens.list", "routineTokens.revoke":
 		return r.routineOperation(ctx, p, operation, payload)
 	case "skills.list", "skills.read", "skills.save", "skills.bind", "skills.remove":
 		return r.skillOperation(ctx, p, operation, payload)

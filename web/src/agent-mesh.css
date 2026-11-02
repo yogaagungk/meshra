@@ -1,0 +1,24 @@
+.mesh-view{border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:12px}
+.mesh-stage{position:relative;width:100%;aspect-ratio:900/560;min-height:340px}
+.mesh-edges{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.mesh-edge{fill:none;stroke:var(--edge);stroke-width:2;transition:stroke .2s,stroke-width .2s}
+.mesh-edge.peer{stroke-dasharray:3 6;stroke:var(--secondary)}
+.mesh-edge.live{stroke:var(--run);stroke-width:3;stroke-dasharray:8 8;animation:mesh-flow 1s linear infinite}
+.mesh-edge.lit{stroke:var(--text);stroke-width:3}
+@keyframes mesh-flow{to{stroke-dashoffset:-16}}
+.mesh-node{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:0;padding:6px;color:var(--text);max-width:150px;text-align:center}
+.mesh-node strong{font-size:var(--font-label);font-weight:650;overflow-wrap:anywhere;margin-top:6px}
+.mesh-node small{font:500 11.5px var(--mono,monospace);color:var(--muted);overflow-wrap:anywhere}
+.mesh-disc{width:60px;height:60px;border-radius:50%;display:grid;place-items:center;background:var(--surface);border:3px solid var(--dept,var(--accent));color:var(--dept,var(--accent));transition:transform .2s}
+.mesh-node.agent:hover .mesh-disc,.mesh-node.agent:focus-visible .mesh-disc{transform:scale(1.08)}
+.mesh-node.busy .mesh-disc{box-shadow:0 0 0 0 var(--run);animation:mesh-breathe 1.6s ease-in-out infinite}
+@keyframes mesh-breathe{50%{box-shadow:0 0 0 8px color-mix(in srgb,var(--run) 22%,transparent)}}
+.mesh-node.you .mesh-disc{border-color:var(--you)}
+.mesh-node.you{color:var(--text)}
+.mesh-node.you svg{color:var(--you)}
+.mesh-legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin:8px 4px 0;padding:0;list-style:none;font-size:var(--font-meta);color:var(--muted)}
+.mesh-legend li{display:flex;align-items:center;gap:6px}
+.k{display:inline-block;width:26px;height:0;border-top:2px solid var(--edge)}
+.k.peer{border-top:2px dotted var(--secondary)}
+.k.live{border-top:3px solid var(--run)}
+@media (prefers-reduced-motion:reduce){.mesh-edge.live,.mesh-node.busy .mesh-disc{animation:none}.mesh-edge,.mesh-disc{transition:none}}

@@ -25,6 +25,7 @@ import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { harnessName } from "./HarnessLogo";
+import { ProfileSkills } from "./AutomationSkills";
 import { terminal, type ModelOption, type Task, type TraceEvent, type Workspace } from "./types";
 
 type CapabilityKey = keyof ProfileCapabilities;
@@ -562,6 +563,7 @@ function ProfileDialog({
             Instructions: {new TextEncoder().encode(instructions).length}/16384 bytes.
             Instructions are sent to the selected provider. Do not include credentials.
           </small>
+          {profile && <ProfileSkills profileId={profile.id} />}
           <label htmlFor="profile-workspace">Workspace</label>
           <div className="automation-inline">
             <select
@@ -691,6 +693,7 @@ function ProfileDialog({
               config={binding.config}
               workspaceId={workspaceId}
               disabled={busy || (connectionHarness && !provider)}
+              startOpen={!profile}
               onApply={(draft) => { setName(draft.name); setInstructions(draft.instructions); }}
             />
           )}
@@ -897,12 +900,14 @@ function ProfileGeneration({
   config,
   workspaceId,
   disabled,
+  startOpen,
   onApply,
 }: {
   harness: ProfileHarness;
   config: ProfileConfig;
   workspaceId: string;
   disabled: boolean;
+  startOpen: boolean;
   onApply: (draft: ProfileDraft) => void;
 }) {
   const [description, setDescription] = useState("");
@@ -1026,15 +1031,15 @@ function ProfileGeneration({
 
   const active = !!taskId && (!task.data || !terminal(task.data.state));
   return (
-    <details className="automation-card">
-      <summary>Generate an editable name and instructions draft</summary>
+    <details className="automation-card" open={startOpen}>
+      <summary>Describe your agent and draft its instructions</summary>
       <p className="muted">
         Your description is sent to the selected provider in a disposable empty workspace,
         with verified tool-free mode including native reads. No profile permissions are inherited.
         Unsupported adapters fail visibly. Generation creates a task, not a profile;
         closing this editor does not cancel an accepted task.
       </p>
-      <label htmlFor="profile-generation-description">Describe the profile</label>
+      <label htmlFor="profile-generation-description">What should this agent do?</label>
       <textarea
         id="profile-generation-description"
         rows={3}

@@ -107,6 +107,14 @@ export function Approvals({ profileId }: { profileId?: string } = {}) {
     }
   }
 
+  if (!list.isPending && !list.isError && !items.length && !error) {
+    return (
+      <p className="automation-attention-slim" role="status">
+        <ShieldCheck size={14} aria-hidden="true" />
+        Nothing is waiting for your approval. Tool approvals and questions are decided only here.
+      </p>
+    );
+  }
   return (
     <div className="automation-attention">
       <div className="automation-section-heading">

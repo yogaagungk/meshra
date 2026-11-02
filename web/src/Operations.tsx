@@ -37,7 +37,10 @@ import { Dialog } from "./components/ui/dialog";
 import { Markdown } from "./Markdown";
 import { Delivery } from "./Chat";
 import { AgentAvatar, AvatarPicker, defaultAvatar } from "./components/AgentAvatar";
-import { harnessName } from "./HarnessLogo";
+import { harnessName, deptOf } from "./HarnessLogo";
+
+/** Auto-created per-agent folders are not a project name worth showing. */
+const generalWorkspace = (cwd: string) => /\/agent-\d+\/?$/.test(cwd);
 import {
   mergeTasks,
   terminal,
@@ -52,6 +55,7 @@ import {
 import { SettingsPanels } from "./Personal";
 import { Automation } from "./Automation";
 import { Profiles } from "./Profiles";
+import { AgentMesh } from "./AgentMesh";
 import { Workspaces } from "./Workspaces";
 export function Operations({
   view,
@@ -124,7 +128,7 @@ export function Operations({
       ) : view === "agents" ? (
         <AgentsWorkspace agents={agents} loading={loading} error={error} />
       ) : view === "automation" ? (
-        <Automation />
+        <Automation tab={resourceId} />
       ) : view === "contexts" ? (
         <ContextBrowser />
       ) : view === "settings" ? (
@@ -194,6 +198,7 @@ function Agents({
   const [filter, setFilter] = useState("all");
   const [create, setCreate] = useState(false);
   const [selected, setSelected] = useState<Agent | null>(null);
+  const [layout, setLayout] = useState<"cards" | "mesh">("cards");
   const [action, setAction] = useState("");
   const [failure, setFailure] = useState("");
   const [stopping, setStopping] = useState<Agent | null>(null);
@@ -250,10 +255,19 @@ function Agents({
           onChange={(e) => setFilter(e.target.value)}
         >
           <option value="all">All harnesses</option>
-          {["claude", "codex", "omp", "opencode"].map((h) => (
-            <option key={h}>{h}</option>
+          {[...new Set(agents.map((a) => a.harness))].sort().map((h) => (
+            <option key={h} value={h}>
+              {harnessName(h)}
+            </option>
           ))}
         </select>
+        <div className="layout-toggle" role="group" aria-label="Agent layout">
+          {(["cards", "mesh"] as const).map((v) => (
+            <button key={v} aria-pressed={layout === v} onClick={() => setLayout(v)}>
+              {v === "cards" ? "Cards" : "Mesh"}
+            </button>
+          ))}
+        </div>
         <Button onClick={() => setCreate(true)}>
           <Plus size={16} />
           Register agent
@@ -280,10 +294,12 @@ function Agents({
         >
           Register an installed harness as a general agent or assign it to a registered workspace.
         </Empty>
+      ) : layout === "mesh" ? (
+        <AgentMesh agents={rows} onSelect={setSelected} />
       ) : (
         <div className="agent-grid">
           {rows.map((a) => (
-            <article className="agent-card" key={a.id}>
+            <article className="agent-card" key={a.id} data-harness={deptOf(a.harness)}>
               <div className="agent-card-top">
                 <AgentAvatar icon={a.avatarIcon} color={a.avatarColor} />
                 <Status state={a.state} />
@@ -292,23 +308,30 @@ function Agents({
                 className="agent-card-title"
                 onClick={() => setSelected(a)}
               >
-                <h2>{a.id}</h2>
+                <span className="agent-card-name">
+                  <h2>{a.name || a.id}</h2>
+                  <code className="agent-id" title="Exact agent identity">
+                    {a.id}
+                  </code>
+                </span>
                 <ArrowUpRight size={16} />
               </button>
               <p className="agent-workspace" title={a.cwd}>
-                {a.cwd}
+                {generalWorkspace(a.cwd) ? "General workspace" : a.cwd.split("/").filter(Boolean).pop() || a.cwd}
               </p>
               <div className="agent-card-details">
-                <span>{a.harness}</span>
-                <span>
-                  {a.policy.delegate ? "Delegation enabled" : "Direct requests"}
-                </span>
+                <span>{harnessName(a.harness)}</span>
+                {a.policy.delegate && <span>Can delegate to agents</span>}
               </div>
               {a.error && <p className="text-error">{a.error}</p>}
               <div className="agent-card-footer">
                 <span>
                   <span className="status-dot" />
-                  {a.sessionId ? "Owned session" : "No session allocated"}
+                  {a.state === "busy"
+                    ? "Working now"
+                    : a.sessionId
+                      ? "Session ready"
+                      : "Starts on first message"}
                 </span>
                 <Button
                   variant="outline"

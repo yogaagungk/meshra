@@ -339,6 +339,7 @@ export type RoutineRun = {
   conversationId?: string;
   taskIds?: string[];
   steps?: RoutineStep[];
+  graph?: { nodes: FlowNode[]; edges: FlowEdge[] };
   error?: string;
   createdAt: string;
   updatedAt: string;
@@ -347,6 +348,7 @@ export type FlowNode = { id: string; profileId: string; instruction: string };
 export type FlowEdge = { from: string; to: string };
 export type Flow = {
   id: string;
+  name?: string;
   revision: number;
   nodes: FlowNode[];
   edges: FlowEdge[];
@@ -421,7 +423,9 @@ export type AutomationOperations = {
     taskId: string; state: string; draft?: ProfileDraft; raw?: string; error?: string;
   }>;
   "profiles.resetContext": Operation<RevisionRequest & { conversationId: string }, { epoch: number; resetAfterSeq: number }>;
-  "queue.list": Operation<{ agentId?: string; profileId?: string }, { items: QueueState[] }>;
+  "routing.route": Operation<{ conversationId: string; leadAgentId: string; text: string; purpose?: string }, { taskId: string; state: string; startError?: string }>;
+  "routing.result": Operation<{ taskId: string }, { taskId: string; state: string; agentIds?: string[]; reason?: string; error?: string }>;
+  "queue.list": Operation<{ agentId?: string; profileId?: string; includeChat?: boolean }, { items: QueueState[] }>;
   "queue.pause": Operation<{ agentId: string; expectedRevision: number }, QueueState>;
   "queue.resume": Operation<{ agentId: string; expectedRevision: number }, QueueState>;
   "queue.reorder": Operation<{ agentId: string; expectedRevision: number; taskIds: string[] }, QueueState>;
@@ -600,9 +604,11 @@ export type AutomationOperations = {
   "routineTokens.list": Operation<Pagination, ResourcePage<RoutineToken>>;
   "routineTokens.create": Operation<{ routineIds: string[]; expiresAt?: string }, RoutineToken>;
   "routineTokens.revoke": Operation<{ id: string }, RoutineToken>;
+  "flows.list": Operation<Pagination, ResourcePage<Flow>>;
   "flows.get": Operation<{ id: string; revision?: number }, Flow>;
   "flows.save": Operation<{
     id?: string;
+    name?: string;
     expectedRevision?: number;
     nodes: FlowNode[];
     edges: FlowEdge[];

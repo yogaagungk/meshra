@@ -706,7 +706,7 @@ function Shell({
                 )}
                 <div className="welcome-note">
                   <ShieldCheck size={14} />
-                  Messages go only to the recipients you select.
+                  Messages go only to agents you address with @ or select. Nothing is broadcast.
                 </div>
               </div>
               <div className="welcome-bottom">

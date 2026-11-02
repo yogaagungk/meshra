@@ -1,0 +1,431 @@
+<title>Meshra Mesh</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a live mesh map on the left with the thread ledger below it; a streaming chat and the selected node's details on the right. */
+:root{
+  --bg:#eef1f4; --panel:#fbfcfd; --ink:#14202b; --muted:#566574; --line:#cdd5dd; --edge:#9aa8b6; --soft:#e6ebf0;
+  --you:#e8590c; --claude:#c2410c; --codex:#1d4ed8; --omp:#6d3fc7; --opencode:#0f7a4d; --acp:#b01e4f;
+  --ctx:#8a6a00; --ok:#0f7a4d; --run:#e8590c; --focus:#1d4ed8; --bubble:#e3e9ef;
+  --display:"Bricolage Grotesque","Trebuchet MS",system-ui,sans-serif;
+  --body:"Geist",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1a20; --panel:#15232b; --ink:#e6eef3; --muted:#9fb0bd; --line:#2a3d48; --edge:#4d6677; --soft:#1b2d37;
+  --you:#ff8a4c; --claude:#ff9a6b; --codex:#8db0ff; --omp:#bba0ff; --opencode:#6fdca3; --acp:#ff9bbb;
+  --ctx:#e9c445; --ok:#6fdca3; --run:#ff8a4c; --focus:#8db0ff; --bubble:#1f3340; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1a20; --panel:#15232b; --ink:#e6eef3; --muted:#9fb0bd; --line:#2a3d48; --edge:#4d6677; --soft:#1b2d37;
+  --you:#ff8a4c; --claude:#ff9a6b; --codex:#8db0ff; --omp:#bba0ff; --opencode:#6fdca3; --acp:#ff9bbb;
+  --ctx:#e9c445; --ok:#6fdca3; --run:#ff8a4c; --focus:#8db0ff; --bubble:#1f3340; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.5 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 32px}
+.wrap{max-width:1280px;margin:0 auto;display:grid;gap:16px}
+header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:end;justify-content:space-between}
+.logo{font:700 28px/1 var(--display);letter-spacing:-.02em}
+.logo i{font-style:normal;color:var(--you)}
+.tag{margin:6px 0 0;color:var(--muted);max-width:60ch}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+button{font:500 14px var(--body);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer;min-height:38px;display:inline-flex;align-items:center;gap:8px}
+button:hover{border-color:var(--edge)}
+button:focus-visible,input:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.ic{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.stage{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.stage{grid-template-columns:minmax(0,1fr)}}
+.col{display:grid;gap:16px;min-width:0;align-content:start}
+.map{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px;min-width:0}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:8px 12px 4px;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend svg{width:30px;height:8px}
+svg.mesh{display:block;width:100%;height:auto;overflow:visible}
+.edge{fill:none;stroke:var(--edge);stroke-width:2;transition:stroke .2s,stroke-width .2s}
+.edge.ctx{stroke-dasharray:3 6;stroke:var(--ctx);stroke-width:1.75}
+.edge.none{stroke-dasharray:1 7;stroke-linecap:round;opacity:.55}
+.edge.live{stroke:var(--run);stroke-width:3}
+.edge.sel{stroke:var(--ink);stroke-width:3.5}
+.hit{fill:none;stroke:transparent;stroke-width:22;cursor:pointer}
+.node{cursor:pointer}
+.node .disc{fill:var(--panel);stroke-width:3;transition:transform .2s}
+.node:hover .disc,.node.sel .disc{transform:scale(1.07);transform-box:fill-box;transform-origin:center}
+.node.sel .halo{opacity:1}
+.node.busy .ring{opacity:1;animation:spin 1.6s linear infinite}
+.ring{fill:none;stroke-width:3;stroke-linecap:round;stroke-dasharray:36 170;opacity:0;transform-box:fill-box;transform-origin:center}
+@keyframes spin{to{transform:rotate(360deg)}}
+.halo{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-dasharray:2 4;opacity:0}
+.node text.id{font:500 12.5px var(--mono);text-anchor:middle;fill:var(--ink);pointer-events:none}
+.node text.sub{font:400 11.5px var(--body);text-anchor:middle;fill:var(--muted);pointer-events:none}
+.node use{pointer-events:none}
+.pulse{fill:var(--run);stroke:var(--panel);stroke-width:2}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}
+h2{margin:0 0 8px;font:700 19px/1.2 var(--display);letter-spacing:-.01em}
+.who{display:flex;gap:12px;align-items:center}
+.chip{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;border:3px solid currentColor;flex:none}
+.chip .ic{width:20px;height:20px}
+.mono{font-family:var(--mono);font-size:13px;overflow-wrap:anywhere}
+.facts{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0;padding:0;list-style:none}
+.facts li{font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 10px}
+.links{margin:12px 0 0;padding:0;list-style:none;display:grid;gap:6px}
+.links li{display:flex;justify-content:space-between;gap:8px;font-size:13.5px;border-top:1px solid var(--line);padding-top:6px}
+.links b{font-weight:500;color:var(--muted)}
+.picker{margin:12px 0 0;border:0;padding:0}
+.picker legend{font-size:12.5px;color:var(--muted);padding:0;margin-bottom:6px}
+.picker div{display:flex;flex-wrap:wrap;gap:6px}
+.picker button{padding:0;width:38px;justify-content:center}
+.picker button[aria-checked="true"]{border-color:var(--ink);background:var(--soft)}
+.ledger{max-height:230px;overflow:auto;display:grid;margin:0;padding:0;list-style:none}
+.ledger li{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px;align-items:baseline}
+.ledger li:first-child{border-top:0}
+.ledger time{font:400 12px var(--mono);color:var(--muted)}
+.st{font:500 12px var(--mono);padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.st.run{color:var(--run);border-color:var(--run)}
+.st.ok{color:var(--ok);border-color:var(--ok)}
+
+/* Chat */
+.chat{display:flex;flex-direction:column;padding:0;overflow:hidden}
+.chat-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.chat-head h2{margin:0}
+.feed{height:min(520px,62vh);overflow:auto;padding:16px;display:flex;flex-direction:column;gap:16px;scroll-behavior:smooth}
+.empty{margin:auto;text-align:center;color:var(--muted);max-width:30ch}
+.empty .ic{width:28px;height:28px;margin-bottom:6px;color:var(--edge)}
+.m{display:flex;gap:10px;animation:rise .38s cubic-bezier(.22,1,.36,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.m.me{justify-content:flex-end}
+.m.me .bub{background:var(--bubble);border-radius:16px 16px 4px 16px;max-width:88%;padding:9px 13px}
+.av{width:30px;height:30px;border-radius:50%;border:2px solid currentColor;display:grid;place-items:center;flex:none;margin-top:2px}
+.av .ic{width:15px;height:15px}
+.av.live{animation:breathe 1.6s ease-in-out infinite}
+@keyframes breathe{50%{box-shadow:0 0 0 5px color-mix(in srgb,currentColor 18%,transparent)}}
+.body{min-width:0;flex:1}
+.who-l{font:500 12.5px var(--mono);display:flex;gap:8px;align-items:center;margin-bottom:4px;flex-wrap:wrap}
+.who-l .sub{color:var(--muted);font:400 12px var(--body)}
+.txt{overflow-wrap:anywhere}
+.txt code{font:500 13px var(--mono);background:var(--soft);padding:1px 5px;border-radius:5px}
+.caret{display:inline-block;width:8px;height:1.05em;vertical-align:-.15em;margin-left:2px;border-radius:2px;background:var(--ink);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.dots{display:inline-flex;gap:4px;padding:6px 0}
+.dots i{width:7px;height:7px;border-radius:50%;background:var(--muted);animation:bounce 1.1s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-5px);opacity:1}}
+.steps{display:grid;gap:4px;margin:2px 0 8px}
+.step{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);animation:rise .3s ease both}
+.step .ic{width:14px;height:14px}
+.step.done .ic{color:var(--ok)}
+.step .spin{animation:spin 1s linear infinite}
+.hand{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);padding:6px 10px;border:1px dashed var(--edge);border-radius:10px;margin-top:8px;width:fit-content;max-width:100%}
+.stopped{color:var(--muted);font-size:12.5px;margin-top:4px}
+.comp{border-top:1px solid var(--line);padding:12px 16px 14px;display:grid;gap:10px}
+.to{display:flex;flex-wrap:wrap;gap:6px}
+.to label{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:3px 10px 3px 8px;font:500 12.5px var(--mono);cursor:pointer;background:var(--panel)}
+.to input{accent-color:var(--ink);margin:0}
+.to label:has(input:checked){border-color:var(--ink);background:var(--soft)}
+.to .ic{width:14px;height:14px}
+.box{display:flex;gap:8px;align-items:flex-end;background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:6px 6px 6px 12px}
+.box:focus-within{border-color:var(--ink)}
+textarea{flex:1;min-height:44px;max-height:140px;resize:none;font:400 15px/1.5 var(--body);color:var(--ink);background:transparent;border:0;padding:8px 0;outline:none}
+.send{width:40px;height:40px;padding:0;justify-content:center;border-radius:50%}
+.hint{font-size:12.5px;color:var(--muted);margin:0}
+.pill-btn{font-size:13px;min-height:32px;padding:4px 10px}
+@media (prefers-reduced-motion:reduce){
+  .edge,.node .disc{transition:none}
+  .m,.step{animation:none}
+  .av.live,.dots i,.caret,.node.busy .ring,.step .spin{animation:none}
+  .feed{scroll-behavior:auto}
+}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z"/><path d="M19 3v3M17.5 4.5h3"/></symbol>
+    <symbol id="i-orbit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.2"/><ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(-30 12 12)"/><circle cx="19" cy="7.6" r=".8"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4.5" y="8" width="15" height="11" rx="3"/><path d="M12 4v4M9 13v1.5M15 13v1.5M2.5 13.5v2M21.5 13.5v2"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.5 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.8l6-.8z"/></symbol>
+    <symbol id="i-hex" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 9v6M9 10.5l3 1.5 3-1.5"/></symbol>
+    <symbol id="i-flower" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.4"/><circle cx="12" cy="6.2" r="2.8"/><circle cx="12" cy="17.8" r="2.8"/><circle cx="6.2" cy="12" r="2.8"/><circle cx="17.8" cy="12" r="2.8"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3L5.5 13.5H11L10 21l8.5-11H13z"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.9 3.1-6 7-6s7 2.1 7 6"/></symbol>
+    <symbol id="i-ctx" viewBox="0 0 24 24"><path d="M6 4h10a2 2 0 012 2v14H8a2 2 0 01-2-2z"/><path d="M6 18a2 2 0 012-2h10M10 8.5h5"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2.5"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-8 8a5 5 0 01-7-7l8.5-8.5a3.2 3.2 0 014.6 4.6L9.5 17a1.6 1.6 0 01-2.3-2.3L15 7"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5.2c0 4.7-3 7.9-7 9.8-4-1.9-7-5.1-7-9.8V6z"/><path d="M9 12l2.2 2.2L15.5 10"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 8.2v7.6M18 11.2c0 3-3 3.8-6 3.8H8"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-loader" viewBox="0 0 24 24"><path d="M12 3a9 9 0 019 9"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M9.5 13h5M9.5 16.5h5"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 015.5 4h13A1.5 1.5 0 0120 5.5v9a1.5 1.5 0 01-1.5 1.5H10l-4.5 4v-4h0A1.5 1.5 0 014 14.5z"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z"/></symbol>
+    <symbol id="i-replay" viewBox="0 0 24 24"><path d="M4 12a8 8 0 108-8H8M8 1.5L5.5 4 8 6.5"/></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="logo">meshra<i>.</i></div>
+      <p class="tag">You and your agents, joined by threads you drew. A thread exists only where you connected two parties; nothing is sent to anyone you did not name.</p>
+    </div>
+    <div class="tools">
+      <button id="replay"><svg class="ic"><use href="#i-replay"/></svg>Replay delegation</button>
+      <button id="theme"><svg class="ic"><use href="#i-moon"/></svg>Light / dark</button>
+    </div>
+  </header>
+
+  <div class="stage">
+    <div class="col">
+      <section class="map" aria-label="Mesh map">
+        <svg class="mesh" id="mesh" viewBox="0 0 900 560" role="img" aria-label="Map of you, four agents and one shared context joined by threads"></svg>
+        <div class="legend">
+          <span><svg viewBox="0 0 30 8"><path d="M0 4H30" stroke="var(--edge)" stroke-width="2.5"/></svg>Thread</span>
+          <span><svg viewBox="0 0 30 8"><path d="M0 4H30" stroke="var(--run)" stroke-width="3"/></svg>Task in flight</span>
+          <span><svg viewBox="0 0 30 8"><path d="M0 4H30" stroke="var(--ctx)" stroke-width="2" stroke-dasharray="3 6"/></svg>Shared context, read only</span>
+          <span><svg viewBox="0 0 30 8"><path d="M1 4H29" stroke="var(--edge)" stroke-width="2" stroke-dasharray="1 7" stroke-linecap="round"/></svg>Not connected</span>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Thread ledger</h2>
+        <ol class="ledger" id="ledger"></ol>
+      </section>
+    </div>
+
+    <aside class="col">
+      <section class="card" aria-live="polite" id="detail"></section>
+      <section class="card chat" aria-label="Chat">
+        <div class="chat-head">
+          <h2><svg class="ic" style="vertical-align:-3px;margin-right:6px"><use href="#i-chat"/></svg>Targeted collaboration</h2>
+          <button class="pill-btn" id="stop" disabled><svg class="ic"><use href="#i-stop"/></svg>Stop</button>
+        </div>
+        <div class="feed" id="feed" role="log" aria-live="polite">
+          <div class="empty" id="empty"><svg class="ic"><use href="#i-chat"/></svg><div>Pick who should hear you, then write. Replies stream in as they are produced.</div></div>
+        </div>
+        <div class="comp">
+          <div class="to" id="to" role="group" aria-label="Recipients"></div>
+          <div class="box">
+            <textarea id="msg" rows="1" aria-label="Message" placeholder="Give your agent a clear task or ask a question">Review the API contract in the attached context and list breaking changes.</textarea>
+            <button class="primary send" id="send" aria-label="Send message"><svg class="ic"><use href="#i-send"/></svg></button>
+          </div>
+          <p class="hint" id="route"><svg class="ic" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px"><use href="#i-shield"/></svg>Choose who receives this. Nobody is selected by default.</p>
+        </div>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script>
+/* Synthetic demo data. Identities follow the harness:name convention. */
+var NS="http://www.w3.org/2000/svg";
+var ICONS=[["spark","Spark"],["orbit","Orbit"],["bot","Bot"],["star","Star"],["hex","Hexagon"],["flower","Flower"],["bolt","Bolt"]];
+var N={
+  you:{id:"human:operator",label:"You",icon:"user",x:110,y:290,color:"--you",sub:"Operator",facts:["Local administrator","Loopback only"],fixed:true},
+  cl:{id:"claude:exampleone",label:"claude:exampleone",icon:"spark",x:400,y:140,color:"--claude",sub:"Reviewer, can delegate",facts:["Claude","api-gateway","Session ready"]},
+  cx:{id:"codex:mobilewallet",label:"codex:mobilewallet",icon:"hex",x:720,y:100,color:"--codex",sub:"Builder",facts:["Codex","mobile-wallet","Session ready"]},
+  om:{id:"omp:adsengine",label:"omp:adsengine",icon:"orbit",x:650,y:340,color:"--omp",sub:"Migrator",facts:["OMP","General workspace"]},
+  oc:{id:"opencode:handbook",label:"opencode:handbook",icon:"flower",x:380,y:470,color:"--opencode",sub:"Docs",facts:["OpenCode","docs-site"]},
+  ctx:{id:"ctx 41ddb16bdd v1",label:"ctx 41ddb16bdd",icon:"ctx",x:210,y:60,color:"--ctx",sub:"Immutable, pinned",facts:["Shared context","Read only","Published by you"],fixed:true}
+};
+var E=[
+  {id:"you-cl",a:"you",b:"cl",bend:-30,kind:"thread",note:"Direct thread"},
+  {id:"you-oc",a:"you",b:"oc",bend:30,kind:"none",note:"Not connected. Nothing reaches this agent unless you name it."},
+  {id:"cl-cx",a:"cl",b:"cx",bend:-20,kind:"thread",note:"Delegation allowed"},
+  {id:"cl-om",a:"cl",b:"om",bend:30,kind:"thread",note:"Delegation allowed"},
+  {id:"om-oc",a:"om",b:"oc",bend:20,kind:"thread",note:"Hand-off"},
+  {id:"ctx-cl",a:"ctx",b:"cl",bend:-10,kind:"ctx",note:"Context attached, read only"},
+  {id:"ctx-om",a:"ctx",b:"om",bend:60,kind:"ctx",note:"Context granted, read only"}
+];
+/* Scripted replies: steps shown first, then the answer streams in. */
+var SCRIPT={
+  cl:{steps:["Reading ctx 41ddb16bdd v1","Comparing against /tasks handlers"],
+      text:"Two breaking changes: `/tasks` now requires `correlationId`, and `state=held` was removed. I'll ask `codex:mobilewallet` to check the wallet client and `omp:adsengine` to draft the migration.",
+      hand:[["cx","Check the wallet client for /tasks calls"],["om","Draft the migration"]]},
+  cx:{steps:["Searching mobile-wallet for /tasks calls"],
+      text:"Found 3 call sites in `TaskClient.kt`. Two already send `correlationId`; `retryHeld()` still reads `state=held` and needs a change."},
+  om:{steps:["Reading ctx 41ddb16bdd v1","Drafting migration steps"],
+      text:"Migration drafted: add `correlationId` to the request schema, then backfill rows with `state=held` to `queued`. I'll hand the doc update to `opencode:handbook`.",
+      hand:[["oc","Update the handbook page for the new /tasks contract"]]},
+  oc:{steps:["Opening docs-site/api/tasks.md"],
+      text:"Updated the handbook page and removed `state=held` from the examples."}
+};
+var E_=E,ledger=[
+  {t:"09:12",from:"you",to:"cl",text:"Review the API contract",st:"ok"},
+  {t:"09:13",from:"cl",to:"cx",text:"Check the wallet client for /tasks calls",st:"ok"},
+  {t:"09:14",from:"cl",to:"om",text:"Draft the migration",st:"ok"}
+];
+var sel={type:"node",key:"you"};
+var svg=document.getElementById("mesh"),els={};
+function mk(tag,attrs,parent){var e=document.createElementNS(NS,tag);for(var k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e}
+function ico(name,cls){return '<svg class="ic'+(cls?" "+cls:"")+'"><use href="#i-'+name+'"/></svg>'}
+function pathD(e){var a=N[e.a],b=N[e.b],mx=(a.x+b.x)/2,my=(a.y+b.y)/2,dx=b.x-a.x,dy=b.y-a.y,l=Math.hypot(dx,dy)||1;
+  return "M"+a.x+" "+a.y+" Q"+(mx-dy/l*e.bend*2)+" "+(my+dx/l*e.bend*2)+" "+b.x+" "+b.y}
+var gE=mk("g",{},svg),gP=mk("g",{},svg),gN=mk("g",{},svg);
+E.forEach(function(e){
+  var p=mk("path",{d:pathD(e),"class":"edge "+(e.kind==="thread"?"":e.kind)},gE);
+  var h=mk("path",{d:pathD(e),"class":"hit",tabindex:"0",role:"button","aria-label":"Thread "+N[e.a].label+" to "+N[e.b].label});
+  gE.appendChild(h);
+  h.addEventListener("click",function(){pick("edge",e.id)});
+  h.addEventListener("keydown",function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();pick("edge",e.id)}});
+  els[e.id]={path:p}
+});
+Object.keys(N).forEach(function(k){
+  var n=N[k],g=mk("g",{"class":"node",tabindex:"0",role:"button","aria-label":n.label},gN);
+  mk("circle",{"class":"halo",cx:n.x,cy:n.y,r:44},g);
+  mk("circle",{"class":"disc",cx:n.x,cy:n.y,r:32,stroke:"var("+n.color+")"},g);
+  mk("circle",{"class":"ring",cx:n.x,cy:n.y,r:38,stroke:"var("+n.color+")"},g);
+  var u=mk("use",{x:n.x-14,y:n.y-14,width:28,height:28,href:"#i-"+n.icon,style:"color:var("+n.color+");fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"},g);
+  var i=mk("text",{"class":"id",x:n.x,y:n.y+54},g);i.textContent=n.label;
+  var s=mk("text",{"class":"sub",x:n.x,y:n.y+70},g);s.textContent=n.sub;
+  g.addEventListener("click",function(){pick("node",k)});
+  g.addEventListener("keydown",function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();pick("node",k)}});
+  els[k]={g:g,use:u}
+});
+function edgeBetween(a,b){return E.filter(function(e){return (e.a===a&&e.b===b)||(e.a===b&&e.b===a)})[0]}
+function pick(type,key){sel={type:type,key:key};render()}
+function esc(s){return String(s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]})}
+function md(s){return esc(s).replace(/`([^`]+)`/g,"<code>$1</code>")}
+function setIcon(k,name){N[k].icon=name;els[k].use.setAttribute("href","#i-"+name);document.querySelectorAll('[data-av="'+k+'"] use').forEach(function(u){u.setAttribute("href","#i-"+name)});render();buildTo()}
+function render(){
+  Object.keys(N).forEach(function(k){els[k].g.classList.toggle("sel",sel.type==="node"&&sel.key===k)});
+  E.forEach(function(e){els[e.id].path.classList.toggle("sel",sel.type==="edge"&&sel.key===e.id)});
+  var d=document.getElementById("detail"),h="";
+  if(sel.type==="node"){
+    var n=N[sel.key];
+    h='<div class="who"><span class="chip" style="color:var('+n.color+')">'+ico(n.icon)+'</span><div><h2 style="margin:0">'+esc(n.label)+'</h2><div class="mono" style="color:var(--muted)">'+esc(n.id)+'</div></div></div><ul class="facts">'+n.facts.map(function(f){return "<li>"+esc(f)+"</li>"}).join("")+"</ul>";
+    var ls=E.filter(function(e){return e.a===sel.key||e.b===sel.key});
+    h+='<ul class="links">'+ls.map(function(e){var o=e.a===sel.key?e.b:e.a;return "<li><span>"+esc(N[o].label)+"</span><b>"+esc(e.kind==="none"?"Not connected":e.kind==="ctx"?"Context, read only":"Connected")+"</b></li>"}).join("")+"</ul>";
+    if(!n.fixed){
+      h+='<fieldset class="picker"><legend>Agent icon</legend><div role="radiogroup" aria-label="Agent icon">'+ICONS.map(function(c){
+        return '<button type="button" role="radio" aria-checked="'+(n.icon===c[0])+'" aria-label="'+c[1]+'" title="'+c[1]+'" data-ic="'+c[0]+'" style="color:var('+n.color+')">'+ico(c[0])+'</button>'}).join("")+'</div></fieldset>';
+    }
+  }else{
+    var e=E.filter(function(x){return x.id===sel.key})[0];
+    h='<h2>'+esc(N[e.a].label)+' &rarr; '+esc(N[e.b].label)+'</h2><p class="hint" style="font-size:14px">'+esc(e.note)+'</p>';
+    var m=ledger.filter(function(l){return (l.from===e.a&&l.to===e.b)||(l.from===e.b&&l.to===e.a)});
+    h+=m.length?'<ul class="links">'+m.map(function(l){return "<li><span>"+esc(l.text)+"</span><b>"+l.t+"</b></li>"}).join("")+"</ul>":'<p class="hint">No messages on this thread yet.</p>';
+  }
+  d.innerHTML=h;
+  d.querySelectorAll("[data-ic]").forEach(function(b){b.addEventListener("click",function(){setIcon(sel.key,b.dataset.ic)})});
+  var L=document.getElementById("ledger");
+  L.innerHTML=ledger.slice().reverse().map(function(l){
+    return '<li><time>'+l.t+'</time><span><span class="mono" style="color:var('+N[l.from].color+')">'+esc(N[l.from].label)+'</span> &rarr; <span class="mono" style="color:var('+N[l.to].color+')">'+esc(N[l.to].label)+'</span><br>'+esc(l.text)+'</span><span class="st '+l.st+'">'+(l.st==="run"?"running":l.st==="stop"?"stopped":"done")+'</span></li>'}).join("")
+}
+var reduce=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+var epoch=0; /* bump to cancel everything in flight */
+function wait(ms,my){return new Promise(function(res){setTimeout(function(){res(my===epoch)},reduce?0:ms)})}
+function pulse(fromKey,toKey,my){
+  return new Promise(function(done){
+    var e=edgeBetween(fromKey,toKey);if(!e){done();return}
+    var p=els[e.id].path,len=p.getTotalLength(),fwd=e.a===fromKey;
+    p.classList.add("live");
+    if(reduce){setTimeout(function(){p.classList.remove("live");done()},300);return}
+    var c=mk("circle",{"class":"pulse",r:7},gP),t0=null,dur=900;
+    function step(ts){if(!t0)t0=ts;var f=Math.min(1,(ts-t0)/dur),q=fwd?f:1-f,pt=p.getPointAtLength(len*q);
+      c.setAttribute("cx",pt.x);c.setAttribute("cy",pt.y);
+      if(f<1&&my===epoch)requestAnimationFrame(step);else{if(c.parentNode)gP.removeChild(c);p.classList.remove("live");done()}}
+    requestAnimationFrame(step)
+  })
+}
+function now(){var d=new Date();return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)}
+function log(from,to,text,st){var r={t:now(),from:from,to:to,text:text,st:st};ledger.push(r);render();return r}
+
+/* Chat feed */
+var feed=document.getElementById("feed"),stopBtn=document.getElementById("stop"),active=0;
+function bottom(){feed.scrollTop=feed.scrollHeight}
+function addEl(html,cls){var emp=document.getElementById("empty");if(emp)emp.remove();var d=document.createElement("div");d.className=cls;d.innerHTML=html;feed.appendChild(d);bottom();return d}
+function setBusy(n,on){active+=on?1:-1;stopBtn.disabled=active<=0;if(els[n])els[n].g.classList.toggle("busy",on)}
+async function stream(box,text,my){
+  var words=text.split(/(\s+)/),shown="";
+  var caret='<span class="caret"></span>';
+  for(var i=0;i<words.length;i++){
+    if(my!==epoch)return false;
+    shown+=words[i];
+    box.innerHTML=md(shown)+caret;bottom();
+    if(!/^\s+$/.test(words[i])&&!reduce){await wait(28+Math.random()*30,my)}
+  }
+  box.innerHTML=md(text);bottom();return my===epoch
+}
+async function agentReply(k,from,depth,my){
+  var n=N[k],sc=SCRIPT[k];
+  var row=addEl('<span class="av live" data-av="'+k+'" style="color:var('+n.color+')">'+ico(n.icon)+'</span><div class="body"><div class="who-l" style="color:var('+n.color+')">'+esc(n.label)+'<span class="sub">'+esc(n.sub)+'</span></div><div class="steps"></div><div class="txt"><span class="dots"><i></i><i></i><i></i></span></div></div>',"m");
+  var steps=row.querySelector(".steps"),txt=row.querySelector(".txt"),av=row.querySelector(".av");
+  setBusy(k,true);
+  if(!(await wait(700,my))){return end(false)}
+  for(var i=0;i<sc.steps.length;i++){
+    var s=document.createElement("div");s.className="step";s.innerHTML=ico("loader","spin")+esc(sc.steps[i]);steps.appendChild(s);bottom();
+    if(!(await wait(650,my))){return end(false)}
+    s.classList.add("done");s.innerHTML=ico("check")+esc(sc.steps[i])
+  }
+  txt.innerHTML="";
+  var ok=await stream(txt,sc.text,my);
+  if(!ok){return end(false)}
+  return end(true);
+  function end(done){
+    av.classList.remove("live");setBusy(k,false);
+    if(!done){var c=txt.querySelector(".caret");if(c)c.remove();var d=txt.querySelector(".dots");if(d)d.remove();
+      var st=document.createElement("div");st.className="stopped";st.textContent="Stopped. Nothing further was sent.";row.querySelector(".body").appendChild(st)}
+    return done
+  }
+}
+async function deliver(from,to,text,depth,my){
+  var r=log(from,to,text,"run");
+  await pulse(from,to,my);
+  if(my!==epoch){r.st="stop";render();return}
+  var ok=await agentReply(to,from,depth,my);
+  r.st=ok?"ok":"stop";render();
+  var sc=SCRIPT[to];
+  if(ok&&sc.hand&&depth<2){
+    for(var i=0;i<sc.hand.length;i++){
+      var h=sc.hand[i];
+      if(!edgeBetween(to,h[0]))continue;
+      var last=feed.lastElementChild;
+      addEl(ico("branch")+'<span><span class="mono" style="color:var('+N[to].color+')">'+esc(N[to].label)+'</span> handed work to <span class="mono" style="color:var('+N[h[0]].color+')">'+esc(N[h[0]].label)+'</span>: '+esc(h[1])+'</span>',"m hand");
+    }
+    await Promise.all(sc.hand.map(function(h,i){return wait(250*i,my).then(function(go){if(go&&edgeBetween(to,h[0]))return deliver(to,h[0],h[1],depth+1,my)})}))
+  }
+}
+function start(picked,text){
+  var my=epoch;
+  addEl('<div class="bub txt">'+md(text)+'</div>',"m me");
+  picked.forEach(function(k,i){wait(260*i,my).then(function(go){if(go)deliver("you",k,text,0,my)})})
+}
+stopBtn.addEventListener("click",function(){epoch++;active=0;stopBtn.disabled=true;document.querySelectorAll(".node.busy").forEach(function(g){g.classList.remove("busy")})});
+
+/* Composer: recipients are explicit. */
+var toBox=document.getElementById("to"),route=document.getElementById("route"),msg=document.getElementById("msg");
+function buildTo(){
+  var keep=[].slice.call(toBox.querySelectorAll("input:checked")).map(function(i){return i.value});
+  toBox.innerHTML="";
+  ["cl","cx","om","oc"].forEach(function(k){
+    var l=document.createElement("label");
+    l.innerHTML='<input type="checkbox" value="'+k+'" id="to-'+k+'"'+(keep.indexOf(k)>-1?" checked":"")+'><span style="color:var('+N[k].color+');display:inline-flex">'+ico(N[k].icon)+'</span>'+esc(N[k].label);
+    toBox.appendChild(l)})
+}
+buildTo();
+function pickedList(){return [].slice.call(toBox.querySelectorAll("input:checked")).map(function(i){return i.value})}
+toBox.addEventListener("change",function(){
+  var picked=pickedList();
+  var bad=picked.filter(function(k){return !edgeBetween("you",k)||edgeBetween("you",k).kind==="none"});
+  var t=!picked.length?"Choose who receives this. Nobody is selected by default.":bad.length?N[bad[0]].label+" has no thread with you. Sending opens one.":"Goes only to "+picked.map(function(k){return N[k].label}).join(", ")+".";
+  route.lastChild.textContent=t
+});
+function send(){
+  var picked=pickedList(),text=msg.value.trim();
+  if(!picked.length){route.lastChild.textContent="Pick at least one recipient first.";return}
+  if(!text){route.lastChild.textContent="Write a message first.";return}
+  picked.forEach(function(k){var e=edgeBetween("you",k);if(e&&e.kind==="none"){e.kind="thread";e.note="Direct thread, opened by you just now";els[e.id].path.setAttribute("class","edge")}});
+  start(picked,text);msg.value="";fit()
+}
+function fit(){msg.style.height="auto";msg.style.height=Math.min(140,msg.scrollHeight)+"px"}
+msg.addEventListener("input",fit);
+msg.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
+document.getElementById("send").addEventListener("click",send);
+document.getElementById("replay").addEventListener("click",function(){
+  epoch++;var my=epoch;active=0;stopBtn.disabled=true;
+  document.querySelectorAll(".node.busy").forEach(function(g){g.classList.remove("busy")});
+  var t="Review the API contract in the attached context and list breaking changes.";
+  addEl('<div class="bub txt">'+md(t)+'</div>',"m me");deliver("you","cl",t,0,my)});
+document.getElementById("theme").addEventListener("click",function(){
+  var r=document.documentElement,dark=getComputedStyle(r).colorScheme==="dark";r.setAttribute("data-theme",dark?"light":"dark")});
+render();fit();
+</script>
