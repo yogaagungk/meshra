@@ -38,7 +38,7 @@ import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { Markdown } from "./Markdown";
 import { ContextBrowser } from "./Operations";
-import { harnessName } from "./HarnessLogo";
+import { harnessName, deptOf } from "./HarnessLogo";
 import {
   mergeTasks,
   stateLabel,
@@ -699,7 +699,7 @@ function LegacyChat({
                       </div>
                     </div>
                   </div>
-                  <div className="message message-response">
+                  <div className="message message-response" data-harness={deptOf(t.to)}>
                     <div className="message-avatar">
                       <ChatAgentAvatar id={t.to} agents={agents} />
                     </div>

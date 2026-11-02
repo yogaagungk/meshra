@@ -36,3 +36,9 @@ export function HarnessLogo({ id }: { id: string }) {
     </span>
   );
 }
+
+/** Department key for a harness or canonical agent id: claude, codex, omp, opencode, or acp for everything else. */
+export function deptOf(id: string) {
+  const h = id.split(":")[0];
+  return h in logos ? h : "acp";
+}

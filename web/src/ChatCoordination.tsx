@@ -82,7 +82,7 @@ export function ChatQueue({ conversationId, members }: { conversationId: string;
   const ids = new Set(members.map((m) => m.id));
   const queues = useQuery({
     queryKey: ["queue", "chat", conversationId],
-    queryFn: () => automation("queue.list", {}),
+    queryFn: () => automation("queue.list", { includeChat: true }),
     refetchInterval: 4000,
     refetchIntervalInBackground: false,
   });

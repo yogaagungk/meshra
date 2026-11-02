@@ -37,7 +37,7 @@ import { Dialog } from "./components/ui/dialog";
 import { Markdown } from "./Markdown";
 import { Delivery } from "./Chat";
 import { AgentAvatar, AvatarPicker, defaultAvatar } from "./components/AgentAvatar";
-import { harnessName } from "./HarnessLogo";
+import { harnessName, deptOf } from "./HarnessLogo";
 
 /** Auto-created per-agent folders are not a project name worth showing. */
 const generalWorkspace = (cwd: string) => /\/agent-\d+\/?$/.test(cwd);
@@ -55,6 +55,7 @@ import {
 import { SettingsPanels } from "./Personal";
 import { Automation } from "./Automation";
 import { Profiles } from "./Profiles";
+import { AgentMesh } from "./AgentMesh";
 import { Workspaces } from "./Workspaces";
 export function Operations({
   view,
@@ -197,6 +198,7 @@ function Agents({
   const [filter, setFilter] = useState("all");
   const [create, setCreate] = useState(false);
   const [selected, setSelected] = useState<Agent | null>(null);
+  const [layout, setLayout] = useState<"cards" | "mesh">("cards");
   const [action, setAction] = useState("");
   const [failure, setFailure] = useState("");
   const [stopping, setStopping] = useState<Agent | null>(null);
@@ -259,6 +261,13 @@ function Agents({
             </option>
           ))}
         </select>
+        <div className="layout-toggle" role="group" aria-label="Agent layout">
+          {(["cards", "mesh"] as const).map((v) => (
+            <button key={v} aria-pressed={layout === v} onClick={() => setLayout(v)}>
+              {v === "cards" ? "Cards" : "Mesh"}
+            </button>
+          ))}
+        </div>
         <Button onClick={() => setCreate(true)}>
           <Plus size={16} />
           Register agent
@@ -285,10 +294,12 @@ function Agents({
         >
           Register an installed harness as a general agent or assign it to a registered workspace.
         </Empty>
+      ) : layout === "mesh" ? (
+        <AgentMesh agents={rows} onSelect={setSelected} />
       ) : (
         <div className="agent-grid">
           {rows.map((a) => (
-            <article className="agent-card" key={a.id}>
+            <article className="agent-card" key={a.id} data-harness={deptOf(a.harness)}>
               <div className="agent-card-top">
                 <AgentAvatar icon={a.avatarIcon} color={a.avatarColor} />
                 <Status state={a.state} />

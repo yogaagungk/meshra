@@ -1,0 +1,211 @@
+/*
+  Mesh: the console's visual world. Loaded last; re-tokens the console.
+  Every party (you, each agent, shared context) has one color and one icon,
+  and the threads between them are the organising idea: chat replies stream in
+  as animated turns, and the Agents view can draw the mesh itself.
+*/
+:root {
+  font-family:
+    "Geist Variable", "Geist", ui-sans-serif, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "Geist Mono Variable", "Geist Mono", ui-monospace, Menlo, Consolas, monospace;
+  --display: "Bricolage Grotesque Variable", "Bricolage Grotesque", "Trebuchet MS", ui-sans-serif, sans-serif;
+  --weight-body: 420;
+  --weight-label: 540;
+  --weight-heading: 700;
+
+  --dept-claude: #ff9a6b;
+  --dept-codex: #8db0ff;
+  --dept-omp: #bba0ff;
+  --dept-opencode: #6fdca3;
+  --dept-acp: #ff9bbb;
+
+  --bg: #0f1a20;
+  --nav: #0c151a;
+  --inbox: #12202a;
+  --surface: #15232b;
+  --surface-2: #1b2d37;
+  --surface-3: #24394a;
+  --hover: #223645;
+  --border: #2a3d48;
+  --edge: #4d6677;
+  --text: #e6eef3;
+  --muted: #9fb0bd;
+  --faint: #93a5b3;
+
+  --you: #ff8a4c;
+  --run: #ff8a4c;
+  --accent: #ff8a4c;
+  --accent-strong: #ffa879;
+  --accent-ink: #1d0d03;
+  --accent-tint: #3a2417;
+  --success: #6fdca3;
+  --warning: #e9c445;
+  --error: #ff9a9a;
+  --secondary: #8db0ff;
+  --secondary-strong: #bcd0ff;
+  --secondary-tint: #1c2a47;
+  --secondary-border: #3f5486;
+  --ring: #8db0ff;
+  --glass-fill: rgb(18 32 42 / 0.96);
+  --glass-fill-strong: rgb(21 35 43 / 0.99);
+  --glass-edge: rgb(255 255 255 / 0.1);
+  --glass-edge-soft: rgb(255 255 255 / 0.07);
+}
+:root[data-theme="light"] {
+  --dept-claude: #c2410c;
+  --dept-codex: #1d4ed8;
+  --dept-omp: #6d3fc7;
+  --dept-opencode: #0f7a4d;
+  --dept-acp: #b01e4f;
+
+  --bg: #eef1f4;
+  --nav: #f6f8fa;
+  --inbox: #f7f9fb;
+  --surface: #fbfcfd;
+  --surface-2: #eef2f5;
+  --surface-3: #e0e7ed;
+  --hover: #e6ecf1;
+  --border: #cdd5dd;
+  --edge: #9aa8b6;
+  --text: #14202b;
+  --muted: #566574;
+  --faint: #566574;
+
+  --you: #c2410c;
+  --run: #c2410c;
+  --accent: #14202b;
+  --accent-strong: #000;
+  --accent-ink: #fff;
+  --accent-tint: #e3e9ef;
+  --success: #0f7a4d;
+  --warning: #8a5300;
+  --error: #b3262e;
+  --secondary: #1d4ed8;
+  --secondary-strong: #1a3fa8;
+  --secondary-tint: #e8eefc;
+  --secondary-border: #a6b6e2;
+  --ring: #1d4ed8;
+  --glass-fill: rgb(247 249 251 / 0.97);
+  --glass-fill-strong: #fff;
+  --glass-edge: rgb(20 32 43 / 0.14);
+  --glass-edge-soft: rgb(20 32 43 / 0.08);
+}
+::selection {
+  background: var(--secondary);
+  color: #fff;
+}
+
+/* Department color travels with the harness. */
+[data-harness="claude"] { --dept: var(--dept-claude); }
+[data-harness="codex"] { --dept: var(--dept-codex); }
+[data-harness="omp"] { --dept: var(--dept-omp); }
+[data-harness="opencode"] { --dept: var(--dept-opencode); }
+[data-harness="acp"] { --dept: var(--dept-acp); }
+.harness-claude { --dept: var(--dept-claude); }
+.harness-codex { --dept: var(--dept-codex); }
+.harness-omp { --dept: var(--dept-omp); }
+.harness-opencode { --dept: var(--dept-opencode); }
+
+/* ---------- Shell ---------- */
+.brand {
+  font-family: var(--display);
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.brand-dot { color: var(--you); }
+.brand-mark { color: var(--you); }
+.navigation nav a[aria-current="page"] {
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--you);
+}
+.workspace-avatar {
+  background: var(--you);
+  border-color: var(--you);
+  color: #fff;
+  font-family: var(--display);
+  font-weight: 700;
+}
+:root[data-theme="light"] .workspace-avatar { color: #fff; }
+.status-dot { background: var(--success); }
+.breadcrumbs strong { font-weight: 650; }
+h1, .page-title { font-family: var(--display); letter-spacing: -0.02em; }
+.agent-id,
+.message-heading .mono,
+.message-target code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.harness-label {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  border: 0;
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: var(--dept, var(--muted));
+  background: color-mix(in srgb, var(--dept, var(--muted)) 14%, transparent);
+}
+
+/* ---------- Chat: turns that arrive, think, then reveal ---------- */
+.message-group { margin-bottom: 28px; }
+.message {
+  animation: mesh-rise 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.message-response { animation-delay: 90ms; }
+@keyframes mesh-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.message-request .message-body {
+  background: var(--surface-2);
+  border-radius: 16px 16px 4px 16px;
+  padding: 9px 14px 6px;
+}
+.message-avatar > .harness,
+.message-avatar .agent-avatar { color: var(--dept, var(--accent)); }
+.message-response .message-avatar {
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dept, var(--edge)) 70%, transparent);
+}
+/* The latest reply wipes in top to bottom, like text arriving. */
+.message-scroll .message-group:last-child .message-response .message-body > .markdown,
+.message-scroll .message-group:last-child .message-response .message-body > div:not(.message-heading):not(.thinking-indicator):not(.message-meta) {
+  animation: mesh-reveal 900ms cubic-bezier(0.22, 1, 0.36, 1) 160ms both;
+}
+@keyframes mesh-reveal {
+  from { clip-path: inset(0 0 100% 0); opacity: 0.2; }
+  to { clip-path: inset(0 0 0 0); opacity: 1; }
+}
+.thinking-orbit span { background: var(--dept, var(--accent)); }
+.thinking-label { font-family: var(--mono); font-size: 12.5px; }
+
+/* ---------- Agents ---------- */
+.agent-card {
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms;
+}
+.agent-card:hover { transform: translateY(-2px); border-color: var(--dept, var(--edge)); }
+.agent-card-top .agent-avatar { color: var(--dept, inherit); }
+.agent-card-title h2 { font: 700 18px/1.2 var(--display); letter-spacing: -0.01em; }
+.agent-card-name { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.agent-card-details > span { border-radius: 999px; }
+.layout-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.layout-toggle button { padding: 7px 14px; font-size: var(--font-ui); background: transparent; border: 0; color: var(--muted); }
+.layout-toggle button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); font-weight: 650; }
+
+/* ---------- Browser surfaces ---------- */
+button:focus-visible, a:focus-visible, input:focus-visible,
+textarea:focus-visible, select:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .message, .message-scroll .message-group:last-child .message-response .message-body > * { animation: none !important; }
+  .agent-card { transition: none; }
+  .agent-card:hover { transform: none; }
+}
