@@ -35,7 +35,7 @@ func queueSnapshot(t *testing.T, r *Relay, id string) queueView {
 func TestQueuePauseExpiresWithoutOfflineDelivery(t *testing.T) {
 	r, _ := openTest(t, nil)
 	source := createTest(t, r, "omp", "source")
-	dest := createTest(t, r, "codex", "paused")
+	dest := createTest(t, r, "omp", "paused")
 	queueCall(t, r, "queue.pause", map[string]any{"agentId": dest.ID, "expectedRevision": 0})
 	task := sendTest(t, r, source.ID, dest.ID, "paused task")
 	r.tick()
@@ -80,7 +80,7 @@ func TestQueueReorderPreservesRecipientOrderAndTranscript(t *testing.T) {
 	r.settings.MaxParallelTurns = 1
 	r.mu.Unlock()
 	source := createTest(t, r, "omp", "source")
-	a := createTest(t, r, "codex", "first")
+	a := createTest(t, r, "omp", "first")
 	b := createTest(t, r, "claude", "second")
 	queueCall(t, r, "queue.pause", map[string]any{"agentId": a.ID, "expectedRevision": 0})
 	queueCall(t, r, "queue.pause", map[string]any{"agentId": b.ID, "expectedRevision": 0})

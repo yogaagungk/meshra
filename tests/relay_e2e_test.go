@@ -79,7 +79,7 @@ func TestLocalEndToEndIdentityMCPAndStreamReplay(t *testing.T) {
 	var mu sync.Mutex
 	received := map[string]int{}
 	adapters := map[string]model.Adapter{}
-	for _, h := range []string{"omp", "claude", "codex", "opencode"} {
+	for _, h := range []string{"omp", "claude"} {
 		adapters[h] = model.Adapter{Factory: func(_ context.Context, a model.Agent, _ model.Emit) (model.Runtime, error) {
 			return &echoRuntime{id: "native-" + a.ID, mu: &mu, received: received, agent: a.ID}, nil
 		}}
@@ -100,10 +100,10 @@ func TestLocalEndToEndIdentityMCPAndStreamReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin := string(b)
-	for _, name := range []string{"claude:exampleone", "claude:exampletwo", "omp:exampleworker", "codex:reviewer", "opencode:testengine"} {
+	for _, name := range []string{"claude:exampleone", "claude:exampletwo", "omp:exampleworker", "omp:reviewer", "claude:testengine"} {
 		parts := strings.Split(name, ":")
 		var a model.Agent
-		httpJSON(t, client, server.URL, admin, "POST", "/v1/agents", model.CreateAgent{Harness: parts[0], Name: parts[1], Policy: model.Policy{Destinations: []string{"claude:exampleone", "codex:reviewer"}, Operations: []string{"list", "send", "request", "status", "events", "cancel"}, Delegate: true}}, &a, 201)
+		httpJSON(t, client, server.URL, admin, "POST", "/v1/agents", model.CreateAgent{Harness: parts[0], Name: parts[1], Policy: model.Policy{Destinations: []string{"claude:exampleone", "omp:reviewer"}, Operations: []string{"list", "send", "request", "status", "events", "cancel"}, Delegate: true}}, &a, 201)
 		if a.ID != name {
 			t.Fatalf("identity changed: %+v", a)
 		}

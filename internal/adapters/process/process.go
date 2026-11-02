@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"meshra/internal/sandbox"
 )
 
 const MaxFrame = 1024 * 1024
@@ -96,19 +95,6 @@ func Start(ctx context.Context, binary string, args []string, cwd string, env []
 	return start(ctx, cmd, cmd.Start, cmd.Wait, func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	})
-}
-
-// StartConfined preserves the prepared worker's born-in-cgroup launch and
-// whole-cgroup cleanup while sharing the bounded native JSONL transport.
-func StartConfined(ctx context.Context, worker *sandbox.Prepared) (*Process, error) {
-	if worker == nil || worker.Cmd == nil {
-		return nil, errors.New("a prepared confined worker is required")
-	}
-	child, err := start(ctx, worker.Cmd, worker.Start, worker.Wait, worker.Close)
-	if err != nil {
-		_ = worker.Close()
-	}
-	return child, err
 }
 
 func start(ctx context.Context, cmd *exec.Cmd, launch, wait, terminate func() error) (*Process, error) {

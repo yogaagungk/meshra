@@ -6,8 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -154,7 +152,7 @@ func TestEndpointSaveGetDisableAndRemove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list.(ConnectionList).Endpoints) != 1 || len(list.(ConnectionList).ACP) != 0 {
+	if len(list.(ConnectionList).Endpoints) != 1 {
 		t.Fatalf("unexpected list: %+v", list)
 	}
 	disabled, err := connectionsCall(t, r, admin, "connections.disable", map[string]any{"id": view.ID, "expectedRevision": updated.Revision})
@@ -203,108 +201,6 @@ func TestEndpointRemovalBlockedWhenReferenced(t *testing.T) {
 	}
 	if _, err = connectionsCall(t, r, admin, "connections.remove", map[string]any{"id": view.ID, "expectedRevision": view.Revision}); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestACPConfigurationValidation(t *testing.T) {
-	r, _ := openTest(t, nil)
-	executable := filepath.Join(t.TempDir(), "gemini")
-	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	base := map[string]any{"name": "Gemini", "preset": "gemini", "executable": executable}
-	rejected := []map[string]any{
-		{"name": "Gemini", "preset": "gemini", "executable": "gemini"},
-		{"name": "Gemini", "preset": "gemini", "executable": filepath.Join(t.TempDir(), "missing")},
-		{"name": "Gemini", "preset": "unknown", "executable": executable},
-		{"name": "Gemini", "preset": "gemini", "executable": executable, "args": []string{"--acp", "; rm -rf /"}},
-		{"name": "Gemini", "preset": "gemini", "executable": executable, "args": []string{"--acp && curl example.com"}},
-		{"name": "Gemini", "preset": "gemini", "executable": executable, "allowedOrigins": []string{"https://example.com/path"}},
-		{"name": "Gemini", "preset": "gemini", "executable": executable, "allowedOrigins": []string{"https://user:pass@example.com"}},
-		{"name": "Gemini", "preset": "gemini", "executable": executable, "secretEnvRefs": []string{"TOKEN"}},
-	}
-	for _, definition := range rejected {
-		if _, err := connectionsCall(t, r, admin, "connections.saveAcp", map[string]any{"acp": definition}); err == nil {
-			t.Fatalf("accepted an invalid ACP definition: %+v", definition)
-		} else {
-			requireStatus(t, err, 400)
-		}
-	}
-	// A secret value may never travel inside the argument vector.
-	registerSecretValue("acp-secret-value-5566778899")
-	if _, err := connectionsCall(t, r, admin, "connections.saveAcp", map[string]any{"acp": map[string]any{
-		"name": "Gemini", "preset": "gemini", "executable": executable, "args": []string{"--acp", "acp-secret-value-5566778899"},
-	}}); err == nil {
-		t.Fatal("accepted a secret value inside the argument vector")
-	} else {
-		requireStatus(t, err, 400)
-	}
-	result, err := connectionsCall(t, r, admin, "connections.saveAcp", map[string]any{"acp": base})
-	if err != nil {
-		t.Fatal(err)
-	}
-	view := result.(ACPAgentView)
-	if view.Preset != "gemini" || len(view.Args) != 1 || view.Args[0] != "--acp" {
-		t.Fatalf("unexpected ACP configuration: %+v", view)
-	}
-	if view.Revision != 1 {
-		t.Fatalf("unexpected revision: %d", view.Revision)
-	}
-	base["id"] = view.ID
-	if _, err = connectionsCall(t, r, admin, "connections.saveAcp", map[string]any{"acp": base}); err == nil {
-		t.Fatal("an update without the expected revision was accepted")
-	} else {
-		requireStatus(t, err, 409)
-	}
-	base["id"] = view.ID
-	updated, err := connectionsCall(t, r, admin, "connections.saveAcp", map[string]any{"expectedRevision": view.Revision, "acp": base})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.(ACPAgentView).Revision != view.Revision+1 {
-		t.Fatal("the ACP revision did not advance")
-	}
-	disabled, err := connectionsCall(t, r, admin, "connections.disableAcp", map[string]any{"id": view.ID, "expectedRevision": view.Revision + 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if disabled.(ACPAgentView).Enabled {
-		t.Fatal("the ACP configuration was not disabled")
-	}
-	if _, err = connectionsCall(t, r, admin, "connections.removeAcp", map[string]any{"id": view.ID, "expectedRevision": view.Revision + 2}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = connectionsCall(t, r, admin, "connections.get", map[string]any{"id": view.ID}); err == nil {
-		t.Fatal("the removed ACP configuration was still readable")
-	} else {
-		requireStatus(t, err, 404)
-	}
-}
-
-func TestACPRemovalBlockedWhenReferenced(t *testing.T) {
-	r, _ := openTest(t, nil)
-	executable := filepath.Join(t.TempDir(), "cline")
-	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	result, err := connectionsCall(t, r, admin, "connections.saveAcp", map[string]any{"acp": map[string]any{
-		"name": "Cline", "preset": "cline", "executable": executable,
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	view := result.(ACPAgentView)
-	body, err := json.Marshal(map[string]any{"id": "omp:acpreference", "harness": "omp", "config": map[string]any{"provider": view.ID}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = r.db.Exec("INSERT INTO agents(id,body) VALUES(?,?)", "omp:acpreference", string(body)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = connectionsCall(t, r, admin, "connections.removeAcp", map[string]any{"id": view.ID, "expectedRevision": view.Revision}); err == nil {
-		t.Fatal("a referenced ACP configuration was removed")
-	} else {
-		requireStatus(t, err, 409)
 	}
 }
 

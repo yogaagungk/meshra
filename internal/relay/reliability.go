@@ -557,19 +557,10 @@ func (r *Relay) Doctor(p model.Principal) (model.Diagnostics, error) {
 	} else {
 		add("sqlite", "ok", "WAL database open; exclusive daemon ownership")
 	}
-	for _, h := range []string{"omp", "codex", "claude", "opencode"} {
+	for _, h := range []string{"omp", "claude"} {
 		executable := h
 		if h == "claude" {
 			executable = "node"
-		}
-		if h == "opencode" {
-			executable = os.Getenv("MESHRA_OPENCODE_BIN")
-			if executable == "" {
-				executable = "opencode"
-				if _, e := exec.LookPath(executable); e != nil {
-					executable = localAsset("bridges/claude-agent-sdk/opencode/node_modules/.bin/opencode", "")
-				}
-			}
 		}
 		path, e := exec.LookPath(executable)
 		if e != nil {
@@ -592,10 +583,6 @@ func (r *Relay) Doctor(p model.Principal) (model.Diagnostics, error) {
 		switch h {
 		case "omp":
 			expected = "omp/18.12.1"
-		case "codex":
-			expected = "codex-cli 0.163.0"
-		case "opencode":
-			expected = "1.19.3"
 		}
 		if expected != "" && version != expected {
 			add(h, "error", "unsupported/unverified installed version; expected "+expected)

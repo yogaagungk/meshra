@@ -25,14 +25,14 @@ func TestConsoleFixture(t *testing.T) {
 		t.Fatal("MESHRA_UI_TEST_DIR required")
 	}
 	adapters := map[string]model.Adapter{}
-	for _, h := range []string{"claude", "omp", "codex", "opencode"} {
+	for _, h := range []string{"claude", "omp"} {
 		adapters[h] = model.Adapter{Quotas: func(context.Context) ([]model.QuotaWindow, error) {
 			percent := 82.0
 			reset := time.Now().Add(2 * time.Hour)
 			observed := time.Now()
 			return []model.QuotaWindow{{Provider: h, Label: "Primary window", UsedPercent: &percent, ResetsAt: &reset, ObservedAt: &observed}}, nil
 		}, Models: func(context.Context) ([]model.ModelOption, error) {
-			return []model.ModelOption{{ID: "fixture-model", Name: "Fixture model", Provider: map[string]string{"claude": "anthropic", "opencode": "fixture", "omp": "fixture"}[h]}}, nil
+			return []model.ModelOption{{ID: "fixture-model", Name: "Fixture model", Provider: map[string]string{"claude": "anthropic", "omp": "fixture"}[h]}}, nil
 		}, Factory: func(_ context.Context, a model.Agent, _ model.Emit) (model.Runtime, error) {
 			return &consoleFixtureRuntime{id: a.ID}, nil
 		}}
@@ -43,7 +43,7 @@ func TestConsoleFixture(t *testing.T) {
 	}
 	defer r.Close()
 	p := model.Principal{Admin: true}
-	ids := []string{"claude:apmobileprod", "claude:apmobilewallet", "omp:adsengine", "codex:reviewer", "opencode:builder"}
+	ids := []string{"claude:apmobileprod", "claude:apmobilewallet", "omp:adsengine", "omp:reviewer", "claude:builder"}
 	for _, id := range ids {
 		parts := strings.Split(id, ":")
 		a, err := r.Create(p, model.CreateAgent{Harness: parts[0], Name: parts[1]})

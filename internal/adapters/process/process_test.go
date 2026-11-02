@@ -114,16 +114,16 @@ func TestLifetimeCancellation(t *testing.T) {
 
 func TestEphemeralRuntimeStateDoesNotCompeteWithDurableIdentity(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	durable, release, err := RuntimeStateDir("codex", "codex:assistant", false)
+	durable, release, err := RuntimeStateDir("omp", "omp:assistant", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
-	if _, _, err = RuntimeStateDir("codex", "codex:assistant", false); err == nil {
+	if _, _, err = RuntimeStateDir("omp", "omp:assistant", false); err == nil {
 		t.Fatal("durable identity lost exclusive ownership")
 	}
 	for i := 0; i < 10; i++ {
-		dir, cleanup, err := RuntimeStateDir("codex", "codex:assistant", true)
+		dir, cleanup, err := RuntimeStateDir("omp", "omp:assistant", true)
 		if err != nil {
 			t.Fatal("chat collided with durable identity", err)
 		}

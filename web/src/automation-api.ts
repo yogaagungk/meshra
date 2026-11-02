@@ -1,7 +1,7 @@
 import { api, APIError, authenticatedFetch } from "./api";
-import type { Agent, Conversation, Task } from "./types";
+import type { Agent, Conversation, ModelOption, Task } from "./types";
 
-export type ProfileHarness = "codex" | "claude" | "omp" | "opencode" | "openai" | "acp";
+export type ProfileHarness = "claude" | "omp" | "openai";
 export type ProfileConfig = { model?: string; provider?: string };
 export type ProfileProvider = {
   harness: ProfileHarness;
@@ -209,29 +209,7 @@ export type ProviderEndpoint = {
   updatedAt: string;
   secretStatus: "missing" | "saved" | "unreadable";
 };
-export type ACPAgent = {
-  id: string;
-  revision: number;
-  name: string;
-  preset: string;
-  executable: string;
-  args: string[];
-  runtimePaths: string[];
-  secretEnvRefs: string[];
-  readOnlyAuthFiles: string[];
-  allowedOrigins: string[];
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-  secretStatus: "missing" | "saved" | "unreadable";
-};
-export type ACPInspection = {
-  protocolVersion: number;
-  supportsLoad: boolean;
-  authMethods: { id: string; name: string; description?: string }[];
-  ready: boolean;
-};
-export type ConnectionList = { endpoints: ProviderEndpoint[]; acp: ACPAgent[] };
+export type ConnectionList = { endpoints: ProviderEndpoint[] };
 export type LocalModelScan = {
   url: string;
   status: "available" | "unreachable" | "error";
@@ -530,28 +508,8 @@ export type AutomationOperations = {
     { id: string; expectedRevision: number },
     { id: string; removed: boolean }
   >;
-  "connections.scanLocal": Operation<
-    Record<string, never>,
-    { results: LocalModelScan[]; acpPresets: { preset: string; executable?: string; args: string[]; installed: boolean }[] }
-  >;
-  "connections.checkAcp": Operation<
-    { id: string; expectedRevision?: number },
-    { id: string; revision: number; status: "ready" | "failed"; inspection: ACPInspection; error?: string }
-  >;
-  "connections.acpStatus": Operation<
-    { id: string; expectedRevision?: number },
-    { configuration: ACPAgent; runtime: RuntimeReadiness["status"]; verified: false }
-  >;
-  "connections.authenticateAcp": Operation<{
-    id: string;
-    expectedRevision: number;
-    profileId: string;
-    conversationId: string;
-    methodId: string;
-  }, { id: string; revision: number; bindingId: string; status: "ready" | "failed"; inspection: ACPInspection; error?: string }>;
-  "connections.saveAcp": Operation<{ expectedRevision?: number; acp: { id?: string; name: string; preset: string; executable: string; args?: string[]; runtimePaths?: string[]; secretEnvRefs?: string[]; readOnlyAuthFiles?: string[]; allowedOrigins?: string[]; enabled?: boolean } }, ACPAgent>;
-  "connections.disableAcp": Operation<RevisionRequest, ACPAgent>;
-  "connections.removeAcp": Operation<RevisionRequest, { id: string; removed: boolean }>;
+  "connections.scanLocal": Operation<Record<string, never>, { results: LocalModelScan[] }>;
+  "connections.models": Operation<{ id: string }, ModelOption[]>;
   "mcp.list": Operation<Pagination, ResourcePage<MCPServer>>;
   "mcp.save": Operation<{ expectedRevision?: number; server: { id?: string; name: string; transport: "http" | "stdio"; url?: string; executable?: string; args?: string[]; secretHeaderRefs?: string[]; secretEnvRefs?: string[]; workspaceId: string; allowedOrigins?: string[]; allowPrivate?: boolean; enabled: false } }, MCPServer>;
   "mcp.test": Operation<{ id: string }, MCPServer>;

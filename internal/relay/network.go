@@ -162,7 +162,7 @@ func (r *Relay) networkOperation(ctx context.Context, principal model.Principal,
 	}
 	if q.ConnectionID != "" {
 		var count int
-		if err = r.db.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM provider_endpoints WHERE id=?)+(SELECT count(*) FROM acp_agents WHERE id=?)", q.ConnectionID, q.ConnectionID).Scan(&count); err != nil { return nil, err }
+		if err = r.db.QueryRowContext(ctx, "SELECT count(*) FROM provider_endpoints WHERE id=?", q.ConnectionID).Scan(&count); err != nil { return nil, err }
 		if count != 1 { return nil, model.Err(404, "connection not found") }
 	}
 	previous, err := readNetworkGrant(ctx, r.db, scope, origin)

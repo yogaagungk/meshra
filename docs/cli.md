@@ -35,16 +35,16 @@ Retention removes terminal tasks and their events together, never active work or
 
 ## Named agents and policy
 
-Names are lowercase `[a-z][a-z0-9_-]{0,62}`. Canonical IDs are `<harness>:<name>`, with harness `omp`, `claude`, `codex`, or `opencode`. Each identity owns a separate native session. Omit `--workspace-id` for a private general working directory, or register a project in the console and pass its workspace ID. Existing agents retain their original directories; new registrations cannot supply arbitrary paths. Use independent repositories/worktrees when parallel writes are needed.
+Names are lowercase `[a-z][a-z0-9_-]{0,62}`. Canonical IDs are `<harness>:<name>`, with harness `omp`, `claude` or `openai` (a direct OpenAI-compatible endpoint; pass `--provider <endpoint-id> --model <model>`). Each identity owns a separate native session. Omit `--workspace-id` for a private general working directory, or register a project in the console and pass its workspace ID. Existing agents retain their original directories; new registrations cannot supply arbitrary paths. Use independent repositories/worktrees when parallel writes are needed.
 
 ```sh
 meshra agent create --harness claude --name exampleone --workspace-id WORKSPACE_ID \
-  --allow-to codex:reviewer --allow-operation list,status,request,events,cancel --delegate
+  --allow-to omp:reviewer --allow-operation list,status,request,events,cancel --delegate
 meshra agent create --harness claude --name exampletwo
 meshra agent create --harness omp --name exampleworker \
   --allow-to claude:exampleone,claude:exampletwo \
   --allow-operation list,status,send,request,events,cancel
-meshra agent create --harness codex --name reviewer \
+meshra agent create --harness omp --name reviewer \
   --model MODEL_ID --provider PROVIDER_ID
 meshra agent list
 meshra agent status claude:exampleone
@@ -185,14 +185,6 @@ export MESHRA_TOKEN="$(meshra agent token omp:exampleworker)"
 # Launch only the intended source harness from this environment.
 ```
 
-**Codex:** installed `codex mcp add --help` confirms URL plus bearer-token environment support:
-
-```sh
-codex mcp add meshra --url http://127.0.0.1:7331/mcp --bearer-token-env-var MESHRA_TOKEN
-```
-
-This registration changes Codex configuration only when you run it yourself. Ensure that configuration is scoped to the intended Codex instance and that each launched process has its own agent token. A stdio alternative supported by the same help is `codex mcp add meshra -- meshra mcp stdio`; the child must inherit the agent-token environment.
-
 **Claude Code:** the [official MCP reference](https://code.claude.com/docs/en/mcp) documents stdio command registration. To avoid putting a bearer token in `--header` arguments, use the proxy and an inherited agent-token environment:
 
 ```sh
@@ -208,14 +200,6 @@ This is documentation-verified syntax, not a locally authenticated Claude test. 
 ```
 
 Schema reference: [upstream OMP MCP schema](https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/config/mcp-schema.json). `omp mcp --help` did not expose a dedicated registration subcommand in the inspected installation; do not assume `omp mcp add` exists.
-
-**OpenCode:** the [official MCP configuration reference](https://opencode.ai/docs/mcp-servers/) documents `mcp.<name>.type=remote`, `url`, `headers`, `oauth:false`, and `{env:VAR}` expansion. Manually merge into the intended OpenCode configuration:
-
-```json
-{"mcp":{"meshra":{"type":"remote","url":"http://127.0.0.1:7331/mcp","oauth":false,"headers":{"Authorization":"Bearer {env:MESHRA_TOKEN}"}}}}
-```
-
-OpenCode also documents local `{"type":"local","command":["meshra","mcp","stdio"]}` under the same `mcp.meshra` key. These are documentation-verified formats, not a locally authenticated OpenCode test. Do not commit credentials or overwrite unrelated settings when merging.
 
 ## Checks
 

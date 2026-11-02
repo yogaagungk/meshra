@@ -165,7 +165,7 @@ export function ChatAIStatus({
 }
 export function AIStatusPanel({
   conversationId = "",
-  initialHarness = "codex",
+  initialHarness = "omp",
 }: {
   conversationId?: string;
   initialHarness?: string;
@@ -241,7 +241,7 @@ export function AIStatusPanel({
               setError("");
             }}
           >
-            {["codex", "omp", "claude", "opencode"].map((h) => (
+            {["omp", "claude"].map((h) => (
               <option value={h} key={h}>
                 {harnessName(h)}
               </option>
@@ -472,12 +472,6 @@ export function AIStatusPanel({
           ) : (
             <p>No recorded usage for this selection.</p>
           ))}
-        {harness === "opencode" && (
-          <p>
-            OpenCode token counts cover the returned assistant message and may
-            omit intermediate model/tool steps.
-          </p>
-        )}
       </section>
     </div>
   );

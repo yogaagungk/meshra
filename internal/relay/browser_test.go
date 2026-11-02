@@ -280,7 +280,7 @@ func TestBrowserTakeoverInvalidatesPendingApproval(t *testing.T) {
 	invocation := randomID()
 	taskID := randomID()
 	r.mu.Lock()
-	_, err := r.db.Exec("INSERT INTO tasks(id,sender,sender_session,recipient,operation,state,body) VALUES(?,?,?,?,?,?,?)", taskID, "admin", "session", "codex:fixture", "request", "running", "{}")
+	_, err := r.db.Exec("INSERT INTO tasks(id,sender,sender_session,recipient,operation,state,body) VALUES(?,?,?,?,?,?,?)", taskID, "admin", "session", "omp:fixture", "request", "running", "{}")
 	if err == nil {
 		_, err = r.db.Exec("INSERT INTO tool_invocations(id,task_id,attempt,call_id,action_hash,state,body) VALUES(?,?,?,?,?,?,?)", invocation, taskID, 1, "call-1", "hash", "pending", `{"name":"meshra_browser"}`)
 	}

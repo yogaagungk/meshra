@@ -103,7 +103,7 @@ func TestContextLimitsAndIntegrity(t *testing.T) {
 func TestDelegationDependenciesAndRevocation(t *testing.T) {
 	r, _ := openTest(t, nil)
 	a := createTest(t, r, "claude", "prod")
-	b := createTest(t, r, "codex", "implementer")
+	b := createTest(t, r, "omp", "implementer")
 	c := createTest(t, r, "omp", "reviewer")
 	v, err := r.Collaborate(admin, "conversation.create", model.CollaborationRequest{Title: "delivery", Participants: []string{a.ID, b.ID, c.ID}})
 	if err != nil {
@@ -179,7 +179,7 @@ func TestDelegationDependenciesAndRevocation(t *testing.T) {
 func TestCollaborationRestartAndPagination(t *testing.T) {
 	r, dir := openTest(t, nil)
 	a := createTest(t, r, "claude", "prod")
-	b := createTest(t, r, "codex", "implementer")
+	b := createTest(t, r, "omp", "implementer")
 	owner := model.Principal{AgentID: a.ID}
 	for i := 0; i < 3; i++ {
 		if _, err := r.Collaborate(owner, "conversation.create", model.CollaborationRequest{Title: "persist", Participants: []string{b.ID}}); err != nil {
@@ -269,7 +269,7 @@ func TestMigrationFailureRollsBack(t *testing.T) {
 func TestDependencyCancellationAndEncodedBudget(t *testing.T) {
 	r, _ := openTest(t, nil)
 	a := createTest(t, r, "claude", "prod")
-	b := createTest(t, r, "codex", "implementer")
+	b := createTest(t, r, "omp", "implementer")
 	c := createTest(t, r, "omp", "reviewer")
 	v, err := r.Collaborate(admin, "conversation.create", model.CollaborationRequest{Title: "bounded work", Participants: []string{a.ID, b.ID, c.ID}})
 	if err != nil {

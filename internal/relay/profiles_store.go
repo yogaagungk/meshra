@@ -56,7 +56,7 @@ func (r *Relay) validateProfile(v model.Profile, creating bool) error {
 		return err
 	}
 	switch v.Binding.Harness {
-	case "codex", "claude", "omp", "opencode", "openai", "acp":
+	case "claude", "omp", "openai":
 	default:
 		return model.Err(400, "unsupported profile harness")
 	}

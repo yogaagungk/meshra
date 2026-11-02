@@ -11,13 +11,11 @@ import {
 } from "lucide-react";
 import {
   automation,
-  type ACPAgent,
   type ConnectionList,
   type NetworkGrant,
   type ProviderEndpoint,
   type RuntimeReadiness,
   type VoiceReadiness,
-  type AutomationRequest,
   type AutomationResponse,
   type MCPServer,
 } from "./automation-api";
@@ -93,7 +91,6 @@ export function Connections() {
       <RuntimeReadiness />
       <NetworkGrants />
       <ProviderConnections />
-      <ACPConnections />
       <MCPConnections />
       <MessagingConnections />
       <VoiceReadiness />
@@ -602,7 +599,7 @@ function ProviderConnections() {
         <div>
           <strong>Provider connections</strong>
           <small className="muted">
-            OpenAI-compatible endpoints and installed ACP agents. Credentials
+            OpenAI-compatible endpoints. Credentials
             are stored encrypted and never shown again.
           </small>
         </div>
@@ -838,136 +835,6 @@ function ProfileSelect({ value, onChange, workspaceId }: { value: string; onChan
     {!profiles.isPending && !profiles.isError && !items.length && <p className="muted">No eligible profiles. Create a profile with the matching workspace first.</p>}
     {profiles.hasNextPage && <Button type="button" variant="outline" disabled={profiles.isFetchingNextPage} onClick={() => void profiles.fetchNextPage()}>Load more profiles</Button>}
   </>;
-}
-
-function ACPConnections() {
-  const client = useQueryClient();
-  const connections = useQuery({ queryKey: ["connections"], queryFn: () => automation("connections.list", {}) });
-  const scan = useQuery({ queryKey: ["automation", "connections", "local-scan"], queryFn: () => automation("connections.scanLocal", {}), enabled: false, retry: false });
-  const [editing, setEditing] = useState<{ agent?: ACPAgent; preset?: { preset: string; executable?: string; args: string[] } }>();
-  return <section className="automation-card">
-    <header className="automation-card-head"><div><strong>Installed ACP agents and local discovery</strong><small className="muted">Scan lists CLI paths without executing them and probes only the two reviewed loopback model endpoints. Check explicitly launches a confined CLI; neither action enables a connection.</small></div>
-      <div className="automation-actions"><Button variant="outline" disabled={scan.isFetching} onClick={() => void scan.refetch()}>{scan.isFetching ? "Scanning…" : "Scan local"}</Button><Button variant="outline" onClick={() => setEditing({})}>Add ACP agent</Button></div>
-    </header>
-    {scan.isError && <Notice>{scan.error.message}</Notice>}
-    {scan.data && <><h3>Discovery metadata — not authenticated or verified</h3><ul>{scan.data.results.map((result) => <li key={result.url}><span className="mono">{result.url}</span>: {result.status}{result.detail && <span> — {result.detail}</span>}{result.models?.length ? <span> · {result.models.join(", ")}</span> : null}</li>)}</ul>
-      <ul>{scan.data.acpPresets.map((preset) => <li key={preset.preset}><strong>{preset.preset}</strong> · {preset.installed ? preset.executable : "Not installed"} · arguments: {preset.args.join(" ") || "(none)"} <Button size="sm" variant="outline" disabled={!preset.installed || !preset.executable} onClick={() => setEditing({ preset })}>Review configuration</Button></li>)}</ul></>}
-    {connections.isError && <Notice>{connections.error.message}</Notice>}
-    {connections.isPending ? <p role="status">Loading ACP configurations…</p> : connections.data?.acp.length === 0 ? <p className="muted">No ACP agents configured. Discovery never installs software or changes native sign-in.</p> : null}
-    {connections.data?.acp.map((agent) => <ACPEntry key={agent.id} agent={agent} onEdit={() => setEditing({ agent })} />)}
-    <Dialog open={!!editing} onOpenChange={(open) => { if (!open) setEditing(undefined); }} title={editing?.agent ? "Edit ACP agent" : "Configure ACP agent"} description="Review the direct executable, arguments, read-only native authentication files and exact origins. Never put passwords or tokens in arguments or chat.">
-      {editing && <ACPForm agent={editing.agent} preset={editing.preset} onSaved={() => { setEditing(undefined); void client.invalidateQueries({ queryKey: ["connections"] }); }} />}
-    </Dialog>
-  </section>;
-}
-
-function ACPForm({ agent, preset, onSaved }: { agent?: ACPAgent; preset?: { preset: string; executable?: string; args: string[] }; onSaved: () => void }) {
-  const [name, setName] = useState(agent?.name || preset?.preset || "");
-  const [kind, setKind] = useState(agent?.preset || preset?.preset || "gemini");
-  const [executable, setExecutable] = useState(agent?.executable || preset?.executable || "");
-  const [args, setArgs] = useState((agent?.args || preset?.args || []).join("\n"));
-  const [paths, setPaths] = useState((agent?.runtimePaths || []).join("\n"));
-  const [refs, setRefs] = useState((agent?.secretEnvRefs || []).join("\n"));
-  const [authFiles, setAuthFiles] = useState((agent?.readOnlyAuthFiles || []).join("\n"));
-  const [origins, setOrigins] = useState((agent?.allowedOrigins || []).join("\n"));
-  const [enabled, setEnabled] = useState(agent?.enabled || false);
-  const [reviewed, setReviewed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  async function save(e: FormEvent) {
-    e.preventDefault(); setBusy(true); setError("");
-    try {
-      await automation("connections.saveAcp", { ...(agent ? { expectedRevision: agent.revision } : {}), acp: { ...(agent ? { id: agent.id } : {}), name, preset: kind, executable, args: lines(args), runtimePaths: lines(paths), secretEnvRefs: lines(refs), readOnlyAuthFiles: lines(authFiles), allowedOrigins: lines(origins), enabled } });
-      onSaved();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  }
-  return <form className="form-stack" onSubmit={save} onChange={() => setReviewed(false)}>
-    <Field label="Name" value={name} onChange={setName} required />
-    <label className="form-stack">Preset<select value={kind} onChange={(e) => setKind(e.target.value)}>{["gemini", "cursor", "cline", "custom"].map((value) => <option key={value}>{value}</option>)}</select></label>
-    <Field label="Absolute executable path" value={executable} onChange={setExecutable} required />
-    <LinesField label="Arguments (one per line, never a shell command or secret)" value={args} onChange={setArgs} />
-    <LinesField label="Runtime paths (one absolute path per line)" value={paths} onChange={setPaths} />
-    <LinesField label="Secret environment references (NAME=existing-secret-id, one per line)" value={refs} onChange={setRefs} />
-    <LinesField label="Explicit read-only native authentication files (absolute paths, one per line)" value={authFiles} onChange={setAuthFiles} />
-    <LinesField label="Allowed exact origins (one per line)" value={origins} onChange={setOrigins} />
-    <Check label="Enable this ACP configuration" checked={enabled} onChange={setEnabled} />
-    {enabled && <label className="automation-inline"><input type="checkbox" checked={reviewed} onChange={(e) => { e.stopPropagation(); setReviewed(e.target.checked); }} />I reviewed executable access, native authentication files, secret references and network disclosure before enabling.</label>}
-    {error && <Notice>{error}</Notice>}
-    <Button type="submit" disabled={busy || (enabled && !reviewed)}>{busy ? "Saving…" : "Save ACP configuration"}</Button>
-  </form>;
-}
-
-function ACPEntry({ agent, onEdit }: { agent: ACPAgent; onEdit: () => void }) {
-  const client = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [inspection, setInspection] = useState<AutomationResponse<"connections.checkAcp">>();
-  const [authOpen, setAuthOpen] = useState(false);
-  const [removeOpen, setRemoveOpen] = useState(false);
-  const readiness = useQuery({ queryKey: ["automation", "connections", agent.id, agent.revision, "readiness"], queryFn: () => automation("connections.acpStatus", { id: agent.id, expectedRevision: agent.revision }), enabled: false, retry: false });
-  useEffect(() => { setInspection(undefined); setAuthOpen(false); }, [agent.revision]);
-  async function act(action: "check" | "disable" | "remove") {
-    setBusy(true); setError("");
-    try {
-      const request = { id: agent.id, expectedRevision: agent.revision };
-      if (action === "check") setInspection(await automation("connections.checkAcp", request));
-      else {
-        if (action === "disable") await automation("connections.disableAcp", request);
-        else await automation("connections.removeAcp", request);
-        setRemoveOpen(false);
-        await client.invalidateQueries({ queryKey: ["connections"] });
-      }
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  }
-  return <article className="automation-card">
-    <strong>{agent.name}</strong><p className="mono">{agent.executable} {agent.args?.join(" ")}</p>
-    <p>{agent.preset} · {agent.enabled ? "Enabled" : "Disabled"} · revision {agent.revision} · {SECRET_STATUS_LABELS[agent.secretStatus] || agent.secretStatus}</p>
-    <div className="automation-actions"><Button variant="outline" size="sm" disabled={busy} onClick={onEdit}>Edit / enable</Button><Button variant="outline" size="sm" disabled={busy || readiness.isFetching} onClick={() => void readiness.refetch()}>Readiness (no CLI launch)</Button><Button variant="outline" size="sm" disabled={busy} onClick={() => void act("check")}>Check (launch CLI)</Button><Button variant="outline" size="sm" disabled={busy || !inspection?.inspection.authMethods?.length} onClick={() => setAuthOpen(true)}>Authenticate binding</Button><Button variant="outline" size="sm" disabled={busy || !agent.enabled} onClick={() => void act("disable")}>Disable</Button><Button variant="ghost" size="sm" disabled={busy} onClick={() => setRemoveOpen(true)}>Remove</Button></div>
-    {busy && <p role="status">Working…</p>}
-    {error && <Notice>{error}</Notice>}
-    {readiness.isError && <Notice>{readiness.error.message}</Notice>}
-    {readiness.data && <p>{readiness.data.runtime.state} · Configuration only, CLI not verified. {readiness.data.runtime.prerequisites?.join("; ")}</p>}
-    {inspection && <><p>CLI check: {inspection.status}. This is not a verified model turn or shared authentication state.</p>{inspection.error && <Notice>{inspection.error}</Notice>}{!inspection.inspection.authMethods?.length && <p className="muted">No authentication methods advertised. Use explicitly selected native sign-in files in configuration where supported; do not send passwords in chat.</p>}</>}
-    <Dialog open={authOpen} onOpenChange={setAuthOpen} title="Authenticate an ACP binding" description="Authentication belongs to an existing profile conversation. Only advertised methods are accepted. No prompt or chat password is sent.">
-      {authOpen && inspection && <ACPAuthenticate agent={agent} methods={inspection.inspection.authMethods} />}
-    </Dialog>
-    <Dialog open={removeOpen} onOpenChange={setRemoveOpen} title="Remove ACP configuration?" description="Referenced connections cannot be removed. This does not uninstall the CLI or change native authentication."><Button disabled={busy} onClick={() => void act("remove")}>Remove configuration</Button>{error && <Notice>{error}</Notice>}</Dialog>
-  </article>;
-}
-
-function ACPAuthenticate({ agent, methods }: { agent: ACPAgent; methods: { id: string; name: string; description?: string }[] }) {
-  const profiles = useConnectionProfiles();
-  const conversations = useInfiniteQuery({
-    queryKey: ["automation", "profiles", "conversations", "acp-auth"],
-    initialPageParam: "",
-    queryFn: ({ pageParam }) => automation("profiles.conversations", { limit: 100, ...(pageParam ? { after: pageParam } : {}) }),
-    getNextPageParam: (last) => last.hasMore ? last.nextAfter : undefined,
-  });
-  const [profileId, setProfileId] = useState("");
-  const [conversationId, setConversationId] = useState("");
-  const [methodId, setMethodId] = useState(methods[0]?.id || "");
-  const [result, setResult] = useState<AutomationResponse<"connections.authenticateAcp">>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const eligible = profiles.data?.pages.flatMap((page) => page.items).filter((profile) => !profile.archived && profile.binding.harness === "acp" && profile.binding.connectionId === agent.id) || [];
-  const existing = conversations.data?.pages.flatMap((page) => page.items).filter((conversation) => conversation.profileIds.includes(profileId)) || [];
-  async function authenticate(e: FormEvent) {
-    e.preventDefault(); setBusy(true); setError(""); setResult(undefined);
-    try { setResult(await automation("connections.authenticateAcp", { id: agent.id, expectedRevision: agent.revision, profileId, conversationId, methodId })); }
-    catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  }
-  return <form className="form-stack" onSubmit={authenticate}>
-    <label className="form-stack">ACP profile<select required value={profileId} onChange={(e) => { setProfileId(e.target.value); setConversationId(""); setResult(undefined); }}><option value="">Choose a profile</option>{eligible.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-    {!profiles.isPending && !eligible.length && <p className="muted">No eligible profiles. Create a profile bound to this ACP configuration first.</p>}
-    {profiles.isError && <Notice>{profiles.error.message}</Notice>}{profiles.hasNextPage && <Button type="button" variant="outline" onClick={() => void profiles.fetchNextPage()}>Load more profiles</Button>}
-    <label className="form-stack">Existing profile conversation<select required value={conversationId} onChange={(e) => { setConversationId(e.target.value); setResult(undefined); }}><option value="">Choose a conversation</option>{existing.map((conversation) => <option key={conversation.conversationId} value={conversation.conversationId}>{conversation.title || conversation.conversationId}</option>)}</select></label>
-    {profileId && !conversations.isPending && !existing.length && <p className="muted">No conversation for this profile. Create a profile conversation before authenticating.</p>}
-    {conversations.isError && <Notice>{conversations.error.message}</Notice>}{conversations.hasNextPage && <Button type="button" variant="outline" onClick={() => void conversations.fetchNextPage()}>Load more conversations</Button>}
-    <label className="form-stack">Advertised authentication method<select required value={methodId} onChange={(e) => { setMethodId(e.target.value); setResult(undefined); }}>{methods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select></label>
-    <p className="muted">{methods.find((method) => method.id === methodId)?.description}</p>
-    {error && <Notice>{error}</Notice>}{result && <p role="status">Authentication: {result.status}. {result.error || `Binding ${result.bindingId}`}</p>}
-    <Button type="submit" disabled={busy || !profileId || !conversationId || !methods.some((method) => method.id === methodId)}>{busy ? "Authenticating…" : "Authenticate selected binding"}</Button>
-  </form>;
 }
 
 function MCPConnections() {

@@ -42,7 +42,7 @@ func automationStatus(operation string, payload json.RawMessage) int {
 		return http.StatusAccepted
 	case "profiles.createConversation", "routineTokens.create", "templates.import", "browser.open":
 		return http.StatusCreated
-	case "profiles.save", "memory.save", "flows.save", "skills.save", "network.grant", "connections.saveAcp", "connections.saveEndpoint", "mcp.save", "routines.save", "connectors.save":
+	case "profiles.save", "memory.save", "flows.save", "skills.save", "network.grant", "connections.saveEndpoint", "mcp.save", "routines.save", "connectors.save":
 		// Successful updates require a positive optimistic revision. A caller
 		// may choose a new ID, so ID presence cannot distinguish creation.
 		var revision struct {

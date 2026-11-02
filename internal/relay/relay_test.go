@@ -31,7 +31,7 @@ func (f *fakeRuntime) Run(c context.Context, t model.Turn, e model.Emit) (string
 }
 func fakeAdapters(run func(context.Context, model.Turn, model.Emit) (string, error)) map[string]model.Adapter {
 	out := map[string]model.Adapter{}
-	for _, h := range []string{"omp", "claude", "codex", "opencode"} {
+	for _, h := range []string{"omp", "claude"} {
 		out[h] = model.Adapter{Factory: func(_ context.Context, a model.Agent, e model.Emit) (model.Runtime, error) {
 			sid := a.SessionID
 			if sid == "" {
@@ -237,7 +237,7 @@ func TestBusyQueueAndRepositorySerialization(t *testing.T) {
 	})
 	source := createTest(t, r, "omp", "source")
 	a := createTest(t, r, "claude", "one")
-	b, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "codex", Name: "two", Cwd: a.Cwd})
+	b, err := createWithWorkspaceTest(t, r, admin, model.CreateAgent{Harness: "omp", Name: "two", Cwd: a.Cwd})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestConcurrentRequestsAndAdmissionDeduplication(t *testing.T) {
 	r, _ := openTest(t, nil)
 	origin := createTest(t, r, "omp", "source")
 	a := createTest(t, r, "claude", "one")
-	b := createTest(t, r, "opencode", "two")
+	b := createTest(t, r, "claude", "two")
 	startTest(t, r, a.ID)
 	startTest(t, r, b.ID)
 	q := model.SendRequest{From: origin.ID, To: a.ID, Text: "first", IdempotencyKey: "same"}
@@ -313,7 +313,7 @@ func TestFailureTimeoutCancelAndRetry(t *testing.T) {
 		return "", ctx.Err()
 	})
 	source := createTest(t, r, "omp", "origin")
-	dest := createTest(t, r, "codex", "dest")
+	dest := createTest(t, r, "omp", "dest")
 	_, err := r.Send(admin, model.SendRequest{From: source.ID, To: "claude:absent", Text: "hello"})
 	requireStatus(t, err, 404)
 	for _, q := range []model.SendRequest{{From: source.ID, To: dest.ID, Text: ""}, {From: source.ID, To: dest.ID, Text: "x", TimeoutSeconds: -1}} {
@@ -415,7 +415,7 @@ func TestDelegationCorrelationPermissionsAndCycleSafety(t *testing.T) {
 			if err != nil {
 				return "", err
 			}
-			child, err := r.Send(principal, model.SendRequest{To: "codex:leaf", Text: "leaf work", Type: "request"})
+			child, err := r.Send(principal, model.SendRequest{To: "omp:leaf", Text: "leaf work", Type: "request"})
 			if err != nil {
 				return "", err
 			}
@@ -435,7 +435,7 @@ func TestDelegationCorrelationPermissionsAndCycleSafety(t *testing.T) {
 				}
 			}
 		}
-		if v.Task.To == "codex:leaf" {
+		if v.Task.To == "omp:leaf" {
 			p, err := r.Authenticate(v.Token)
 			if err != nil {
 				return "", err
@@ -452,7 +452,7 @@ func TestDelegationCorrelationPermissionsAndCycleSafety(t *testing.T) {
 	r, _ = openTest(t, run)
 	origin := createTest(t, r, "omp", "origin")
 	middle := createTest(t, r, "claude", "middle")
-	leaf := createTest(t, r, "codex", "leaf")
+	leaf := createTest(t, r, "omp", "leaf")
 	o := startTest(t, r, origin.ID)
 	startTest(t, r, middle.ID)
 	startTest(t, r, leaf.ID)
@@ -499,7 +499,7 @@ func TestCancellationDiscardsPartialTextAndKeepsReplay(t *testing.T) {
 		return "", ctx.Err()
 	})
 	source := createTest(t, r, "omp", "source")
-	dest := createTest(t, r, "opencode", "dest")
+	dest := createTest(t, r, "claude", "dest")
 	startTest(t, r, dest.ID)
 	task := sendTest(t, r, source.ID, dest.ID, "stream")
 	select {
@@ -581,7 +581,7 @@ func TestTurnCredentialAncestryAndExpiry(t *testing.T) {
 	r, _ = openTest(t, run)
 	origin := createTest(t, r, "omp", "origin")
 	middle := createTest(t, r, "claude", "middle")
-	leaf := createTest(t, r, "codex", "leaf")
+	leaf := createTest(t, r, "omp", "leaf")
 	startTest(t, r, origin.ID)
 	startTest(t, r, middle.ID)
 	startTest(t, r, leaf.ID)

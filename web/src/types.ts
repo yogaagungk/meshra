@@ -61,6 +61,7 @@ export type Task = {
   updatedAt: string;
   deadline: string;
   attempts: number;
+  toolCalls?: number;
   deliveryAttempts: number;
   contextRefs?: Ref[];
   resultRef?: Ref;

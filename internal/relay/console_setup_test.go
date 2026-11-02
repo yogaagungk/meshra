@@ -11,7 +11,7 @@ import (
 
 func TestHarnessChatCreatesBoundedManagedIdentities(t *testing.T) {
 	r, _ := openTest(t, nil)
-	for _, harness := range []string{"codex", "claude", "omp", "opencode"} {
+	for _, harness := range []string{"claude", "omp"} {
 		var previous string
 		for i := 0; i < 3; i++ {
 			v, err := r.Console(admin, "chat-create", model.ConsoleRequest{Harness: harness, Title: "A private chat"})
@@ -43,14 +43,14 @@ func TestHarnessChatCreatesBoundedManagedIdentities(t *testing.T) {
 		}
 	}
 	agents, err := r.Agents(admin)
-	if err != nil || len(agents) != 4 {
+	if err != nil || len(agents) != 2 {
 		t.Fatal("managed agent count grew with chats", len(agents), err)
 	}
-	_, err = r.Console(model.Principal{AgentID: agents[0].ID}, "chat-create", model.ConsoleRequest{Harness: "codex"})
+	_, err = r.Console(model.Principal{AgentID: agents[0].ID}, "chat-create", model.ConsoleRequest{Harness: "omp"})
 	requireStatus(t, err, 403)
 	_, err = r.Console(admin, "chat-create", model.ConsoleRequest{Harness: "unknown"})
 	requireStatus(t, err, 400)
-	_, err = r.Console(admin, "chat-create", model.ConsoleRequest{Harness: "codex", Title: "password=private"})
+	_, err = r.Console(admin, "chat-create", model.ConsoleRequest{Harness: "omp", Title: "password=private"})
 	requireStatus(t, err, 400)
 }
 
@@ -93,7 +93,7 @@ func TestDirectoryExplorerBoundedPagination(t *testing.T) {
 	_, err := browseDirectories(model.ConsoleRequest{Path: filepath.Join(root, "ordinary-file.txt")})
 	requireStatus(t, err, 400)
 	r, _ := openTest(t, nil)
-	_, err = r.Console(model.Principal{AgentID: "codex:untrusted"}, "directories", model.ConsoleRequest{Path: root})
+	_, err = r.Console(model.Principal{AgentID: "omp:untrusted"}, "directories", model.ConsoleRequest{Path: root})
 	requireStatus(t, err, 403)
 }
 
@@ -155,7 +155,7 @@ func TestDirectoryCreateRejectsUnsafeNamesParentsAndNonAdmin(t *testing.T) {
 	}
 	_, err := r.Console(admin, "directories/create", model.ConsoleRequest{Path: file, Name: "child"})
 	requireStatus(t, err, 400)
-	for _, principal := range []model.Principal{{}, {AgentID: "codex:untrusted"}} {
+	for _, principal := range []model.Principal{{}, {AgentID: "omp:untrusted"}} {
 		_, err := r.Console(principal, "directories/create", model.ConsoleRequest{Path: root, Name: "unauthorized"})
 		requireStatus(t, err, 403)
 	}
@@ -167,7 +167,7 @@ func TestDirectoryCreateRejectsUnsafeNamesParentsAndNonAdmin(t *testing.T) {
 
 func TestManagedChatRestartStartsFreshWithoutResumingIdleThreads(t *testing.T) {
 	calls := make(chan model.Agent, 8)
-	adapters := map[string]model.Adapter{"codex": {Factory: func(_ context.Context, a model.Agent, _ model.Emit) (model.Runtime, error) {
+	adapters := map[string]model.Adapter{"omp": {Factory: func(_ context.Context, a model.Agent, _ model.Emit) (model.Runtime, error) {
 		calls <- a
 		if a.ManagedChat && (a.SessionID != "" || !a.Ephemeral) {
 			t.Error("managed slot tried to resume a durable idle thread")
@@ -184,7 +184,7 @@ func TestManagedChatRestartStartsFreshWithoutResumingIdleThreads(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	v, err := r.Console(admin, "chat-create", model.ConsoleRequest{Harness: "codex"})
+	v, err := r.Console(admin, "chat-create", model.ConsoleRequest{Harness: "omp"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestManagedChatRestartStartsFreshWithoutResumingIdleThreads(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-calls
-	ordinary := createTest(t, r, "codex", "ordinary")
+	ordinary := createTest(t, r, "omp", "ordinary")
 	before := startTest(t, r, ordinary.ID)
 	<-calls
 	if _, err = r.Action(admin, ordinary.ID, "restart"); err != nil {
@@ -220,5 +220,24 @@ func TestManagedChatRestartStartsFreshWithoutResumingIdleThreads(t *testing.T) {
 	input := <-calls
 	if input.SessionID != "" || !input.Ephemeral {
 		t.Fatal("daemon recovery tried to resume managed idle thread", input)
+	}
+}
+
+func TestDirectAPIChatRequiresEndpointAndModel(t *testing.T) {
+	r, _ := openTest(t, nil)
+	r.adapters["openai"] = r.adapters["omp"]
+	_, err := r.Console(admin, "chat-create", model.ConsoleRequest{Harness: "openai"})
+	requireStatus(t, err, 400)
+	v, err := r.Console(admin, "chat-create", model.ConsoleRequest{Harness: "openai", Config: model.Config{Provider: "endpoint1", Model: "m1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := v.(model.Conversation)
+	a, err := r.Agent(admin, c.Participants[0])
+	if err != nil || a.Harness != "openai" || !a.ManagedChat {
+		t.Fatal("direct API chat did not create a managed identity", a, err)
+	}
+	if c.ChatSettings == nil || c.ChatSettings.Config.Provider != "endpoint1" || c.ChatSettings.Config.Model != "m1" {
+		t.Fatal("endpoint and model were not saved with the chat", c.ChatSettings)
 	}
 }

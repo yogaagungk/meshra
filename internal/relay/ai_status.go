@@ -17,12 +17,9 @@ var quotaAccount = regexp.MustCompile(`^Account [0-9]{1,3}$`)
 var quotaIdentifier = regexp.MustCompile(`^[a-zA-Z0-9_.:/ -]{1,100}$`)
 
 func knownHarness(h string) bool {
-	return h == "codex" || h == "omp" || h == "claude" || h == "opencode"
+	return h == "omp" || h == "claude"
 }
 func quotaSource(h string) string {
-	if h == "codex" {
-		return "Codex account quota"
-	}
 	if h == "omp" {
 		return "OMP native usage reports"
 	}
@@ -33,7 +30,7 @@ func (r *Relay) cachedQuota(h string) model.QuotaSnapshot {
 	if !ok {
 		v = model.QuotaSnapshot{Harness: h, Source: quotaSource(h), State: "not_checked", Windows: []model.QuotaWindow{}}
 	}
-	if h != "codex" && h != "omp" {
+	if h != "omp" {
 		v.State = "not_supported"
 		v.Message = "Provider quota is not connected for this harness."
 	}
@@ -197,7 +194,7 @@ func (r *Relay) aiStatus(q model.ConsoleRequest) (any, error) {
 		return nil, err
 	}
 	quotas := []model.QuotaSnapshot{}
-	for _, h := range []string{"codex", "omp", "claude", "opencode"} {
+	for _, h := range []string{"omp", "claude"} {
 		quotas = append(quotas, r.cachedQuota(h))
 	}
 	return map[string]any{"quotas": quotas, "latest": latest, "localBudget": map[string]any{"turns": turns, "limit": r.settings.DailyTurnLimit, "resetsAt": now().Truncate(24 * time.Hour).Add(24 * time.Hour)}, "contextNote": "Last native context snapshot, not a prediction for your next message. AI chats send bounded recent history on each turn."}, nil

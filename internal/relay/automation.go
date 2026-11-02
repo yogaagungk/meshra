@@ -71,9 +71,7 @@ func (r *Relay) Automation(ctx context.Context, p model.Principal, operation str
 		return r.runtimeOperation(ctx, p, operation, payload)
 	case "network.list", "network.grant", "network.revoke":
 		return r.networkOperation(ctx, p, operation, payload)
-	case "connections.list", "connections.get", "connections.models", "connections.saveEndpoint", "connections.disable", "connections.remove", "connections.saveAcp", "connections.disableAcp", "connections.removeAcp", "connections.scanLocal":
-		return r.connectionsOperation(ctx, p, operation, payload)
-	case "connections.checkAcp", "connections.acpStatus", "connections.authenticateAcp":
+	case "connections.list", "connections.get", "connections.models", "connections.saveEndpoint", "connections.disable", "connections.remove", "connections.scanLocal":
 		return r.connectionsOperation(ctx, p, operation, payload)
 	case "changesets.apply", "changesets.get", "changesets.list":
 		return r.changesetOperation(ctx, p, operation, payload)

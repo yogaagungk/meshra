@@ -32,7 +32,7 @@ func profileStoreWorkspace(t *testing.T, r *Relay) model.Workspace {
 func profileStoreRequest(w model.Workspace) map[string]any {
 	return map[string]any{
 		"name": "Portable coworker", "instructions": "Keep findings scoped.\nExplain uncertainty.",
-		"workspaceId": w.ID, "binding": model.ProfileProvider{Harness: "codex"},
+		"workspaceId": w.ID, "binding": model.ProfileProvider{Harness: "omp"},
 		"capabilities": model.ProfileCapabilities{}, "allowedProfileIds": []string{}, "notificationsEnabled": false,
 	}
 }
@@ -48,7 +48,7 @@ func profileStoreCreate(t *testing.T, r *Relay, q map[string]any) model.Profile 
 
 func TestProfileStoreCreationPreservesCanonicalAgents(t *testing.T) {
 	r, _ := openTest(t, nil)
-	canonical := createTest(t, r, "codex", "portable")
+	canonical := createTest(t, r, "omp", "portable")
 	before, err := r.Agents(admin)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestProfileStoreStrictValidation(t *testing.T) {
 	}{
 		{"unknown field", func(q map[string]any) { q["archived"] = true }, 400},
 		{"unknown binding field", func(q map[string]any) {
-			q["binding"] = map[string]any{"harness": "codex", "config": map[string]any{}, "secret": "value"}
+			q["binding"] = map[string]any{"harness": "omp", "config": map[string]any{}, "secret": "value"}
 		}, 400},
 		{"unknown capability", func(q map[string]any) { q["capabilities"] = map[string]any{"shell": true} }, 400},
 		{"blank name", func(q map[string]any) { q["name"] = " " }, 400},
@@ -100,9 +100,6 @@ func TestProfileStoreStrictValidation(t *testing.T) {
 		{"future harness", func(q map[string]any) {
 			q["binding"] = model.ProfileProvider{Harness: "openai", Config: model.Config{Model: "local"}}
 		}, 400},
-		{"incomplete opencode config", func(q map[string]any) {
-			q["binding"] = model.ProfileProvider{Harness: "opencode", Config: model.Config{Model: "model"}}
-		}, 400},
 		{"wrong claude provider", func(q map[string]any) {
 			q["binding"] = model.ProfileProvider{Harness: "claude", Config: model.Config{Provider: "other"}}
 		}, 400},
@@ -110,7 +107,7 @@ func TestProfileStoreStrictValidation(t *testing.T) {
 			q["binding"] = model.ProfileProvider{Harness: "omp", Config: model.Config{Model: "sk-abcdefghijklmnopqrst"}}
 		}, 400},
 		{"native connection", func(q map[string]any) {
-			q["binding"] = model.ProfileProvider{Harness: "codex", ConnectionID: "endpoint"}
+			q["binding"] = model.ProfileProvider{Harness: "omp", ConnectionID: "endpoint"}
 		}, 400},
 		{"revision on creation", func(q map[string]any) { q["expectedRevision"] = 0 }, 400},
 	}
@@ -136,7 +133,7 @@ func TestProfileStoreStrictValidation(t *testing.T) {
 		_, err := r.profileStoreOperation(admin, "profiles.save", json.RawMessage(raw))
 		requireStatus(t, err, 400)
 	}
-	_, err := r.profileStoreOperation(model.Principal{AgentID: "codex:portable"}, "profiles.list", json.RawMessage(`{}`))
+	_, err := r.profileStoreOperation(model.Principal{AgentID: "omp:portable"}, "profiles.list", json.RawMessage(`{}`))
 	requireStatus(t, err, 403)
 	page, err := profileStoreCall(t, r, "profiles.list", map[string]any{})
 	if err != nil || len(page.(model.AutomationPage[model.Profile]).Items) != 0 {
@@ -156,7 +153,7 @@ func TestProfileStoreRevisionArchiveAndUnavailableExecution(t *testing.T) {
 	_, err := profileStoreCall(t, r, "profiles.save", q)
 	requireStatus(t, err, 409)
 	q["expectedRevision"] = updated.Revision
-	q["binding"] = model.ProfileProvider{Harness: "omp"}
+	q["binding"] = model.ProfileProvider{Harness: "claude"}
 	_, err = profileStoreCall(t, r, "profiles.save", q)
 	requireStatus(t, err, 409)
 	q["binding"] = updated.Binding
@@ -310,7 +307,7 @@ func TestProfileStoreAdmittedSnapshotAndArchivePreserveHistory(t *testing.T) {
 
 func TestProfileStoreWorkspaceChangeRotatesOnlyManagedSession(t *testing.T) {
 	r, _ := continuityOpenTest(t, nil)
-	canonical := createTest(t, r, "codex", "unrelated")
+	canonical := createTest(t, r, "omp", "unrelated")
 	canonical = startTest(t, r, canonical.ID)
 	q := profileStoreRequest(profileStoreWorkspace(t, r))
 	profile := profileStoreCreate(t, r, q)

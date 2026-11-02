@@ -1,14 +1,12 @@
-import codex from "./assets/harnesses/codex.svg";
 import claude from "./assets/harnesses/claude.svg";
-import opencode from "./assets/harnesses/opencode.svg";
 import omp from "./assets/harnesses/omp.svg";
+import openai from "./assets/harnesses/openai.svg";
 export const harnessNames: Record<string, string> = {
-  codex: "Codex",
   claude: "Claude",
-  opencode: "OpenCode",
   omp: "OMP",
+  openai: "Direct API",
 };
-const logos: Record<string, string> = { codex, claude, opencode, omp };
+const logos: Record<string, string> = { claude, omp, openai };
 export function harnessName(id: string) {
   const h = id.split(":")[0];
   return harnessNames[h] || h;
@@ -37,8 +35,8 @@ export function HarnessLogo({ id }: { id: string }) {
   );
 }
 
-/** Department key for a harness or canonical agent id: claude, codex, omp, opencode, or acp for everything else. */
+/** Department key for a harness or canonical agent id: claude, omp or openai (direct API). */
 export function deptOf(id: string) {
   const h = id.split(":")[0];
-  return h in logos ? h : "acp";
+  return h in logos ? h : "openai";
 }

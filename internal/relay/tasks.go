@@ -993,6 +993,12 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 				_, _ = r.db.Exec("UPDATE credentials SET session_id=? WHERE hash=?", data, tokenHash(token))
 				return
 			}
+			if kind == "tool_use" || kind == "tool_result" {
+				data = redact(data)
+				if kind == "tool_use" {
+					task.ToolCalls++
+				}
+			}
 			if len(data) > 16384 {
 				data = truncate(data, 16384) + " [event truncated]"
 			}

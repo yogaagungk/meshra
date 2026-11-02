@@ -71,7 +71,7 @@ func TestNetworkSchemasAreStrictAndNoGlobalGrant(t *testing.T) {
 	}
 	_, err := networkCall(t, r, principal, "network.list", map[string]any{"allowPrivate": true})
 	requireStatus(t, err, 400)
-	_, err = networkCall(t, r, model.Principal{AgentID: "codex:worker"}, "network.list", map[string]any{})
+	_, err = networkCall(t, r, model.Principal{AgentID: "omp:worker"}, "network.list", map[string]any{})
 	requireStatus(t, err, 403)
 	value, err := networkCall(t, r, admin, "network.list", map[string]any{})
 	if err != nil || len(value.([]netpolicy.Grant)) != 0 { t.Fatalf("invalid request created grants: %v %v", value, err) }

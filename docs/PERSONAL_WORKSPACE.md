@@ -68,18 +68,16 @@ Models & usage also provides discovery refresh and today's usage breakdown.
 Only model/provider identifiers and names cross the console boundary; native
 provider credentials remain owned by the harness.
 
-Discovery uses Codex `model/list`, OMP `get_available_models`, Claude Agent SDK
-`supportedModels()` with no input messages, and OpenCode `/config/providers`.
-The OpenCode adapter uses configured providers rather than downloading the full
-provider catalog, which can exceed the transport bound. Up to 200 sanitized,
+Discovery uses OMP `get_available_models` and Claude Agent SDK
+`supportedModels()` with no input messages. A Direct API endpoint lists its own
+models from `GET /models`. Up to 200 sanitized,
 deduplicated options reach the UI. Missing native authentication is reported as
 unavailable; no guessed or hardcoded model catalog is displayed.
 
 A schema-7 usage ledger records attempts, chosen harness/model/provider, project,
 state, input/output byte counts and elapsed time. Token counts appear only when
-reported by Codex, Claude or OpenCode. OMP currently reports no token totals to
-this adapter. OpenCode reports tokens for the returned assistant message; its
-counts do not represent every intermediate tool/model step. Counts include
+reported by Claude or a Direct API endpoint. OMP currently reports no token totals to
+this adapter. Counts include
 cached input where the native summary exposes it. Native-default rows cannot
 identify the actual selected model unless the harness reports that separately.
 No token estimates, inferred billing, subscription quota or monetary budget is
@@ -101,6 +99,6 @@ with `MESHRA_NATIVE_MODEL_CATALOG=1 go test ./tests -run '^TestNativeModelCatalo
 it generates no paid AI response.
 
 Provider quota and context telemetry are now connected through
-[AI Status](AI_STATUS.md), with Codex/OMP live quota reports and explicitly scoped
+[AI Status](AI_STATUS.md), with OMP live quota reports and explicitly scoped
 native context observations. The earlier quota limitation above describes the
 initial personal-controls release; use AI Status for current telemetry behavior.

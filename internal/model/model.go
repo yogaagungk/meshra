@@ -111,6 +111,7 @@ type Task struct {
 	Error                string    `json:"error,omitempty"`
 	IdempotencyKey       string    `json:"idempotencyKey,omitempty"`
 	Attempts             int       `json:"attempts"`
+	ToolCalls            int       `json:"toolCalls,omitempty"`
 	CreatedAt            time.Time `json:"createdAt"`
 	Deadline             time.Time `json:"deadline"`
 	UpdatedAt            time.Time `json:"updatedAt"`

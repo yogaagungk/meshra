@@ -77,7 +77,7 @@ func TestAttachmentBinaryRoundTripPrivateDraftIntegrityAndRemoval(t *testing.T) 
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("blob permissions: %v, %v", info, err)
 	}
-	_, body, err := r.ReadAttachment(context.Background(), model.Principal{AgentID: "codex:unrelated"}, a.ID)
+	_, body, err := r.ReadAttachment(context.Background(), model.Principal{AgentID: "omp:unrelated"}, a.ID)
 	requireStatus(t, err, 403)
 	if body != nil {
 		t.Fatal("denied read returned bytes")
@@ -134,8 +134,8 @@ func TestAttachmentAgentRequiresExactActiveTaskAndConversation(t *testing.T) {
 			return "", ctx.Err()
 		}
 	})
-	a := createTest(t, r, "codex", "attachment-reader")
-	b := createTest(t, r, "codex", "attachment-unrelated")
+	a := createTest(t, r, "omp", "attachment-reader")
+	b := createTest(t, r, "omp", "attachment-unrelated")
 	c := attachmentTestConversation(t, r, a.ID, b.ID)
 	other := attachmentTestConversation(t, r, a.ID)
 	data := []byte("scoped attachment data\n")
@@ -216,7 +216,7 @@ func TestAttachmentBoundsDraftExpiryAndScopedPagination(t *testing.T) {
 	requireStatus(t, err, 400)
 	_, err = r.UploadAttachment(ctx, admin, "", "x", "not a media type", strings.NewReader("x"), 1)
 	requireStatus(t, err, 400)
-	_, err = r.UploadAttachment(ctx, model.Principal{AgentID: "codex:other"}, "", "x", "text/plain", strings.NewReader("x"), 1)
+	_, err = r.UploadAttachment(ctx, model.Principal{AgentID: "omp:other"}, "", "x", "text/plain", strings.NewReader("x"), 1)
 	requireStatus(t, err, 403)
 	_, err = r.UploadAttachment(ctx, admin, "missing", "x", "text/plain", strings.NewReader("x"), 1)
 	requireStatus(t, err, 404)
@@ -377,7 +377,7 @@ func TestAttachmentStoreDirectorySymlinkRejected(t *testing.T) {
 
 func TestAttachmentAdmissionRejectsLegacyBinaryAndQuotesBoundedText(t *testing.T) {
 	r, _ := openTest(t, nil)
-	a := createTest(t, r, "codex", "text-attachments")
+	a := createTest(t, r, "omp", "text-attachments")
 	c := attachmentTestConversation(t, r, a.ID)
 	binary := attachmentTestUpload(t, r, c.ID, "binary.bin", "application/octet-stream", []byte{0, 0xff})
 	invalidText := attachmentTestUpload(t, r, c.ID, "invalid.txt", "text/plain", []byte{'x', 0, 0xff})

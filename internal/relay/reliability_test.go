@@ -123,7 +123,7 @@ func TestOfflineDeliveryBackoffExhaustionAndExplicitRedrive(t *testing.T) {
 	}
 	defer r.Close()
 	origin := createTest(t, r, "omp", "origin")
-	dest := createTest(t, r, "codex", "dest")
+	dest := createTest(t, r, "omp", "dest")
 	task := sendTest(t, r, origin.ID, dest.ID, "offline")
 	done := awaitTask(t, r, task.ID)
 	if done.State != "failed" || done.ErrorCategory != "delivery_exhausted" || done.Ambiguous || done.Attempts != 0 || done.DeliveryAttempts != 3 {
@@ -381,7 +381,7 @@ func TestDeadlineSurvivesSlowClaimAndUncancellableRuntime(t *testing.T) {
 		return "late result", nil
 	})
 	origin := createTest(t, r, "omp", "origin")
-	dest := createTest(t, r, "codex", "dest")
+	dest := createTest(t, r, "omp", "dest")
 	startTest(t, r, dest.ID)
 	gate := &slowClaimHandler{entered: make(chan struct{}), release: make(chan struct{})}
 	var releaseOnce sync.Once

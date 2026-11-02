@@ -40,3 +40,39 @@ type ActiveToolService interface {
 type ScopedToolEndpoint interface {
  ScopedMCP(context.Context)(socketPath string,credential string,err error)
 }
+
+// ToolEventLimit bounds the input or output carried by one tool event.
+const ToolEventLimit = 4000
+
+// ToolEvent is the payload of a "tool_use" or "tool_result" task event. Every
+// adapter reports tool activity in this one shape so the console can render it.
+type ToolEvent struct {
+	ID      string          `json:"id"`
+	Name    string          `json:"name,omitempty"`
+	Input   json.RawMessage `json:"input,omitempty"`
+	Output  string          `json:"output,omitempty"`
+	IsError bool            `json:"isError,omitempty"`
+}
+
+// ToolEventData encodes a tool event with bounded input and output.
+func ToolEventData(e ToolEvent) string {
+	if len(e.Input) > ToolEventLimit || !json.Valid(e.Input) {
+		text := string(e.Input)
+		if len(text) > ToolEventLimit {
+			text = text[:ToolEventLimit] + " [truncated]"
+		}
+		e.Input, _ = json.Marshal(text)
+	}
+	if len(e.Output) > ToolEventLimit {
+		cut := ToolEventLimit
+		for cut > 0 && e.Output[cut]&0xC0 == 0x80 {
+			cut--
+		}
+		e.Output = e.Output[:cut] + " [truncated]"
+	}
+	b, err := json.Marshal(e)
+	if err != nil {
+		return `{"id":"unknown"}`
+	}
+	return string(b)
+}

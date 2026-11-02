@@ -33,17 +33,11 @@ func validConfig(c model.Config, harness string) error {
 			return model.Err(400, "model/provider must be identifiers, not credentials")
 		}
 	}
-	if harness == "opencode" && (c.Model == "") != (c.Provider == "") {
-		return model.Err(400, "OpenCode requires both model and provider")
-	}
 	if harness == "claude" && c.Provider != "" && c.Provider != "anthropic" {
 		return model.Err(400, "Claude uses its native Anthropic provider")
 	}
 	if harness == "openai" && (c.Model == "" || c.Provider == "") {
 		return model.Err(400, "OpenAI-compatible endpoints require both model and endpoint identifier")
-	}
-	if harness == "acp" && c.Provider == "" {
-		return model.Err(400, "ACP agents require an installed-command configuration identifier")
 	}
 	return nil
 }

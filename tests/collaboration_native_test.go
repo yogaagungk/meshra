@@ -2,9 +2,7 @@ package tests
 
 import (
 	"meshra/internal/adapters/claude"
-	"meshra/internal/adapters/codex"
 	"meshra/internal/adapters/omp"
-	"meshra/internal/adapters/opencode"
 	"meshra/internal/model"
 	"meshra/internal/relay"
 	"os"
@@ -18,7 +16,7 @@ func TestNativeCollaboration(t *testing.T) {
 	if os.Getenv("MESHRA_V03_NATIVE") != "1" {
 		t.Skip("opt in with MESHRA_V03_NATIVE=1; real provider costs")
 	}
-	nativeCollaboration(t, "opencode")
+	nativeCollaboration(t, "claude")
 }
 func TestNativeTwoHarnessCollaboration(t *testing.T) {
 	if os.Getenv("MESHRA_V03_TWO_HARNESS") != "1" {
@@ -29,22 +27,18 @@ func TestNativeTwoHarnessCollaboration(t *testing.T) {
 func nativeCollaboration(t *testing.T, publisher string) {
 	t.Helper()
 	p := model.Principal{Admin: true}
-	r, err := relay.Open(t.TempDir(), map[string]model.Adapter{"claude": claude.New(), "codex": codex.New(), "omp": omp.New(), "opencode": opencode.New()})
+	r, err := relay.Open(t.TempDir(), map[string]model.Adapter{"claude": claude.New(), "omp": omp.New()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	ids := []string{publisher + ":apmobileprod", "codex:implementer", "omp:reviewer", "claude:apmobilewallet"}
+	ids := []string{publisher + ":apmobileprod", "omp:implementer", "omp:reviewer", "claude:apmobilewallet"}
 	for _, id := range ids {
 		parts := strings.Split(id, ":")
 		config := model.Config{}
 		switch parts[0] {
 		case "omp":
 			config = model.Config{Model: os.Getenv("MESHRA_OMP_MODEL"), Provider: os.Getenv("MESHRA_OMP_PROVIDER")}
-		case "codex":
-			config = model.Config{Model: os.Getenv("MESHRA_CODEX_MODEL"), Provider: os.Getenv("MESHRA_CODEX_PROVIDER")}
-		case "opencode":
-			config = model.Config{Model: os.Getenv("MESHRA_OPENCODE_MODEL"), Provider: os.Getenv("MESHRA_OPENCODE_PROVIDER")}
 		case "claude":
 			config.Model = os.Getenv("MESHRA_CLAUDE_MODEL")
 		}
@@ -145,7 +139,7 @@ func nativeCollaboration(t *testing.T, publisher string) {
 	if err != nil || wallet.SessionID != "" {
 		t.Fatal("wallet received a session")
 	}
-	t.Logf("real harness publisher=%s implementer=codex reviewer=omp; pinned context consumed; wallet denied; conversation=%s tasks=%s,%s,%s", publisher, conv.ID, first.ID, implement.ID, review.ID)
+	t.Logf("real harness publisher=%s implementer=omp reviewer=omp; pinned context consumed; wallet denied; conversation=%s tasks=%s,%s,%s", publisher, conv.ID, first.ID, implement.ID, review.ID)
 }
 
 func TestNativeLifecycle(t *testing.T) {
@@ -160,7 +154,7 @@ func TestNativeLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { r.Close() }()
-	for _, id := range []string{"omp:v03lifecycle", "codex:v03origin"} {
+	for _, id := range []string{"omp:v03lifecycle", "claude:v03origin"} {
 		parts := strings.Split(id, ":")
 		config := model.Config{}
 		if parts[0] == "omp" {
@@ -170,7 +164,7 @@ func TestNativeLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	v, err := r.Collaborate(p, "conversation.create", model.CollaborationRequest{Title: "native lifecycle", Participants: []string{"omp:v03lifecycle", "codex:v03origin"}})
+	v, err := r.Collaborate(p, "conversation.create", model.CollaborationRequest{Title: "native lifecycle", Participants: []string{"omp:v03lifecycle", "claude:v03origin"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +174,7 @@ func TestNativeLifecycle(t *testing.T) {
 	}
 	send := func(text string) model.Task {
 		t.Helper()
-		task, e := r.Send(p, model.SendRequest{From: "codex:v03origin", To: "omp:v03lifecycle", ConversationID: conv.ID, Text: text, TimeoutSeconds: 120})
+		task, e := r.Send(p, model.SendRequest{From: "claude:v03origin", To: "omp:v03lifecycle", ConversationID: conv.ID, Text: text, TimeoutSeconds: 120})
 		if e != nil {
 			t.Fatal(e)
 		}

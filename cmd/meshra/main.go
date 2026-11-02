@@ -21,12 +21,9 @@ import (
 	"syscall"
 	"time"
 
-	"meshra/internal/adapters/acp"
 	"meshra/internal/adapters/claude"
-	"meshra/internal/adapters/codex"
 	"meshra/internal/adapters/omp"
 	"meshra/internal/adapters/openai"
-	"meshra/internal/adapters/opencode"
 	"meshra/internal/api"
 	"meshra/internal/model"
 	"meshra/internal/relay"
@@ -751,15 +748,7 @@ func serve(ctx context.Context, opts options, errout io.Writer) error {
 		}
 		return core.EndpointRuntimeConfig(ctx, id)
 	}
-	acpAdapter := acp.New(acp.Options{})
-	acpAdapter.Factory = func(ctx context.Context, agent model.Agent, emit model.Emit) (model.Runtime, error) {
-		core := coreRef.Load()
-		if core == nil {
-			return nil, model.Err(503, "the relay is not ready")
-		}
-		return core.NewACPRuntime(ctx, agent, emit)
-	}
-	adapters := map[string]model.Adapter{"omp": omp.New(), "codex": codex.New(), "claude": claude.New(), "opencode": opencode.New(), "openai": openai.New(resolveEndpoint), "acp": acpAdapter}
+	adapters := map[string]model.Adapter{"omp": omp.New(), "claude": claude.New(), "openai": openai.New(resolveEndpoint)}
 	opened, err := relay.OpenWithOptions(opts.DataDir, adapters, opts.Relay)
 	if err != nil {
 		listener.Close()

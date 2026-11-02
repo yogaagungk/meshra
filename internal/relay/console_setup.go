@@ -20,7 +20,7 @@ func (r *Relay) createHarnessChat(p model.Principal, q model.ConsoleRequest) (an
 		return nil, model.Err(503, "relay is stopping")
 	}
 	adapter, ok := r.adapters[q.Harness]
-	if !ok || adapter.Factory == nil || (q.Harness != "codex" && q.Harness != "claude" && q.Harness != "omp" && q.Harness != "opencode") {
+	if !ok || adapter.Factory == nil || (q.Harness != "claude" && q.Harness != "omp" && q.Harness != "openai") {
 		r.mu.Unlock()
 		return nil, model.Err(400, "unsupported AI harness")
 	}

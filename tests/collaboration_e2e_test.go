@@ -29,7 +29,7 @@ func TestCollaborationHTTPMCPAuthorization(t *testing.T) {
 	}
 	admin := string(bytes)
 	tokens := map[string]string{}
-	for _, name := range []string{"claude:apmobileprod", "claude:apmobilewallet", "opencode:reader"} {
+	for _, name := range []string{"claude:apmobileprod", "claude:apmobilewallet", "omp:reader"} {
 		parts := strings.Split(name, ":")
 		httpJSON(t, client, server.URL, admin, "POST", "/v1/agents", model.CreateAgent{Harness: parts[0], Name: parts[1]}, nil, 201)
 		var v map[string]string
@@ -38,14 +38,14 @@ func TestCollaborationHTTPMCPAuthorization(t *testing.T) {
 	}
 	prod := tokens["claude:apmobileprod"]
 	wallet := tokens["claude:apmobilewallet"]
-	reader := tokens["opencode:reader"]
+	reader := tokens["omp:reader"]
 	var c model.SharedContext
 	httpJSON(t, client, server.URL, prod, "POST", "/v1/collaboration/context.publish", model.CollaborationRequest{Content: "private contract", Title: "API"}, &c, 200)
 	request := model.CollaborationRequest{ContextID: c.ID, Version: 1}
 	httpJSON(t, client, server.URL, wallet, "POST", "/v1/collaboration/context.get", request, nil, 403)
 	// Membership deliberately includes wallet; it still cannot fetch private bytes.
 	var conv model.Conversation
-	httpJSON(t, client, server.URL, prod, "POST", "/v1/collaboration/conversation.create", model.CollaborationRequest{Title: "shared channel", Participants: []string{"claude:apmobilewallet", "opencode:reader"}}, &conv, 200)
+	httpJSON(t, client, server.URL, prod, "POST", "/v1/collaboration/conversation.create", model.CollaborationRequest{Title: "shared channel", Participants: []string{"claude:apmobilewallet", "omp:reader"}}, &conv, 200)
 	httpJSON(t, client, server.URL, prod, "POST", "/v1/collaboration/context.attach", model.CollaborationRequest{ContextID: c.ID, Version: 1, ConversationID: conv.ID}, nil, 200)
 	httpJSON(t, client, server.URL, wallet, "POST", "/v1/collaboration/context.get", request, nil, 403)
 	var visible model.Conversation
@@ -67,13 +67,13 @@ func TestCollaborationHTTPMCPAuthorization(t *testing.T) {
 	if rpc(reader, "resources/read", map[string]any{"uri": uri})["error"] == nil {
 		t.Fatal("resource bypassed ACL")
 	}
-	httpJSON(t, client, server.URL, prod, "POST", "/v1/collaboration/context.grant", model.CollaborationRequest{ContextID: c.ID, AgentID: "opencode:reader"}, nil, 200)
+	httpJSON(t, client, server.URL, prod, "POST", "/v1/collaboration/context.grant", model.CollaborationRequest{ContextID: c.ID, AgentID: "omp:reader"}, nil, 200)
 	got := rpc(reader, "resources/read", map[string]any{"uri": uri})
 	encoded, _ := json.Marshal(got)
 	if got["error"] != nil || !strings.Contains(string(encoded), "private contract") {
 		t.Fatalf("authorized resource failed %s", encoded)
 	}
-	httpJSON(t, client, server.URL, prod, "POST", "/v1/collaboration/context.revoke", model.CollaborationRequest{ContextID: c.ID, AgentID: "opencode:reader"}, nil, 200)
+	httpJSON(t, client, server.URL, prod, "POST", "/v1/collaboration/context.revoke", model.CollaborationRequest{ContextID: c.ID, AgentID: "omp:reader"}, nil, 200)
 	if rpc(reader, "resources/read", map[string]any{"uri": uri})["error"] == nil {
 		t.Fatal("revoked resource accessible")
 	}

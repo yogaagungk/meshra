@@ -282,7 +282,7 @@ function ProfileDialog({
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
-  const [harness, setHarness] = useState<ProfileHarness>("codex");
+  const [harness, setHarness] = useState<ProfileHarness>("claude");
   const [model, setModel] = useState("");
   const [provider, setProvider] = useState("");
   const [capabilities, setCapabilities] = useState<ProfileCapabilities>(
@@ -316,7 +316,7 @@ function ProfileDialog({
   const models = useQuery({
     queryKey: ["models", harness],
     queryFn: () => api<{ items: ModelOption[] }>("models", { harness }),
-    enabled: open && harness !== "openai" && harness !== "acp",
+    enabled: open && harness !== "openai",
     retry: false,
     gcTime: 0,
     staleTime: 60000,
@@ -325,7 +325,7 @@ function ProfileDialog({
   const connections = useQuery({
     queryKey: ["connections"],
     queryFn: () => automation("connections.list", {}),
-    enabled: open && (harness === "openai" || harness === "acp"),
+    enabled: open && harness === "openai",
     gcTime: 0,
   });
 
@@ -358,7 +358,7 @@ function ProfileDialog({
       setName("");
       setInstructions("");
       setWorkspaceId("");
-      setHarness("codex");
+      setHarness("claude");
       setModel("");
       setProvider("");
       setCapabilities({ ...EMPTY_CAPABILITIES });
@@ -377,7 +377,7 @@ function ProfileDialog({
     return () => window.removeEventListener("focus", update);
   }, []);
 
-  const connectionHarness = harness === "openai" || harness === "acp";
+  const connectionHarness = harness === "openai";
   const binding: ProfileProvider = {
     harness,
     config: {
@@ -403,9 +403,7 @@ function ProfileDialog({
   const needsPolicyReview = widenedCapabilities.length > 0 || widenedProfiles.length > 0 || workspaceChanged;
   const policyKey = JSON.stringify({ capabilities, allowed, workspaceId, binding });
   const policyReviewed = !needsPolicyReview || reviewedPolicy === policyKey;
-  const selectedConnection = harness === "openai"
-    ? connections.data?.endpoints.find((item) => item.id === provider)
-    : connections.data?.acp.find((item) => item.id === provider);
+  const selectedConnection = connections.data?.endpoints.find((item) => item.id === provider);
   const formValid = !!name.trim() && !!workspaceId &&
     new TextEncoder().encode(name.trim()).length <= 128 &&
     new TextEncoder().encode(instructions).length <= 16384 &&
@@ -620,14 +618,14 @@ function ProfileDialog({
               >
                 <option value="">Select a saved connection</option>
                 {provider && !selectedConnection && <option value={provider}>{provider} (unavailable)</option>}
-                {(harness === "openai" ? connections.data?.endpoints : connections.data?.acp)?.map((item) => (
+                {connections.data?.endpoints.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name} · {item.enabled ? "enabled" : "disabled"}
                   </option>
                 ))}
               </select>
               {connections.isError && <Notice>{connections.error.message}</Notice>}
-              <small className="muted">Configure saved endpoints and ACP agents in Settings → Connections. Saving a profile does not enable or authenticate a connection.</small>
+              <small className="muted">Configure saved endpoints in Settings → Connections. Saving a profile does not enable or authenticate a connection.</small>
             </>
           )}
           <label htmlFor="profile-model">Model</label>
@@ -637,7 +635,7 @@ function ProfileDialog({
               value={model}
               maxLength={200}
               onChange={(e) => setModel(e.target.value)}
-              placeholder={harness === "openai" ? "Model ID required by this endpoint" : "ACP agent default"}
+              placeholder="Model ID required by this endpoint"
             />
           ) : (
             <select
@@ -672,11 +670,9 @@ function ProfileDialog({
             <strong>Provider and policy disclosure</strong>
             <p>
               {harnessName(harness)} · {provider || "native configured provider"} · {model || "provider default model"}.
-              {harness === "openai" && selectedConnection && "baseUrl" in selectedConnection
+              {harness === "openai" && selectedConnection
                 ? ` Endpoint: ${selectedConnection.baseUrl}.`
-                : harness === "acp" && selectedConnection && "executable" in selectedConnection
-                  ? ` Saved ACP executable: ${selectedConnection.executable}.`
-                  : " Native account authentication and provider routing stay managed by the selected harness."}
+                : " Native account authentication and provider routing stay managed by the selected harness."}
             </p>
             <p className="muted">
               Profile instructions, submitted messages, selected attachments and granted context can reach this provider.

@@ -287,11 +287,11 @@ func TestProfileSwitchSerializesAdmissionDuringTeardown(t *testing.T) {
 		}
 	}()
 	r.mu.Lock()
-	adapter := r.adapters["codex"]
+	adapter := r.adapters["omp"]
 	adapter.Factory = func(context.Context, model.Agent, model.Emit) (model.Runtime, error) {
 		return &continuityClosingRuntime{fakeRuntime: fakeRuntime{session: randomID(), run: func(context.Context, model.Turn, model.Emit) (string, error) { return "answer", nil }}, closing: closing, release: release}, nil
 	}
-	r.adapters["codex"] = adapter
+	r.adapters["omp"] = adapter
 	r.mu.Unlock()
 	p := profileStoreCreate(t, r, profileStoreRequest(profileStoreWorkspace(t, r)))
 	conversation := continuityConversation(t, r, "chat", p)

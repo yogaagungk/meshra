@@ -63,7 +63,7 @@ func (r *Relay) Console(p model.Principal, op string, q model.ConsoleRequest) (a
 		return r.deleteConversation(q)
 	case "harnesses":
 		out := []map[string]string{}
-		for _, h := range []string{"codex", "claude", "opencode", "omp", "openai", "acp"} {
+		for _, h := range []string{"claude", "omp", "openai"} {
 			if adapter, ok := r.adapters[h]; ok && adapter.Factory != nil {
 				out = append(out, map[string]string{"id": h})
 			}

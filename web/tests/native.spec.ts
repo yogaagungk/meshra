@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-test("real browser chat with OMP, Codex and OpenCode", async ({ page }) => {
+test("real browser chat with OMP and Claude", async ({ page }) => {
   test.skip(
     process.env.MESHRA_UI_NATIVE !== "1",
     "Requires an external real daemon and provider credentials; may incur costs.",
@@ -12,12 +12,7 @@ test("real browser chat with OMP, Codex and OpenCode", async ({ page }) => {
   const suffix = Date.now().toString(36);
   const agents = [
     { h: "omp", n: "uireviewer-" + suffix, marker: "MESHRA_UI_OMP_OK" },
-    { h: "codex", n: "uiimplementer-" + suffix, marker: "MESHRA_UI_CODEX_OK" },
-    {
-      h: "opencode",
-      n: "uiarchitect-" + suffix,
-      marker: "MESHRA_UI_OPENCODE_OK",
-    },
+    { h: "claude", n: "uiimplementer-" + suffix, marker: "MESHRA_UI_CLAUDE_OK" },
   ];
   const ids = agents.map((a) => a.h + ":" + a.n);
   await page.setViewportSize({ width: 1440, height: 1000 });

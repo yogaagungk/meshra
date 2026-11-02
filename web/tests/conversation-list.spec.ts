@@ -31,7 +31,7 @@ test("conversation list groups pins, filters chat types, clears search and prese
         headers,
         data: {
           title,
-          participants: [chat ? "opencode:builder" : "claude:apmobilewallet"],
+          participants: [chat ? "omp:builder" : "claude:apmobilewallet"],
           ...(chat ? { mode: "chat" } : {}),
         },
       },

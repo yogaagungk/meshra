@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strings"
 
 	"meshra/internal/model"
 )
@@ -13,9 +12,9 @@ import (
 type admittedConnectionKey struct{}
 
 // Caller holds relay ownership. Native harness provider names are not connection
-// identifiers; endpoint and ACP providers resolve exact saved configuration IDs.
+// identifiers; endpoint providers resolve exact saved configuration IDs.
 func (r *Relay) profileConnectionLocked(binding model.ProfileProvider, enabled bool) (any, []string, error) {
-	if binding.Harness != "openai" && binding.Harness != "acp" {
+	if binding.Harness != "openai" {
 		if binding.ConnectionID != "" {
 			return nil, nil, model.Err(400, "native profile harness does not use a connectionId")
 		}
@@ -42,25 +41,7 @@ func (r *Relay) profileConnectionLocked(binding model.ProfileProvider, enabled b
 		}
 		return endpoint, refs, nil
 	}
-	config, found, err := r.readACPLocked(context.Background(), id)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !found {
-		return nil, nil, model.Err(404, "ACP configuration not found")
-	}
-	if enabled && !config.Enabled {
-		return nil, nil, model.Err(409, "ACP configuration is disabled")
-	}
-	refs := make([]string, 0, len(config.SecretEnvRefs))
-	for _, reference := range config.SecretEnvRefs {
-		_, id, ok := strings.Cut(reference, "=")
-		if !ok {
-			return nil, nil, model.Err(503, "ACP secret configuration is unavailable")
-		}
-		refs = append(refs, id)
-	}
-	return config, refs, nil
+	return nil, nil, model.Err(400, "unsupported connection harness")
 }
 func (r *Relay) validateProfileConnectionLocked(binding model.ProfileProvider, enabled bool) error {
 	_, _, err := r.profileConnectionLocked(binding, enabled)

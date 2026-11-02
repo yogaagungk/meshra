@@ -40,7 +40,7 @@ test("automation: write a skill, pin it, build a flow with a diagram, and manage
       name,
       instructions: "Work carefully.",
       workspaceId: workspace.id,
-      binding: { harness: "codex" },
+      binding: { harness: "omp" },
       capabilities: {},
       allowedProfileIds: [],
       notificationsEnabled: false,

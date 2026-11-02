@@ -99,7 +99,7 @@ func sanitizeTemplate(kind string, raw json.RawMessage) (localTemplate, error) {
 		}
 		target := templateProfile{Name: redactSecrets(source.Name), Instructions: redactSecrets(source.Instructions), AllowedProfileIDs: []string{}, Archived: true}
 		switch source.Binding.Harness {
-		case "codex", "claude", "omp", "opencode", "openai", "acp", "":
+		case "claude", "omp", "openai", "":
 			target.Binding.Harness = source.Binding.Harness
 		default:
 			return value, model.Err(400, "unsupported template harness")

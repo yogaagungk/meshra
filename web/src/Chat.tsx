@@ -52,6 +52,7 @@ import {
   type Task,
 } from "./types";
 import { ProfileChat } from "./ProfileChat";
+import { ToolCalls } from "./ToolCalls";
 import { ChatQueue, RetryWith, RoutingControl } from "./ChatCoordination";
 import {
   readRouteNotes,
@@ -508,7 +509,7 @@ function LegacyChat({
               <ChatAIStatus
                 conversationId={id}
                 harness={
-                  conversation.data.participants[0]?.split(":")[0] || "codex"
+                  conversation.data.participants[0]?.split(":")[0] || "claude"
                 }
                 revision={chatState.data?.state || ""}
               />
@@ -738,6 +739,7 @@ function LegacyChat({
                           {formatTime(t.updatedAt)}
                         </time>
                       </div>
+                      <ToolCalls task={t} />
                       {t.result ? (
                         <Markdown text={t.result} />
                       ) : !terminal(t.state) ? (

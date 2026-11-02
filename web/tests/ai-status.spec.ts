@@ -112,7 +112,7 @@ test("AI status separates provider quota, local budget and context with scoped h
     }),
   ).toBeVisible();
   await expect(page.locator(".ai-quota-list li")).toHaveCount(0);
-  await page.getByLabel("Status harness").selectOption("codex");
+  await page.getByLabel("Status harness").selectOption("omp");
   await expect(
     page.getByRole("button", { name: "Refresh AI status", exact: true }),
   ).toBeEnabled();
@@ -120,7 +120,7 @@ test("AI status separates provider quota, local budget and context with scoped h
   const snapshot = await (
     await page.request.post("./api/quota", {
       headers: { "X-Meshra-CSRF": session.csrf },
-      data: { harness: "codex" },
+      data: { harness: "omp" },
     })
   ).json();
   snapshot.state = "unavailable";

@@ -40,6 +40,7 @@ import { Operations } from "./Operations";
 import { ConversationList, type ConversationFilter } from "./ConversationList";
 import { HarnessLogo, harnessName } from "./HarnessLogo";
 import { automation } from "./automation-api";
+import { DirectApiFields, type DirectApiValue } from "./DirectApiFields";
 import { AutomationEvents } from "./AutomationEvents";
 export const navigation = [
   ["chat", "Chat", MessageSquare],
@@ -888,7 +889,8 @@ function NewConversation({
   });
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
-  const [harness, setHarness] = useState("codex");
+  const [harness, setHarness] = useState("claude");
+  const [direct, setDirect] = useState<DirectApiValue>({ provider: "", model: "" });
   const [workspace, setWorkspace] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   useEffect(() => {
@@ -905,7 +907,7 @@ function NewConversation({
   const models = useQuery({
     queryKey: ["models", harness],
     queryFn: () => api<{ items: ModelOption[] }>("models", { harness }),
-    enabled: open && mode === "chat",
+    enabled: open && mode === "chat" && harness !== "openai",
     retry: false,
     gcTime: 0,
     staleTime: 60000,
@@ -934,7 +936,7 @@ function NewConversation({
           ? await api<Conversation>("chat-create", {
               harness,
               workspaceId: workspace,
-              config: selectedModel ? JSON.parse(selectedModel) : {},
+              config: harness === "openai" ? direct : selectedModel ? JSON.parse(selectedModel) : {},
               title: title.trim() || "New chat",
             })
           : await collab<Conversation>("conversation.create", {
@@ -1038,12 +1040,10 @@ function NewConversation({
                       <strong>{harnessName(id)}</strong>
                       <small>
                         {id === "claude"
-                          ? "Anthropic"
-                          : id === "codex"
-                            ? "OpenAI"
-                            : id === "opencode"
-                              ? "Open-source assistant"
-                              : "Oh My Pi"}
+                          ? "Claude Code"
+                          : id === "openai"
+                            ? "Any OpenAI-compatible API"
+                            : "Oh My Pi"}
                       </small>
                     </span>
                     <Check className="harness-check" size={17} />
@@ -1067,6 +1067,10 @@ function NewConversation({
               ))}
             </select>
             {workspaces.isError && <Notice>{workspaces.error.message}</Notice>}
+            {harness === "openai" ? (
+              <DirectApiFields value={direct} onChange={setDirect} enabled={open} />
+            ) : (
+              <>
             <label htmlFor="chat-model">Model</label>
             <select
               id="chat-model"
@@ -1100,9 +1104,12 @@ function NewConversation({
                 </button>
               </p>
             )}
+              </>
+            )}
             <p className="picker-hint">
-              Uses your local harness and its authentication. No agent setup
-              needed.
+              {harness === "openai"
+                ? "Calls the endpoint directly with the credential saved in Connections. No harness is started."
+                : "Uses your local harness and its authentication. No agent setup needed."}
             </p>
           </>
         ) : (

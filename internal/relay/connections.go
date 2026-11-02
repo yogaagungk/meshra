@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -45,33 +43,9 @@ type ProviderEndpointView struct {
 	SecretStatus string `json:"secretStatus"`
 }
 
-// ACPAgentConfig describes one installed ACP command line agent.
-type ACPAgentConfig struct {
-	ID                string   `json:"id"`
-	Revision          int      `json:"revision"`
-	Name              string   `json:"name"`
-	Preset            string   `json:"preset"`
-	Executable        string   `json:"executable"`
-	Args              []string `json:"args"`
-	RuntimePaths      []string `json:"runtimePaths"`
-	SecretEnvRefs     []string `json:"secretEnvRefs"`
-	ReadOnlyAuthFiles []string `json:"readOnlyAuthFiles"`
-	AllowedOrigins    []string `json:"allowedOrigins"`
-	Enabled           bool     `json:"enabled"`
-	CreatedAt         string   `json:"createdAt"`
-	UpdatedAt         string   `json:"updatedAt"`
-}
-
-// ACPAgentView is the operator summary of one ACP configuration.
-type ACPAgentView struct {
-	ACPAgentConfig
-	SecretStatus string `json:"secretStatus"`
-}
-
 // ConnectionList is the read summary of every configured connection.
 type ConnectionList struct {
 	Endpoints []ProviderEndpointView `json:"endpoints"`
-	ACP       []ACPAgentView         `json:"acp"`
 }
 
 // LocalModelScan reports exactly what one local probe observed. It is not
@@ -103,21 +77,6 @@ type endpointRequest struct {
 	ContextWindowTokens *int   `json:"contextWindowTokens,omitempty"`
 }
 
-// acpRequest is the submitted ACP configuration definition.
-type acpRequest struct {
-	ID                string   `json:"id,omitempty"`
-	Revision          int      `json:"revision,omitempty"`
-	Name              string   `json:"name"`
-	Preset            string   `json:"preset"`
-	Executable        string   `json:"executable"`
-	Args              []string `json:"args,omitempty"`
-	RuntimePaths      []string `json:"runtimePaths,omitempty"`
-	SecretEnvRefs     []string `json:"secretEnvRefs,omitempty"`
-	ReadOnlyAuthFiles []string `json:"readOnlyAuthFiles,omitempty"`
-	AllowedOrigins    []string `json:"allowedOrigins,omitempty"`
-	Enabled           *bool    `json:"enabled,omitempty"`
-}
-
 // connectionsOperation serves the operator only connection operations.
 func (r *Relay) connectionsOperation(ctx context.Context, principal model.Principal, operation string, raw json.RawMessage) (any, error) {
 	if err := ctx.Err(); err != nil {
@@ -134,10 +93,6 @@ func (r *Relay) connectionsOperation(ctx context.Context, principal model.Princi
 		return r.listConnections(ctx, raw)
 	case "connections.get":
 		return r.getConnection(ctx, raw)
-	case "connections.checkAcp", "connections.acpStatus":
-		return r.acpReadinessOperation(ctx, principal, operation, raw)
-	case "connections.authenticateAcp":
-		return r.authenticateACP(ctx, principal, raw)
 	case "connections.models":
 		return r.listEndpointModels(ctx, raw)
 	case "connections.saveEndpoint":
@@ -146,14 +101,12 @@ func (r *Relay) connectionsOperation(ctx context.Context, principal model.Princi
 		return r.disableEndpoint(ctx, raw)
 	case "connections.remove":
 		return r.removeEndpoint(ctx, raw)
-	case "connections.saveAcp":
-		return r.saveACPAgent(ctx, raw)
-	case "connections.disableAcp":
-		return r.disableACPAgent(ctx, raw)
-	case "connections.removeAcp":
-		return r.removeACPAgent(ctx, raw)
 	case "connections.scanLocal":
-		return r.scanLocalOperation(ctx)
+		results, err := r.scanLocalConnections(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"results": results}, nil
 	}
 	return nil, model.Err(404, "unknown connection operation")
 }
@@ -301,193 +254,6 @@ func validateEndpointDefinition(endpoint *ProviderEndpoint) error {
 	return nil
 }
 
-func validateACPExecutable(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || len(raw) > 4096 || !safeRegistryText(raw) {
-		return "", model.Err(400, "ACP executable must be an absolute path")
-	}
-	if !filepath.IsAbs(raw) {
-		return "", model.Err(400, "ACP executable must be an absolute path")
-	}
-	resolved, err := filepath.EvalSymlinks(raw)
-	if err != nil {
-		return "", model.Err(400, "ACP executable does not exist")
-	}
-	info, err := os.Stat(resolved)
-	if err != nil || !info.Mode().IsRegular() {
-		return "", model.Err(400, "ACP executable must be an existing regular file")
-	}
-	return resolved, nil
-}
-
-// validateACPArgs rejects shell text. Arguments are passed to the process as a
-// vector, so a combined command line is always a configuration error.
-func validateACPArgs(args []string, preset string) ([]string, error) {
-	if args == nil {
-		switch preset {
-		case "gemini", "cline":
-			args = []string{"--acp"}
-		case "cursor":
-			args = []string{"acp"}
-		}
-	}
-	if len(args) > 32 {
-		return nil, model.Err(400, "ACP argument list is too long")
-	}
-	out := make([]string, 0, len(args))
-	for _, arg := range args {
-		if arg == "" || len(arg) > 1024 || !safeRegistryText(arg) {
-			return nil, model.Err(400, "ACP arguments must be nonempty safe strings")
-		}
-		if strings.ContainsAny(arg, ";|&$`<>(){}\\'\"\\") {
-			return nil, model.Err(400, "ACP arguments must not contain shell syntax")
-		}
-		if redact(arg) != arg {
-			return nil, model.Err(400, "ACP arguments must not contain credentials")
-		}
-		if maskSecretValues(arg) != arg {
-			return nil, model.Err(400, "ACP arguments must not contain secret values")
-		}
-		out = append(out, arg)
-	}
-	return out, nil
-}
-
-func validateACPRuntimePaths(paths []string) ([]string, error) {
-	if len(paths) > 32 {
-		return nil, model.Err(400, "too many ACP runtime paths")
-	}
-	out := make([]string, 0, len(paths))
-	for _, path := range paths {
-		if path == "" || len(path) > 4096 || !safeRegistryText(path) {
-			return nil, model.Err(400, "invalid ACP runtime path")
-		}
-		if !filepath.IsAbs(path) {
-			return nil, model.Err(400, "ACP runtime paths must be absolute")
-		}
-		info, err := os.Stat(path)
-		if err != nil || !info.IsDir() {
-			return nil, model.Err(400, "ACP runtime path must be an existing directory")
-		}
-		out = append(out, filepath.Clean(path))
-	}
-	return out, nil
-}
-
-func validateACPAuthFiles(files []string) ([]string, error) {
-	if len(files) > 32 {
-		return nil, model.Err(400, "too many ACP authentication files")
-	}
-	out := make([]string, 0, len(files))
-	for _, file := range files {
-		if file == "" || len(file) > 4096 || !safeRegistryText(file) {
-			return nil, model.Err(400, "invalid ACP authentication file")
-		}
-		if !filepath.IsAbs(file) {
-			return nil, model.Err(400, "ACP authentication files must be absolute")
-		}
-		resolved, err := filepath.EvalSymlinks(file)
-		if err != nil {
-			return nil, model.Err(400, "ACP authentication file does not exist")
-		}
-		info, err := os.Stat(resolved)
-		if err != nil || !info.Mode().IsRegular() {
-			return nil, model.Err(400, "ACP authentication file must be an existing regular file")
-		}
-		out = append(out, resolved)
-	}
-	return out, nil
-}
-
-// validateACPSecretEnvRefs accepts ENV_NAME=secret_id entries. The value never
-// appears in the configuration; only the opaque reference does.
-func validateACPSecretEnvRefs(refs []string) ([]string, error) {
-	if len(refs) > 32 {
-		return nil, model.Err(400, "too many ACP secret references")
-	}
-	out := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		name, id, ok := strings.Cut(ref, "=")
-		if !ok || name == "" || id == "" || len(ref) > 512 || !safeRegistryText(ref) {
-			return nil, model.Err(400, "ACP secret references must use ENV_NAME=secret_id")
-		}
-		for _, ch := range name {
-			if !(ch == '_' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9') {
-				return nil, model.Err(400, "invalid ACP environment variable name")
-			}
-		}
-		if !profileIdentifier(id) {
-			return nil, model.Err(400, "invalid ACP secret reference")
-		}
-		out = append(out, name+"="+id)
-	}
-	return out, nil
-}
-
-func validateACPOrigins(origins []string) ([]string, error) {
-	if len(origins) > 32 {
-		return nil, model.Err(400, "too many ACP origins")
-	}
-	out := make([]string, 0, len(origins))
-	for _, raw := range origins {
-		if raw == "" || len(raw) > 2048 || !safeRegistryText(raw) {
-			return nil, model.Err(400, "invalid ACP origin")
-		}
-		origin, err := netpolicy.ParseOrigin(raw)
-		if err != nil {
-			return nil, model.Err(400, "ACP origins must be exact scheme, host and port without path, query or credentials")
-		}
-		out = append(out, origin.String())
-	}
-	return out, nil
-}
-
-func validateACPDefinition(config *ACPAgentConfig) error {
-	name := strings.TrimSpace(config.Name)
-	if name == "" || len(name) > 128 || !safeRegistryText(name) || redact(name) != name {
-		return model.Err(400, "ACP configuration name must be 1..128 bytes without credentials or control characters")
-	}
-	config.Name = name
-	preset := strings.ToLower(strings.TrimSpace(config.Preset))
-	switch preset {
-	case "gemini", "cursor", "cline", "custom":
-	default:
-		return model.Err(400, "ACP preset must be gemini, cursor, cline or custom")
-	}
-	config.Preset = preset
-	executable, err := validateACPExecutable(config.Executable)
-	if err != nil {
-		return err
-	}
-	config.Executable = executable
-	args, err := validateACPArgs(config.Args, preset)
-	if err != nil {
-		return err
-	}
-	config.Args = args
-	paths, err := validateACPRuntimePaths(config.RuntimePaths)
-	if err != nil {
-		return err
-	}
-	config.RuntimePaths = paths
-	files, err := validateACPAuthFiles(config.ReadOnlyAuthFiles)
-	if err != nil {
-		return err
-	}
-	config.ReadOnlyAuthFiles = files
-	refs, err := validateACPSecretEnvRefs(config.SecretEnvRefs)
-	if err != nil {
-		return err
-	}
-	config.SecretEnvRefs = refs
-	origins, err := validateACPOrigins(config.AllowedOrigins)
-	if err != nil {
-		return err
-	}
-	config.AllowedOrigins = origins
-	return nil
-}
-
 func (r *Relay) readEndpointLocked(ctx context.Context, id string) (ProviderEndpoint, bool, error) {
 	var body string
 	err := r.db.QueryRowContext(ctx, "SELECT body FROM provider_endpoints WHERE id=?", id).Scan(&body)
@@ -502,22 +268,6 @@ func (r *Relay) readEndpointLocked(ctx context.Context, id string) (ProviderEndp
 		return ProviderEndpoint{}, false, err
 	}
 	return endpoint, true, nil
-}
-
-func (r *Relay) readACPLocked(ctx context.Context, id string) (ACPAgentConfig, bool, error) {
-	var body string
-	err := r.db.QueryRowContext(ctx, "SELECT body FROM acp_agents WHERE id=?", id).Scan(&body)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ACPAgentConfig{}, false, nil
-	}
-	if err != nil {
-		return ACPAgentConfig{}, false, err
-	}
-	var config ACPAgentConfig
-	if err = json.Unmarshal([]byte(body), &config); err != nil {
-		return ACPAgentConfig{}, false, err
-	}
-	return config, true, nil
 }
 
 // connectionInUseLocked reports whether a connection is referenced by an agent
@@ -548,28 +298,6 @@ func (r *Relay) endpointView(ctx context.Context, endpoint ProviderEndpoint) (Pr
 	return ProviderEndpointView{ProviderEndpoint: endpoint, SecretStatus: status}, nil
 }
 
-func (r *Relay) acpView(ctx context.Context, config ACPAgentConfig) (ACPAgentView, error) {
-	status := "missing"
-	for _, ref := range config.SecretEnvRefs {
-		_, id, ok := strings.Cut(ref, "=")
-		if !ok {
-			continue
-		}
-		state, err := r.secretStatus(ctx, id)
-		if err != nil {
-			return ACPAgentView{}, err
-		}
-		if state == "unreadable" {
-			status = "unreadable"
-			break
-		}
-		if state == "saved" && status == "missing" {
-			status = "saved"
-		}
-	}
-	return ACPAgentView{ACPAgentConfig: config, SecretStatus: status}, nil
-}
-
 func (r *Relay) listConnections(ctx context.Context, raw json.RawMessage) (any, error) {
 	var filter struct{}
 	if err := decodeAutomation(raw, &filter); err != nil {
@@ -582,7 +310,7 @@ func (r *Relay) listConnections(ctx context.Context, raw json.RawMessage) (any, 
 	}
 	// Rows are drained before any further query: the relay owns a single
 	// database connection and a nested read would wait for itself.
-	list := ConnectionList{Endpoints: []ProviderEndpointView{}, ACP: []ACPAgentView{}}
+	list := ConnectionList{Endpoints: []ProviderEndpointView{}}
 	endpoints := []ProviderEndpoint{}
 	rows, err := r.db.QueryContext(ctx, "SELECT body FROM provider_endpoints ORDER BY id")
 	if err != nil {
@@ -606,42 +334,12 @@ func (r *Relay) listConnections(ctx context.Context, raw json.RawMessage) (any, 
 		return nil, err
 	}
 	rows.Close()
-	configs := []ACPAgentConfig{}
-	acpRows, err := r.db.QueryContext(ctx, "SELECT body FROM acp_agents ORDER BY id")
-	if err != nil {
-		return nil, err
-	}
-	for acpRows.Next() {
-		var body string
-		if err = acpRows.Scan(&body); err != nil {
-			acpRows.Close()
-			return nil, err
-		}
-		var config ACPAgentConfig
-		if err = json.Unmarshal([]byte(body), &config); err != nil {
-			acpRows.Close()
-			return nil, err
-		}
-		configs = append(configs, config)
-	}
-	if err = acpRows.Err(); err != nil {
-		acpRows.Close()
-		return nil, err
-	}
-	acpRows.Close()
 	for _, endpoint := range endpoints {
 		view, err := r.endpointView(ctx, endpoint)
 		if err != nil {
 			return nil, err
 		}
 		list.Endpoints = append(list.Endpoints, view)
-	}
-	for _, config := range configs {
-		view, err := r.acpView(ctx, config)
-		if err != nil {
-			return nil, err
-		}
-		list.ACP = append(list.ACP, view)
 	}
 	return list, nil
 }
@@ -667,13 +365,6 @@ func (r *Relay) getConnection(ctx context.Context, raw json.RawMessage) (any, er
 	}
 	if found {
 		return r.endpointView(ctx, endpoint)
-	}
-	config, found, err := r.readACPLocked(ctx, q.ID)
-	if err != nil {
-		return nil, err
-	}
-	if found {
-		return r.acpView(ctx, config)
 	}
 	return nil, model.Err(404, "connection not found")
 }
@@ -924,15 +615,6 @@ func (r *Relay) removeEndpoint(ctx context.Context, raw json.RawMessage) (any, e
 	if inUse {
 		return nil, model.Err(409, "connection is referenced by an agent or profile binding")
 	}
-	// The shared-secret lookup runs before the transaction: the relay owns a
-	// single database connection and a nested read would wait for itself.
-	shared := false
-	if endpoint.SecretRef != "" {
-		shared, err = r.acpSecretSharedLocked(ctx, endpoint.SecretRef)
-		if err != nil {
-			return nil, err
-		}
-	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -941,7 +623,7 @@ func (r *Relay) removeEndpoint(ctx context.Context, raw json.RawMessage) (any, e
 	if _, err = tx.ExecContext(ctx, "DELETE FROM provider_endpoints WHERE id=? AND revision=?", endpoint.ID, q.ExpectedRevision); err != nil {
 		return nil, err
 	}
-	if endpoint.SecretRef != "" && !shared {
+	if endpoint.SecretRef != "" {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM automation_secrets WHERE id=?", endpoint.SecretRef); err != nil {
 			return nil, err
 		}
@@ -954,267 +636,6 @@ func (r *Relay) removeEndpoint(ctx context.Context, raw json.RawMessage) (any, e
 	}
 	r.cancelConnectionProbesLocked(endpoint.ID)
 	return map[string]any{"id": endpoint.ID, "removed": true}, nil
-}
-
-// acpSecretSharedLocked reports whether an ACP configuration references the
-// same secret record.
-func (r *Relay) acpSecretSharedLocked(ctx context.Context, id string) (bool, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT body FROM acp_agents")
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var body string
-		if err = rows.Scan(&body); err != nil {
-			return false, err
-		}
-		var config ACPAgentConfig
-		if err = json.Unmarshal([]byte(body), &config); err != nil {
-			return false, err
-		}
-		for _, ref := range config.SecretEnvRefs {
-			if _, secretID, ok := strings.Cut(ref, "="); ok && secretID == id {
-				return true, nil
-			}
-		}
-	}
-	return false, rows.Err()
-}
-
-func (r *Relay) saveACPAgent(ctx context.Context, raw json.RawMessage) (any, error) {
-	var q struct {
-		ExpectedRevision *int        `json:"expectedRevision,omitempty"`
-		ID               string      `json:"id,omitempty"`
-		ACP              *acpRequest `json:"acp"`
-	}
-	if err := decodeAutomation(raw, &q); err != nil {
-		return nil, err
-	}
-	if q.ACP == nil {
-		return nil, model.Err(400, "acp configuration is required")
-	}
-	request := *q.ACP
-	if request.ID == "" {
-		request.ID = q.ID
-	}
-	incoming := ACPAgentConfig{}
-	if request.ID != "" {
-		if !profileIdentifier(request.ID) {
-			return nil, model.Err(400, "invalid ACP configuration identifier")
-		}
-		incoming.ID = request.ID
-	}
-	incoming.Name = request.Name
-	incoming.Preset = request.Preset
-	incoming.Executable = request.Executable
-	incoming.Args = request.Args
-	incoming.RuntimePaths = request.RuntimePaths
-	incoming.SecretEnvRefs = request.SecretEnvRefs
-	incoming.ReadOnlyAuthFiles = request.ReadOnlyAuthFiles
-	incoming.AllowedOrigins = request.AllowedOrigins
-	if request.Enabled != nil {
-		incoming.Enabled = *request.Enabled
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return nil, model.Err(503, "relay is stopping")
-	}
-	previous, found, err := r.readACPLocked(ctx, incoming.ID)
-	if err != nil {
-		return nil, err
-	}
-	if found {
-		if q.ExpectedRevision == nil || *q.ExpectedRevision != previous.Revision {
-			return nil, model.Err(409, "ACP configuration revision changed")
-		}
-		if request.Revision != 0 && request.Revision != previous.Revision {
-			return nil, model.Err(409, "ACP configuration revision changed")
-		}
-		incoming.ID = previous.ID
-		incoming.Revision = previous.Revision + 1
-		incoming.CreatedAt = previous.CreatedAt
-		if request.Name == "" {
-			incoming.Name = previous.Name
-		}
-		if request.Preset == "" {
-			incoming.Preset = previous.Preset
-		}
-		if request.Executable == "" {
-			incoming.Executable = previous.Executable
-		}
-		if request.Args == nil {
-			incoming.Args = previous.Args
-		}
-		if request.RuntimePaths == nil {
-			incoming.RuntimePaths = previous.RuntimePaths
-		}
-		if request.SecretEnvRefs == nil {
-			incoming.SecretEnvRefs = previous.SecretEnvRefs
-		}
-		if request.ReadOnlyAuthFiles == nil {
-			incoming.ReadOnlyAuthFiles = previous.ReadOnlyAuthFiles
-		}
-		if request.AllowedOrigins == nil {
-			incoming.AllowedOrigins = previous.AllowedOrigins
-		}
-		if request.Enabled == nil {
-			incoming.Enabled = previous.Enabled
-		}
-	} else {
-		if q.ExpectedRevision != nil {
-			return nil, model.Err(409, "ACP configuration revision changed")
-		}
-		if incoming.ID == "" {
-			incoming.ID = randomID()
-		}
-		incoming.Revision = 1
-	}
-	if err := validateACPDefinition(&incoming); err != nil {
-		return nil, err
-	}
-	for _, ref := range incoming.SecretEnvRefs {
-		_, id, _ := strings.Cut(ref, "=")
-		exists, err := r.secretExistsLocked(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if !exists {
-			return nil, model.Err(400, "secret reference does not exist")
-		}
-	}
-	incoming.UpdatedAt = now().Format(time.RFC3339Nano)
-	if incoming.CreatedAt == "" {
-		incoming.CreatedAt = incoming.UpdatedAt
-	}
-	body, err := json.Marshal(incoming)
-	if err != nil {
-		return nil, err
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if found {
-		_, err = tx.ExecContext(ctx, "UPDATE acp_agents SET revision=?,body=? WHERE id=? AND revision=?", incoming.Revision, string(body), incoming.ID, previous.Revision)
-	} else {
-		_, err = tx.ExecContext(ctx, "INSERT INTO acp_agents(id,revision,body) VALUES(?,?,?)", incoming.ID, incoming.Revision, string(body))
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err = insertAutomationEvent(tx, "connection.acp.saved", incoming.ID, "", map[string]any{"revision": incoming.Revision, "name": incoming.Name, "preset": incoming.Preset, "enabled": incoming.Enabled}); err != nil {
-		return nil, err
-	}
-	if err = tx.Commit(); err != nil {
-		return nil, err
-	}
-	r.cancelConnectionProbesLocked(incoming.ID)
-	return r.acpView(ctx, incoming)
-}
-
-func (r *Relay) disableACPAgent(ctx context.Context, raw json.RawMessage) (any, error) {
-	var q struct {
-		ID               string `json:"id"`
-		ExpectedRevision int    `json:"expectedRevision"`
-	}
-	if err := decodeAutomation(raw, &q); err != nil {
-		return nil, err
-	}
-	if !profileIdentifier(q.ID) || q.ExpectedRevision < 1 {
-		return nil, model.Err(400, "ACP configuration id and expectedRevision are required")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return nil, model.Err(503, "relay is stopping")
-	}
-	config, found, err := r.readACPLocked(ctx, q.ID)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, model.Err(404, "ACP configuration not found")
-	}
-	if config.Revision != q.ExpectedRevision {
-		return nil, model.Err(409, "ACP configuration revision changed")
-	}
-	config.Revision++
-	config.Enabled = false
-	config.UpdatedAt = now().Format(time.RFC3339Nano)
-	body, err := json.Marshal(config)
-	if err != nil {
-		return nil, err
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, "UPDATE acp_agents SET revision=?,body=? WHERE id=? AND revision=?", config.Revision, string(body), config.ID, q.ExpectedRevision); err != nil {
-		return nil, err
-	}
-	if err = insertAutomationEvent(tx, "connection.acp.disabled", config.ID, "", map[string]any{"revision": config.Revision}); err != nil {
-		return nil, err
-	}
-	if err = tx.Commit(); err != nil {
-		return nil, err
-	}
-	r.cancelConnectionProbesLocked(config.ID)
-	return r.acpView(ctx, config)
-}
-
-func (r *Relay) removeACPAgent(ctx context.Context, raw json.RawMessage) (any, error) {
-	var q struct {
-		ID               string `json:"id"`
-		ExpectedRevision int    `json:"expectedRevision"`
-	}
-	if err := decodeAutomation(raw, &q); err != nil {
-		return nil, err
-	}
-	if !profileIdentifier(q.ID) || q.ExpectedRevision < 1 {
-		return nil, model.Err(400, "ACP configuration id and expectedRevision are required")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return nil, model.Err(503, "relay is stopping")
-	}
-	config, found, err := r.readACPLocked(ctx, q.ID)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, model.Err(404, "ACP configuration not found")
-	}
-	if config.Revision != q.ExpectedRevision {
-		return nil, model.Err(409, "ACP configuration revision changed")
-	}
-	inUse, err := r.connectionInUseLocked(ctx, config.ID)
-	if err != nil {
-		return nil, err
-	}
-	if inUse {
-		return nil, model.Err(409, "connection is referenced by an agent or profile binding")
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, "DELETE FROM acp_agents WHERE id=? AND revision=?", config.ID, q.ExpectedRevision); err != nil {
-		return nil, err
-	}
-	if err = insertAutomationEvent(tx, "connection.acp.removed", config.ID, "", map[string]any{"revision": config.Revision}); err != nil {
-		return nil, err
-	}
-	if err = tx.Commit(); err != nil {
-		return nil, err
-	}
-	r.cancelConnectionProbesLocked(config.ID)
-	return map[string]any{"id": config.ID, "removed": true}, nil
 }
 
 // listEndpointModels lists the models an endpoint advertises. The listing is
@@ -1342,19 +763,6 @@ func parseModelOptions(body []byte) ([]model.ModelOption, error) {
 	return options, nil
 }
 
-// scanLocalOperation probes fixed model endpoints and inspects installed ACP paths.
-func (r *Relay) scanLocalOperation(ctx context.Context) (any, error) {
-	results, err := r.scanLocalConnections(ctx)
-	if err != nil {
-		return nil, err
-	}
-	presets, err := scanInstalledACPPresets(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"results": results, "acpPresets": presets}, nil
-}
-
 // scanLocalConnections probes exactly the two reviewed loopback model
 // endpoints. It sends no credentials, follows no redirect and reads at most
 // two mebibytes per response. Discovery is not authentication.
@@ -1474,39 +882,4 @@ func (r *Relay) EndpointCredential(ctx context.Context, id string) (string, erro
 		return "", model.Err(404, "endpoint has no stored credential")
 	}
 	return r.readSecret(ctx, endpoint.SecretRef)
-}
-
-// ACPAgent reads one stored ACP configuration for process-internal use.
-func (r *Relay) ACPAgent(ctx context.Context, id string) (ACPAgentConfig, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return ACPAgentConfig{}, model.Err(503, "relay is stopping")
-	}
-	config, found, err := r.readACPLocked(ctx, id)
-	if err != nil {
-		return ACPAgentConfig{}, err
-	}
-	if !found {
-		return ACPAgentConfig{}, model.Err(404, "ACP configuration not found")
-	}
-	return config, nil
-}
-
-// ACPSecretEnvironment resolves the referenced secret records into an
-// environment for a confined ACP launch. The values are process-internal.
-func (r *Relay) ACPSecretEnvironment(ctx context.Context, config ACPAgentConfig) (map[string]string, error) {
-	environment := map[string]string{}
-	for _, ref := range config.SecretEnvRefs {
-		name, id, ok := strings.Cut(ref, "=")
-		if !ok {
-			continue
-		}
-		value, err := r.readSecret(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		environment[name] = value
-	}
-	return environment, nil
 }

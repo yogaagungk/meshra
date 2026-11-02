@@ -338,7 +338,7 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 					}
 				}
 			}
-		case "delta", "approval_required", "progress":
+		case "delta", "approval_required", "progress", "tool_use", "tool_result":
 			if emit != nil {
 				emit(frame.Type, redact(redact(frame.Data, turn.Token), toolToken))
 			}

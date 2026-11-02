@@ -36,7 +36,7 @@ func TestProfileContextRotationWaitsForTeardownBeforeNextClaim(t *testing.T) {
 	defer releaseOnce.Do(func() { close(release) })
 	var factories atomic.Int32
 	r.mu.Lock()
-	adapter := r.adapters["codex"]
+	adapter := r.adapters["omp"]
 	adapter.Capabilities["durableHistory"] = true
 	adapter.Factory = func(_ context.Context, a model.Agent, _ model.Emit) (model.Runtime, error) {
 		generation := factories.Add(1)
@@ -54,7 +54,7 @@ func TestProfileContextRotationWaitsForTeardownBeforeNextClaim(t *testing.T) {
 			return nil
 		}}, nil
 	}
-	r.adapters["codex"] = adapter
+	r.adapters["omp"] = adapter
 	r.mu.Unlock()
 	p := profileStoreCreate(t, r, profileStoreRequest(profileStoreWorkspace(t, r)))
 	c := continuityConversation(t, r, "chat", p)

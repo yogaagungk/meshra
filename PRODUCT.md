@@ -8,7 +8,7 @@ web
 
 ## Users
 
-Primary: a solo developer on their own machine (Ubuntu/WSL2 or Linux) who runs several independent AI coding harnesses (Claude, Codex, OMP, OpenCode, plus ACP agents such as Gemini, Cursor and Cline) against local projects. Their job: chat with those agents, delegate and hand off work between them, share context deliberately, and review what actually executed.
+Primary: a solo developer on their own machine (Ubuntu/WSL2 or Linux) who runs several independent AI agents (Claude Code, OMP, or any OpenAI-compatible API called directly) against local projects. Their job: chat with those agents, delegate and hand off work between them, share context deliberately, and review what actually executed.
 
 ## Product Purpose
 

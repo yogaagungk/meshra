@@ -945,14 +945,11 @@ kbd {
 .harness-claude {
   color: #e7b69c;
 }
-.harness-codex {
+.harness-openai {
   color: var(--accent);
 }
 .harness-omp {
   color: #aebdf5;
-}
-.harness-opencode {
-  color: var(--text);
 }
 [data-theme="light"] .harness-claude {
   color: #91522d;

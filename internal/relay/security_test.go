@@ -295,7 +295,7 @@ func TestSplitStreamCredentialsNeverReachEvents(t *testing.T) {
 		return "safe final reply", nil
 	})
 	origin := createTest(t, r, "omp", "origin")
-	dest := createTest(t, r, "codex", "dest")
+	dest := createTest(t, r, "omp", "dest")
 	startTest(t, r, dest.ID)
 	task := sendTest(t, r, origin.ID, dest.ID, "never persist streamed credentials")
 	if got := awaitTask(t, r, task.ID); got.State != "completed" {

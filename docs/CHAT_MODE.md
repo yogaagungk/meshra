@@ -23,7 +23,7 @@ links and external images in model output are not rendered in the preview.
 
 Each chat turn runs in a fresh native session. Meshra closes the temporary runtime
 before releasing the turn slot, and preserves the registered agent's independent
-native session. Codex/OMP chat runtimes use separate disposable state directories
+native session. OMP chat runtimes use separate disposable state directories
 to avoid the durable identity lock; those directories are deleted on close.
 Conversation context comes from SQLite, scoped to the exact chat
 and AI. Chat turns cannot delegate to other agents. Native harness workspace and
@@ -96,8 +96,10 @@ adapters and do not claim live-provider or OS-level memory-soak validation.
 
 ## Harness picker and console refinements
 
-The default chat picker now selects **Codex**, **Claude**, **OpenCode**, or **OMP**,
-rather than a registered agent. Meshra reuses at most one managed identity per
+The default chat picker now selects **Claude**, **OMP** or **Direct API**,
+rather than a registered agent. Direct API calls an OpenAI-compatible endpoint
+saved under Settings → Connections (pick the endpoint and a model); no harness
+is started. Meshra reuses at most one managed identity per
 harness, with a private workspace under the relay data directory. These managed
 identities are omitted from the Agents page and collaboration picker. Existing
 named agents and older conversations remain supported. Selecting a harness does
@@ -112,7 +114,7 @@ The new-agent workspace field opens an in-app folder explorer for the daemon's
 filesystem. It does not upload folders or use a browser file-upload control.
 Directories are paginated at 100 entries; the scanner retains at most 101 names.
 
-The Manrope variable font and harness vectors are local assets. Codex/Claude/
-OpenCode vectors are distributed under the MIT license in
+The Manrope variable font and harness vectors are local assets. Claude
+vectors are distributed under the MIT license in
 `web/src/assets/harnesses/LICENSE`; OMP uses a local monogram. Short CSS transitions
 and thinking animations respect the operating system's reduced-motion setting.

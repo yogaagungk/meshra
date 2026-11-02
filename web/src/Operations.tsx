@@ -56,6 +56,7 @@ import { SettingsPanels } from "./Personal";
 import { Automation } from "./Automation";
 import { Profiles } from "./Profiles";
 import { AgentMesh } from "./AgentMesh";
+import { DirectApiFields, type DirectApiValue } from "./DirectApiFields";
 import { Workspaces } from "./Workspaces";
 export function Operations({
   view,
@@ -459,7 +460,8 @@ function RegisterAgent({
   onOpenChange: (v: boolean) => void;
 }) {
   const client = useQueryClient();
-  const [harness, setHarness] = useState("codex");
+  const [harness, setHarness] = useState("claude");
+  const [direct, setDirect] = useState<DirectApiValue>({ provider: "", model: "" });
   const [name, setName] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
   const [avatar, setAvatar] = useState(defaultAvatar);
@@ -481,7 +483,7 @@ function RegisterAgent({
         workspaceId,
         avatarIcon: avatar.icon,
         avatarColor: avatar.color,
-        config: {},
+        config: harness === "openai" ? direct : {},
         policy: { destinations: [], operations: [], delegate: false },
       });
       client.invalidateQueries({ queryKey: ["agents"] });
@@ -508,10 +510,13 @@ function RegisterAgent({
           value={harness}
           onChange={(e) => setHarness(e.target.value)}
         >
-          {["codex", "omp", "claude", "opencode"].map((h) => (
-            <option key={h}>{h}</option>
+          {["claude", "omp", "openai"].map((h) => (
+            <option key={h} value={h}>
+              {harnessName(h)}
+            </option>
           ))}
         </select>
+        {harness === "openai" && <DirectApiFields value={direct} onChange={setDirect} enabled={open} />}
         <label htmlFor="agent-name">Instance name</label>
         <input
           id="agent-name"

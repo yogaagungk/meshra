@@ -15,10 +15,8 @@
   --weight-heading: 700;
 
   --dept-claude: #ff9a6b;
-  --dept-codex: #8db0ff;
+  --dept-openai: #8db0ff;
   --dept-omp: #bba0ff;
-  --dept-opencode: #6fdca3;
-  --dept-acp: #ff9bbb;
 
   --bg: #0f1a20;
   --nav: #0c151a;
@@ -54,10 +52,8 @@
 }
 :root[data-theme="light"] {
   --dept-claude: #c2410c;
-  --dept-codex: #1d4ed8;
+  --dept-openai: #1d4ed8;
   --dept-omp: #6d3fc7;
-  --dept-opencode: #0f7a4d;
-  --dept-acp: #b01e4f;
 
   --bg: #eef1f4;
   --nav: #f6f8fa;
@@ -98,14 +94,11 @@
 
 /* Department color travels with the harness. */
 [data-harness="claude"] { --dept: var(--dept-claude); }
-[data-harness="codex"] { --dept: var(--dept-codex); }
+[data-harness="openai"] { --dept: var(--dept-openai); }
 [data-harness="omp"] { --dept: var(--dept-omp); }
-[data-harness="opencode"] { --dept: var(--dept-opencode); }
-[data-harness="acp"] { --dept: var(--dept-acp); }
 .harness-claude { --dept: var(--dept-claude); }
-.harness-codex { --dept: var(--dept-codex); }
+.harness-openai { --dept: var(--dept-openai); }
 .harness-omp { --dept: var(--dept-omp); }
-.harness-opencode { --dept: var(--dept-opencode); }
 
 /* ---------- Shell ---------- */
 .brand {
@@ -494,3 +487,47 @@ textarea:focus-visible, select:focus-visible, summary:focus-visible {
 .workspace-view-tabs button, .mobile-nav > a, .mobile-nav > button,
 .chat-layout .chat-header h1, .chat-layout .chat-header h2 { font-weight: 600; }
 .workspace-path, .page-heading p { font-weight: 400; }
+
+/* ---------- Tool calls: animated summary and expandable detail ---------- */
+.tool-calls { margin: 2px 0 10px; font-size: 13px; color: var(--muted); }
+.tool-calls-summary {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 4px 10px 4px 6px; border: 1px solid var(--edge); border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); font: inherit; cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.tool-calls-summary:hover { color: var(--text); border-color: var(--dept, var(--accent)); }
+.tool-calls-chevron { transition: transform .18s ease; flex-shrink: 0; }
+.tool-calls[data-open="true"] .tool-calls-chevron { transform: rotate(90deg); }
+.tool-calls-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-calls-label code, .tool-call summary code { font-family: var(--mono); font-size: 12px; color: var(--text); }
+.tool-calls-brief { color: var(--muted); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.tool-calls.is-running .tool-calls-summary {
+  border-color: var(--dept, var(--accent)); color: var(--text);
+  background-image: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--dept, var(--accent)) 18%, transparent) 50%, transparent 70%);
+  background-size: 220% 100%; animation: tool-shimmer 1.8s linear infinite;
+}
+.tool-spin { animation: tool-spin .9s linear infinite; color: var(--dept, var(--accent)); flex-shrink: 0; }
+@keyframes tool-spin { to { transform: rotate(360deg); } }
+@keyframes tool-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+@keyframes tool-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.tool-calls-list { list-style: none; margin: 8px 0 0; padding: 0 0 0 10px; border-left: 2px solid var(--edge); display: grid; gap: 4px; }
+.tool-call { animation: tool-in .18s ease both; }
+.tool-call.is-live { border-left-color: var(--dept, var(--accent)); }
+.tool-call summary {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px;
+  cursor: pointer; list-style: none; color: var(--muted);
+}
+.tool-call summary::-webkit-details-marker { display: none; }
+.tool-call summary:hover { background: var(--hover, var(--surface-2)); }
+.tool-call.is-error summary { color: var(--danger, #e5484d); }
+.tool-call-body { margin: 2px 0 6px 8px; padding: 8px 10px; border: 1px solid var(--edge); border-radius: 10px; background: var(--surface-2); }
+.tool-call-body h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.tool-call-body pre {
+  margin: 0 0 8px; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text);
+}
+.tool-call-body pre:last-child { margin-bottom: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .tool-spin, .tool-calls.is-running .tool-calls-summary, .tool-call { animation: none; }
+}

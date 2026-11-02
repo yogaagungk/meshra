@@ -16,20 +16,20 @@ func TestQuotaCacheCooldownStaleAndAdminBoundary(t *testing.T) {
 	fail := false
 	percent := 81.0
 	r.mu.Lock()
-	ad := r.adapters["codex"]
+	ad := r.adapters["omp"]
 	ad.Quotas = func(context.Context) ([]model.QuotaWindow, error) {
 		calls++
 		if fail {
 			return nil, errors.New("private upstream detail")
 		}
-		return []model.QuotaWindow{{ID: "secret-id", Provider: "codex", Label: "Primary window", UsedPercent: &percent}}, nil
+		return []model.QuotaWindow{{ID: "secret-id", Provider: "omp", Label: "Primary window", UsedPercent: &percent}}, nil
 	}
-	r.adapters["codex"] = ad
+	r.adapters["omp"] = ad
 	r.mu.Unlock()
-	_, err := r.Console(model.Principal{}, "quota", model.ConsoleRequest{Harness: "codex"})
+	_, err := r.Console(model.Principal{}, "quota", model.ConsoleRequest{Harness: "omp"})
 	requireStatus(t, err, 403)
 	for i := 0; i < 3; i++ {
-		v, e := r.Console(admin, "quota", model.ConsoleRequest{Harness: "codex", Refresh: true})
+		v, e := r.Console(admin, "quota", model.ConsoleRequest{Harness: "omp", Refresh: true})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -42,14 +42,14 @@ func TestQuotaCacheCooldownStaleAndAdminBoundary(t *testing.T) {
 		t.Fatal("refresh cooldown ignored", calls)
 	}
 	r.mu.Lock()
-	v := r.quotaCache["codex"]
+	v := r.quotaCache["omp"]
 	old := now().Add(-time.Minute * 2)
 	v.AttemptedAt = &old
 	v.CheckedAt = &old
-	r.quotaCache["codex"] = v
+	r.quotaCache["omp"] = v
 	r.mu.Unlock()
 	fail = true
-	value, err := r.Console(admin, "quota", model.ConsoleRequest{Harness: "codex", Refresh: true})
+	value, err := r.Console(admin, "quota", model.ConsoleRequest{Harness: "omp", Refresh: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestQuotaRefreshSerializedWithoutHoldingRelayMutex(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	r.mu.Lock()
-	a := r.adapters["codex"]
+	a := r.adapters["omp"]
 	a.Quotas = func(ctx context.Context) ([]model.QuotaWindow, error) {
 		close(entered)
 		select {
@@ -79,10 +79,10 @@ func TestQuotaRefreshSerializedWithoutHoldingRelayMutex(t *testing.T) {
 		}
 		return nil, nil
 	}
-	r.adapters["codex"] = a
+	r.adapters["omp"] = a
 	r.mu.Unlock()
 	done := make(chan struct{})
-	go func() { defer close(done); _, _ = r.Console(admin, "quota", model.ConsoleRequest{Harness: "codex"}) }()
+	go func() { defer close(done); _, _ = r.Console(admin, "quota", model.ConsoleRequest{Harness: "omp"}) }()
 	<-entered
 	if _, err := r.Agents(admin); err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestContextUsageAndHistoryAreScopedAndRetained(t *testing.T) {
 		emit("context_usage", `{"usedTokens":160,"windowTokens":1000,"estimated":true,"source":"fixture native estimate"}`)
 		return "reply", nil
 	})
-	ai := createTest(t, r, "codex", "contextstatus")
+	ai := createTest(t, r, "omp", "contextstatus")
 	startTest(t, r, ai.ID)
 	c := createChat(t, r, ai.ID)
 	task, err := r.Send(admin, model.SendRequest{From: "human:operator", To: ai.ID, ConversationID: c.ID, Text: "hi"})
@@ -146,7 +146,7 @@ func TestContextUsageAndHistoryAreScopedAndRetained(t *testing.T) {
 	if body.Latest.Used == nil || *body.Latest.Used != 160 || body.Latest.Window == nil || *body.Latest.Window != 1000 || body.Latest.Cached == nil || *body.Latest.Cached != 80 || body.Latest.Estimated == nil || !*body.Latest.Estimated {
 		t.Fatal(string(b))
 	}
-	value, err = r.Console(admin, "usage-history", model.ConsoleRequest{ConversationID: c.ID, Harness: "codex"})
+	value, err = r.Console(admin, "usage-history", model.ConsoleRequest{ConversationID: c.ID, Harness: "omp"})
 	if err != nil {
 		t.Fatal(err)
 	}

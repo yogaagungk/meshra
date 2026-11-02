@@ -34,7 +34,7 @@ func (r *Relay) authorizeRecipient(p model.Principal, from string, dest model.Ag
 func validAgentID(id string) bool {
 	parts := strings.Split(id, ":")
 	return len(parts) == 2 && namePattern.MatchString(parts[1]) &&
-		(parts[0] == "omp" || parts[0] == "claude" || parts[0] == "codex" || parts[0] == "opencode" || parts[0] == "openai" || parts[0] == "acp")
+		(parts[0] == "omp" || parts[0] == "claude" || parts[0] == "openai")
 }
 
 func validOperation(op string) bool {

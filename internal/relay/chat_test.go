@@ -115,7 +115,7 @@ func TestChatCancellationAndSingleActiveTurn(t *testing.T) {
 		}
 		return "Continued successfully", nil
 	})
-	ai := createTest(t, r, "codex", "assistant")
+	ai := createTest(t, r, "omp", "assistant")
 	startTest(t, r, ai.ID)
 	c := createChat(t, r, ai.ID)
 	pending := sendChat(t, r, c, "Wait until stopped")

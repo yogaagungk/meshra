@@ -351,7 +351,7 @@ function PersonalControls({ access }: { access: boolean }) {
   );
 }
 function ModelsUsage() {
-  const [harness, setHarness] = useState("codex");
+  const [harness, setHarness] = useState("claude");
   const models = useQuery({
     queryKey: ["models", harness],
     queryFn: () => api<{ items: ModelOption[] }>("models", { harness }),
@@ -389,7 +389,7 @@ function ModelsUsage() {
         <label className="personal-harness-label">
           AI harness
           <select value={harness} onChange={(e) => setHarness(e.target.value)}>
-            {["codex", "claude", "opencode", "omp"].map((h) => (
+            {["claude", "omp"].map((h) => (
               <option key={h} value={h}>
                 {harnessName(h)}
               </option>

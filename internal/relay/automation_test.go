@@ -11,7 +11,7 @@ import (
 func TestAdmissionFeatureReceiptFailureRollsBack(t *testing.T) {
 	r, _ := openTest(t, nil)
 	source := createTest(t, r, "omp", "source")
-	dest := createTest(t, r, "codex", "dest")
+	dest := createTest(t, r, "omp", "dest")
 	q := model.SendRequest{From: source.ID, To: dest.ID, Text: "preserve atomic admission", IdempotencyKey: "receipt-key"}
 	failure := errors.New("receipt persistence failed")
 	r.mu.Lock()

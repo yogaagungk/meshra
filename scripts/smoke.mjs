@@ -63,8 +63,8 @@ async function cli(...args) {
 }
 try {
   await start();
-  for (const [harness, name] of [['claude', 'exampleone'], ['claude', 'exampletwo'], ['omp', 'exampleworker'], ['codex', 'reviewer'], ['opencode', 'testengine']]) {
-    const policy = harness === 'omp' ? ['--allow-to', 'codex:reviewer', '--allow-operation', 'request,status,events'] : [];
+  for (const [harness, name] of [['claude', 'exampleone'], ['claude', 'exampletwo'], ['omp', 'exampleworker'], ['omp', 'reviewer'], ['claude', 'testengine']]) {
+    const policy = harness === 'omp' ? ['--allow-to', 'omp:reviewer', '--allow-operation', 'request,status,events'] : [];
     const agent = await cli('agent', 'create', '--harness', harness, '--name', name, ...policy);
     assert.equal(agent.id, `${harness}:${name}`);
   }
@@ -89,7 +89,7 @@ try {
   assert.equal(trace.task.state, 'cancelled');
   assert.equal(trace.events.at(-1).type, 'cancelled');
   assert.ok(trace.events.every(event => event.correlationId === task.correlationId && event.to === 'claude:exampleone'));
-  const waiting = await cli('request', '--from', 'omp:exampleworker', '--to', 'codex:reviewer', '--message', 'bounded wait smoke', '--timeout', '1s', '--wait');
+  const waiting = await cli('request', '--from', 'omp:exampleworker', '--to', 'omp:reviewer', '--message', 'bounded wait smoke', '--timeout', '1s', '--wait');
   let expired = waiting;
   const deadline = Date.now() + 2000;
   while (expired.state !== 'timed_out' && Date.now() < deadline) {
@@ -126,7 +126,7 @@ try {
   const traced = replies.find(reply => reply.id === 2).result.structuredContent;
   assert.equal(traced.task.state, 'cancelled');
   assert.equal(traced.task.correlationId, task.correlationId);
-  const conversation = await cli('collaboration', 'conversation.create', JSON.stringify({ title: 'v0.3 CLI smoke', participants: ['claude:exampleone', 'claude:exampletwo', 'codex:reviewer'] }));
+  const conversation = await cli('collaboration', 'conversation.create', JSON.stringify({ title: 'v0.3 CLI smoke', participants: ['claude:exampleone', 'claude:exampletwo', 'omp:reviewer'] }));
   const published = await cli('collaboration', 'context.publish', JSON.stringify({ title: 'contract', content: 'PINNED_V03_ONE', idempotencyKey: 'cli-context-one' }));
   await cli('collaboration', 'context.grant', JSON.stringify({ contextId: published.contextId, agentId: 'claude:exampleone' }));
   await cli('collaboration', 'context.attach', JSON.stringify({ contextId: published.contextId, version: 1, conversationId: conversation.conversationId }));
@@ -144,37 +144,37 @@ try {
   let providerTurns = 0;
   if (native) {
     const omp = await cli('agent', 'start', 'omp:exampleworker');
-    const codex = await cli('agent', 'start', 'codex:reviewer');
+    const reviewer = await cli('agent', 'start', 'omp:reviewer');
     const scoped = await cli('agent', 'token', omp.id);
     const headers = { Authorization: `Bearer ${scoped.token}`, 'Content-Type': 'application/json' };
-    const response = await fetch(`http://${address}/v1/request?wait=true`, { method: 'POST', headers, body: JSON.stringify({ to: codex.id, text: 'Reply with exactly MESHRA_LIVE_CORRELATED_OK. Do not use tools.', timeoutSeconds: 90, idempotencyKey: 'native-correlated' }), signal: AbortSignal.timeout(95000) });
+    const response = await fetch(`http://${address}/v1/request?wait=true`, { method: 'POST', headers, body: JSON.stringify({ to: reviewer.id, text: 'Reply with exactly MESHRA_LIVE_CORRELATED_OK. Do not use tools.', timeoutSeconds: 90, idempotencyKey: 'native-correlated' }), signal: AbortSignal.timeout(95000) });
     assert.equal(response.status, 200);
     const reply = await response.json();
     assert.equal(reply.state, 'completed', JSON.stringify(reply));
     assert.ok(reply.result.includes('MESHRA_LIVE_CORRELATED_OK'));
     assert.equal(reply.originAgentId, omp.id);
     assert.equal(reply.originSessionId, omp.sessionId);
-    assert.equal(reply.destinationSessionId, codex.sessionId);
+    assert.equal(reply.destinationSessionId, reviewer.sessionId);
     const owned = await fetch(`http://${address}/v1/tasks/${reply.taskId}`, { headers });
     assert.equal(owned.status, 200);
     assert.equal((await owned.json()).correlationId, reply.correlationId);
     providerTurns++;
-    const reverse = await cli('request', '--from', codex.id, '--to', omp.id, '--message', 'Reply with exactly MESHRA_LIVE_REVERSE_OK. Do not use tools.', '--timeout', '90s', '--wait');
+    const reverse = await cli('request', '--from', reviewer.id, '--to', omp.id, '--message', 'Reply with exactly MESHRA_LIVE_REVERSE_OK. Do not use tools.', '--timeout', '90s', '--wait');
     assert.equal(reverse.state, 'completed', JSON.stringify(reverse));
     assert.ok(reverse.result.includes('MESHRA_LIVE_REVERSE_OK'));
-    assert.equal(reverse.originSessionId, codex.sessionId);
+    assert.equal(reverse.originSessionId, reviewer.sessionId);
     assert.equal(reverse.destinationSessionId, omp.sessionId);
     providerTurns++;
-    await cli('agent', 'stop', codex.id);
-    const queued = await cli('request', '--from', omp.id, '--to', codex.id, '--message', 'Reply with exactly MESHRA_LIVE_RESTART_OK. Do not use tools.', '--timeout', '90s');
+    await cli('agent', 'stop', reviewer.id);
+    const queued = await cli('request', '--from', omp.id, '--to', reviewer.id, '--message', 'Reply with exactly MESHRA_LIVE_RESTART_OK. Do not use tools.', '--timeout', '90s');
     assert.equal(queued.attempts, 0);
     await stop();
     await start();
     const recovered = await cli('task', 'status', queued.taskId);
     assert.equal(recovered.state, 'queued');
     assert.equal(recovered.attempts, 0);
-    const resumed = await cli('agent', 'start', codex.id);
-    assert.equal(resumed.sessionId, codex.sessionId);
+    const resumed = await cli('agent', 'start', reviewer.id);
+    assert.equal(resumed.sessionId, reviewer.sessionId);
     const until = Date.now() + 90000;
     let completed = recovered;
     while (!['completed', 'failed', 'cancelled', 'timed_out'].includes(completed.state) && Date.now() < until) {
@@ -185,7 +185,7 @@ try {
     assert.ok(completed.result.includes('MESHRA_LIVE_RESTART_OK'));
     assert.equal(completed.attempts, 1);
     assert.equal(completed.originSessionId, omp.sessionId);
-    assert.equal(completed.destinationSessionId, codex.sessionId);
+    assert.equal(completed.destinationSessionId, reviewer.sessionId);
     const stoppedOrigin = await fetch(`http://${address}/v1/tasks/${queued.taskId}`, { headers });
     assert.equal(stoppedOrigin.status, 200);
     assert.equal((await stoppedOrigin.json()).correlationId, queued.correlationId);

@@ -2,9 +2,7 @@ package tests
 
 import (
 	"meshra/internal/adapters/claude"
-	"meshra/internal/adapters/codex"
 	"meshra/internal/adapters/omp"
-	"meshra/internal/adapters/opencode"
 	"meshra/internal/model"
 	"meshra/internal/relay"
 	"os"
@@ -17,12 +15,12 @@ func TestNativeModelCatalog(t *testing.T) {
 	if os.Getenv("MESHRA_NATIVE_MODEL_CATALOG") != "1" {
 		t.Skip("native model catalog opt-in")
 	}
-	r, err := relay.Open(t.TempDir(), map[string]model.Adapter{"codex": codex.New(), "claude": claude.New(), "omp": omp.New(), "opencode": opencode.New()})
+	r, err := relay.Open(t.TempDir(), map[string]model.Adapter{"claude": claude.New(), "omp": omp.New()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	for _, h := range []string{"codex", "omp", "claude", "opencode"} {
+	for _, h := range []string{"omp", "claude"} {
 		t.Run(h, func(t *testing.T) {
 			v, err := r.Console(model.Principal{Admin: true}, "models", model.ConsoleRequest{Harness: h})
 			if err != nil {
@@ -43,12 +41,12 @@ func TestNativeAIStatus(t *testing.T) {
 	if os.Getenv("MESHRA_NATIVE_AI_STATUS") != "1" {
 		t.Skip("native AI status opt-in")
 	}
-	r, err := relay.Open(t.TempDir(), map[string]model.Adapter{"codex": codex.New(), "omp": omp.New()})
+	r, err := relay.Open(t.TempDir(), map[string]model.Adapter{"omp": omp.New()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	for _, h := range []string{"codex", "omp"} {
+	for _, h := range []string{"omp"} {
 		t.Run(h, func(t *testing.T) {
 			value, err := r.Console(model.Principal{Admin: true}, "quota", model.ConsoleRequest{Harness: h})
 			if err != nil {

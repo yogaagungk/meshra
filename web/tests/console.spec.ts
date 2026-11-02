@@ -314,9 +314,7 @@ test("keyboard-only creation and IME-safe multiline composer", async ({
   await expect(page.getByLabel("Conversation title")).toBeFocused();
   await page.keyboard.type("Keyboard-only chat");
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("radio", { name: /Codex/ })).toBeFocused();
-  await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("radio", { name: /Claude/ })).toBeFocused();
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("radio", { name: /OMP/ })).toBeChecked();
   await page.keyboard.press("Tab");
@@ -425,17 +423,17 @@ test("agent registration offers a general workspace without browsing arbitrary f
     .last()
     .click();
   await expect(
-    page.locator(".agent-card").filter({ hasText: "codex:folder-picker-test" }),
+    page.locator(".agent-card").filter({ hasText: "omp:folder-picker-test" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /codex:folder-picker-test/ }).click();
+  await page.getByRole("button", { name: /omp:folder-picker-test/ }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete agent" }).click();
   await expect(page.getByRole("dialog", { name: "Delete this agent?" })).toBeVisible();
   await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
-  await expect(page.locator(".agent-card").filter({ hasText: "codex:folder-picker-test" })).toBeVisible();
-  await page.getByRole("button", { name: /codex:folder-picker-test/ }).click();
+  await expect(page.locator(".agent-card").filter({ hasText: "omp:folder-picker-test" })).toBeVisible();
+  await page.getByRole("button", { name: /omp:folder-picker-test/ }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete agent" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete agent" }).click();
-  await expect(page.locator(".agent-card").filter({ hasText: "codex:folder-picker-test" })).toHaveCount(0);
+  await expect(page.locator(".agent-card").filter({ hasText: "omp:folder-picker-test" })).toHaveCount(0);
 });
 
 test("chat renders Mermaid diagrams and tables without losing source", async ({ page }) => {

@@ -30,7 +30,6 @@ const (
 	secretMaskToken     = "[REDACTED]"
 	secretMaskMinLength = 8
 	secretKindAPIKey    = "endpoint.apiKey"
-	secretKindACPEnv    = "acp.env"
 	secretKindGeneric   = "generic"
 )
 

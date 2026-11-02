@@ -219,6 +219,18 @@ try {
         await session(message.session_id);
       }
       if (message.type === 'stream_event' && message.event?.type === 'content_block_delta' && message.event.delta?.type === 'text_delta') emit('delta', message.event.delta.text);
+      if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
+        for (const block of message.message.content) if (block.type === 'tool_use') {
+          const raw = JSON.stringify(block.input ?? {});
+          emit('tool_use', JSON.stringify({ id: block.id, name: block.name, input: raw.length > 3000 ? raw.slice(0, 3000) + ' [truncated]' : block.input }));
+        }
+      }
+      if (message.type === 'user' && Array.isArray(message.message?.content)) {
+        for (const block of message.message.content) if (block.type === 'tool_result') {
+          const output = typeof block.content === 'string' ? block.content : JSON.stringify(block.content ?? '');
+          emit('tool_result', JSON.stringify({ id: block.tool_use_id, isError: !!block.is_error, output: output.slice(0, 4000) }));
+        }
+      }
       if (message.type === 'system' && message.subtype === 'permission_denied') deny(message.tool_name, message.tool_use_id);
       if (message.type === 'result') {
         if ((generationDraft || profileManaged) && !draftInitialized) throw new Error('Claude restricted profile received a result without an enforced native tool roster');

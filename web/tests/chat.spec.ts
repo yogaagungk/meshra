@@ -43,7 +43,7 @@ test("one-to-one chat starts a stopped AI, stops, continues, regenerates and res
     path: "/tmp/meshra-harness-picker.png",
     fullPage: true,
   });
-  await page.getByRole("radio", { name: /OpenCode/ }).check();
+  await page.getByRole("radio", { name: /OMP/ }).check();
   await expect(page.locator(".agent-option")).toHaveCount(0);
   await expect(
     page.getByRole("link", { name: "Tasks", exact: true }),

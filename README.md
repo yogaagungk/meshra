@@ -2,14 +2,14 @@
 
 A local-first developer console and relay for independently named AI coding harness instances. Chat with your agents, share pinned context, and inspect durable task execution from one workspace. `claude:exampleone` and `claude:exampletwo` are separate durable identities, not interchangeable aliases for a model. Routing uses exact canonical IDs and persists replies against their original identity/session.
 
-The v0.2 daemon includes a SQLite WAL registry and bounded durable inbox, persisted claims and offline retry schedules, session/repository serialization, authenticated HTTP/JSON and task SSE, compatible MCP tools, tracing/metrics/diagnostics, configurable retention, and adapters for OMP, Codex App Server, Claude Agent SDK, and OpenCode HTTP. No Redis, cloud service, or paid account is required for deterministic tests.
+The v0.2 daemon includes a SQLite WAL registry and bounded durable inbox, persisted claims and offline retry schedules, session/repository serialization, authenticated HTTP/JSON and task SSE, compatible MCP tools, tracing/metrics/diagnostics, configurable retention, and adapters for OMP, the Claude Agent SDK and direct OpenAI-compatible endpoints. No Redis, cloud service, or paid account is required for deterministic tests.
 
 The v0.3 collaboration extension adds persistent conversations, private immutable
 shared context, pinned references, dependency-aware delegation and result artifacts.
 Existing v0.1/v0.2 messaging remains compatible. Start with the
 [v0.3 runbook](docs/V0.3_RUNBOOK.md), [contracts](docs/V0.3_DESIGN.md),
 [ADR](docs/ADR-v0.3.md) and [test evidence](docs/V0.3_TEST_REPORT.md).
-Real OpenCode/Codex/OMP validation is distinguished from deterministic isolation
+Real OMP validation is distinguished from deterministic isolation
 checks; Claude native verification was waived by the operator.
 
 ## Developer Console (v0.4)
@@ -44,7 +44,7 @@ select **Use this folder** to confirm it. Folders are created on the machine run
 Meshra, not the browser's machine.
 
 Rebuild UI changes with `npm ci --prefix web && npm run build --prefix web` before
-`go build`. Native OMP/Codex/OpenCode browser chat was exercised; Claude native
+`go build`. Native OMP browser chat was exercised; Claude native
 verification remains waived. [Console guide/demo](docs/V0.4_CONSOLE.md),
 [API/UI contract](docs/API_UI_CONTRACT.md), and [test report/screenshots](docs/V0.4_TEST_REPORT.md).
 
@@ -72,7 +72,7 @@ window. Replies appear after completion and credential checks. See the
 
 - Ubuntu/WSL2 or Linux, **Go 1.25+**. The Go core uses pure-Go SQLite; a C compiler is not required for a normal build.
 - **Node 20.19+ or 22.12+** and npm to rebuild the console; no frontend Node process is needed in production. **Node 20+** is also required for the optional Claude SDK bridge. Native harness requirements still apply.
-- OMP **18.12.1** and Codex CLI **0.163.0** are the inspected stdio versions. OpenCode adapter pins **1.19.3**. Claude SDK pins **0.3.303**, bundling Claude Code **2.1.303**.
+- OMP **18.12.1** is the inspected stdio version. Claude SDK pins **0.3.303**, bundling Claude Code **2.1.303**.
 - Native harness authentication or provider environment credentials for real model turns. Do not put API keys in relay configuration.
 
 ```sh
@@ -82,7 +82,6 @@ go build -o meshra ./cmd/meshra
 
 # Optional SDK/native dependencies, local to this checkout:
 npm ci --prefix bridges/claude-agent-sdk --ignore-scripts
-npm ci --prefix bridges/claude-agent-sdk/opencode
 ```
 
 Keep the bridge/dependencies with the executable when packaging; relocation environment variables and exact native compatibility evidence are in [adapters.md](docs/adapters.md). Installation does not establish provider authentication.
@@ -143,14 +142,9 @@ A reverse request is explicit and separate:
 ./meshra agent restart omp:exampleworker
 ```
 
-The same workflow can use Codex/OpenCode destinations after registration:
-
-```sh
-./meshra agent create --harness codex --name reviewer
-./meshra agent create --harness opencode --name testengine
-./meshra agent start codex:reviewer
-./meshra agent start opencode:testengine
-```
+A direct OpenAI-compatible endpoint is also a destination. Save it under
+**Settings → Connections**, then register an agent with `--harness openai`,
+`--provider <endpoint-id>` and `--model <model-id>`. It needs no installed CLI.
 
 These are real-harness commands and may incur provider costs. Credential-free identity/routing scenarios are exercised by the automated local end-to-end tests.
 
@@ -164,7 +158,7 @@ The authenticated MCP endpoint is `http://127.0.0.1:7331/mcp`. Tools:
 - `meshra_task_trace`
 - Administrator-only HTTP MCP: `meshra_agent_register`, `meshra_task_retry`, `meshra_metrics`, `meshra_doctor`
 
-Outbound policies are deny-by-default. Agents need permitted operations and exact allowed destinations; delegation additionally requires `--delegate`. Optional recipient `--allow-from` / `--allow-inbound-operation` restrict who may send which operation; omitted lists preserve v0.1 access, explicit empty lists deny. A JSON `from` field is never authentication. Claude/OpenCode adapters provide per-turn identity/session/task-bound MCP credentials. OMP/Codex automatic MCP wiring is not claimed; documented manual registration is available in [cli.md](docs/cli.md#manual-harness-mcp-registration). The optional `meshra mcp stdio` proxy refuses admin credentials.
+Outbound policies are deny-by-default. Agents need permitted operations and exact allowed destinations; delegation additionally requires `--delegate`. Optional recipient `--allow-from` / `--allow-inbound-operation` restrict who may send which operation; omitted lists preserve v0.1 access, explicit empty lists deny. A JSON `from` field is never authentication. The Claude adapter provides per-turn identity/session/task-bound MCP credentials. OMP/Codex automatic MCP wiring is not claimed; documented manual registration is available in [cli.md](docs/cli.md#manual-harness-mcp-registration). The optional `meshra mcp stdio` proxy refuses admin credentials.
 
 ## Reliability and recovery
 
@@ -225,19 +219,7 @@ admissions are never automatically retried by the console client.
   skill name and description separately. `templates.import` consumes its
   15-minute preview and exact digest once. Imported profiles, routines and flows
   remain inert library drafts; normal reviewed save forms create live objects.
-- ACP requires manifest entries for the selected CLI plus `node`, `acp-bridge`
-  (`bridges/acp/launch.mjs`) and `mcp-bridge`
-  (`bridges/mcp-stdio/bridge.mjs`). Review additional CLI runtime packages and
-  provider-origin grants explicitly. `connections.acpStatus` reports readiness;
-  `connections.checkAcp` initializes a disposable session without a prompt.
-  Neither command installs software, enables the saved configuration or proves
-  that a model turn works.
-- `connections.authenticateAcp` is console-only and targets an existing ACP
-  binding with `{id,expectedRevision,profileId,conversationId,methodId}`. Select
-  an advertised method. Authentication uses that binding's private native state,
-  never a shared conversation HOME; logout cancels the job. Native CLI sign-in
-  files and environment secrets must be explicitly selected, not entered in chat.
-- Endpoint/ACP turns retain their admitted connection revision. Connection edits
+- Endpoint turns retain their admitted connection revision. Connection edits
   do not redirect an admitted turn; replacing/revoking its credential blocks
   subsequent calls. `connections.models` requires an exact-origin network grant;
   disabling or editing the connection cancels pending discovery.
@@ -247,10 +229,7 @@ admissions are never automatically retried by the console client.
   Text-only endpoints can run default profiles without a tool catalog; profiles
   that explicitly require broker tools are rejected before admission instead of
   silently dropping those permissions.
-- Local Scan inspects installed Gemini/Cursor/Cline paths without running them;
-  symlinked package-manager executables resolve to their canonical file. Custom
-  installed ACP v1 servers use the same explicit executable/argv, protocol check
-  and fail-closed confinement requirements, not a provider-specific fallback.
+- Local Scan probes the two reviewed loopback model endpoints (Ollama and LM Studio) without credentials.
 - External MCP clients are separate from Meshra's legacy `/mcp` server. Save and
   test a connection, explicitly review its exact tools and bind them to a profile,
   then enable the profile capability and server. Each admitted call pins server,
@@ -275,9 +254,7 @@ host-tool roster before a prompt. Claude checks SDK `0.3.303`, native Claude Cod
 `2.1.303`, managed-settings exclusion and the exact scoped MCP catalog; native
 session acknowledgement precedes tool dispatch. Both installed-version
 no-model compatibility checks passed. Authenticated model/tool turns remain a
-separate opt-in check. Codex `0.163.0` and OpenCode `1.19.3` remain unavailable for
-profile automation where rooted native reads/tool omission or pre-start plugin
-installation cannot be verified; legacy workflows are not relaxed.
+separate opt-in check.
 
 ## Tests and checks
 
@@ -298,15 +275,13 @@ node scripts/load.mjs
 
 Acceptance coverage includes two same-harness identities, cross-harness request/reply ownership, nested delegation/correlation, queue order, conflicting repository locks, concurrent requests, queued restart, abruptly killed daemon recovery, idempotent admission, bounded inboxes, unavailable agents, authentication/impersonation failures, timeouts/cancellation, and persistent SSE replay. Protocol contracts use fake processes/HTTP transports, not fabricated provider success.
 
-The local smoke starts a private temporary daemon, registers all four harness types with two Claude identities, queues/deduplicates a message, restarts, verifies durable correlation, timeout/cancellation, metrics, doctor, authorization, and the real MCP stdio proxy. It never starts a provider turn by default and removes temporary relay state. `MESHRA_NATIVE_SMOKE=1 node scripts/smoke.mjs` additionally performs three real OMP/Codex routed turns, exact-ID recovery after restart, and reply retrieval by the stopped original session; native credentials and provider charges apply.
+The local smoke starts a private temporary daemon, registers the OMP and Claude harness types with two Claude identities, queues/deduplicates a message, restarts, verifies durable correlation, timeout/cancellation, metrics, doctor, authorization, and the real MCP stdio proxy. It never starts a provider turn by default and removes temporary relay state. `MESHRA_NATIVE_SMOKE=1 node scripts/smoke.mjs` additionally performs three real OMP routed turns, exact-ID recovery after restart, and reply retrieval by the stopped original session; native credentials and provider charges apply.
 
 Optional **paid/native** prompt-and-resume checks:
 
 ```sh
 MESHRA_REAL_OMP=1 go test -v ./internal/adapters/omp -run '^TestRealSmoke$' -count=1
-MESHRA_REAL_CODEX=1 go test -v ./internal/adapters/codex -run '^TestRealSmoke$' -count=1
 MESHRA_AUTH_SMOKE=1 go test -v ./internal/adapters/claude -run '^TestAuthenticatedSmoke$' -count=1
-MESHRA_AUTH_SMOKE=1 go test -v ./internal/adapters/opencode -run '^TestAuthenticatedSmoke$' -count=1
 ```
 
 Optional model/provider overrides are documented in [adapters.md](docs/adapters.md). These checks validate only the exercised native prompt/session paths, not every possible tool permission or native MCP path. Current v0.2 commands, observed outcomes, resource measurements, and integration limits are recorded in [V0.2_TEST_REPORT.md](docs/V0.2_TEST_REPORT.md); [verification.md](docs/verification.md) retains historical v0.1 evidence.
@@ -316,7 +291,7 @@ Optional model/provider overrides are documented in [adapters.md](docs/adapters.
 - **Connection refused:** run `meshra serve`, and use the same `--addr` for the client. Both processes need access to the same private state directory unless the client uses its own `MESHRA_TOKEN`.
 - **401/403:** remove an unintended `MESHRA_TOKEN` from the human shell, or grant only the intended agent operations/destinations. Session-bound credentials cannot read unrelated session history.
 - **Already owned:** another daemon holds that state directory; use it or stop it cleanly. A dead process releases the OS lock; do not delete SQLite/WAL files to force recovery.
-- **Harness not found / model unavailable:** install the documented version, authenticate through native tooling, and launch the daemon from that environment. Custom Codex provider definitions are not inherited from user config by the isolated adapter.
+- **Harness not found / model unavailable:** install the documented version, authenticate through native tooling, and launch the daemon from that environment.
 - **Queued:** inspect agent state, `nextAttemptAt`, `deliveryAttempts`, and deadline. Start/restart the exact destination before delivery exhaustion. A running conflicting repository turn keeps the shared lock; nested requests must not wait indefinitely while holding it.
 - **Approval required:** legacy native execution stays denied. Profile write/command actions require explicit capability enablement, a ready confined runtime and a one-call console approval; applying host changes is a separate reviewed manifest decision. Missing confinement remains an error, never a reason to enable bypass approvals.
 - **After WSL shutdown:** restart the daemon and agents; queued tasks remain. Inspect uncertain failed turns before retrying.
@@ -324,7 +299,7 @@ Optional model/provider overrides are documented in [adapters.md](docs/adapters.
 
 ## Boundaries and next steps
 
-No arbitrary interactive-session attach, cloud/remote relay, hosted marketplace, model-based routing, or identical native capabilities across harnesses. Native harness sessions live outside SQLite; legacy read-oriented restrictions are not universal OS containment. Profile automation uses the separate broker and verified transport gates. Native browser, desktop, ACP, stdio MCP and voice execution remain dependent on operator-configured manifests, namespaces, cgroups and their actual runtime artifacts. Authenticated provider turns require native credentials and explicit opt-in verification; protocol fixtures are not native execution evidence.
+No arbitrary interactive-session attach, cloud/remote relay, hosted marketplace, model-based routing, or identical native capabilities across harnesses. Native harness sessions live outside SQLite; legacy read-oriented restrictions are not universal OS containment. Profile automation uses the separate broker and verified transport gates. Native browser, desktop, stdio MCP and voice execution remain dependent on operator-configured manifests, namespaces, cgroups and their actual runtime artifacts. Authenticated provider turns require native credentials and explicit opt-in verification; protocol fixtures are not native execution evidence.
 
 Design and evidence: [v0.2 design](docs/V0.2_DESIGN.md), [operations/migration/recovery](docs/V0.2_OPERATIONS.md), [test report](docs/V0.2_TEST_REPORT.md), [adapter verification](docs/V0.2_ADAPTER_VERIFICATION.md), [architecture](docs/architecture.md), [protocol](docs/protocol.md), [security](docs/security.md), [CLI/API/MCP](docs/cli.md), [changelog](CHANGELOG.md).
 

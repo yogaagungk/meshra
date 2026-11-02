@@ -56,7 +56,7 @@ func TestLoopbackBindingValidation(t *testing.T) {
 	}
 }
 func TestCommandCreatePoliciesAndTaskFlags(t *testing.T) {
-	method, path, body, _, err := command([]string{"agent", "create", "--harness", "claude", "--name", "one", "--workspace-id", "workspace-1", "--allow-to", "codex:reviewer,omp:origin", "--allow-to=claude:two", "--allow-operation", "send,request", "--allow-operation", "agents_list", "--delegate", "--model", "test", "--provider", "test-provider"})
+	method, path, body, _, err := command([]string{"agent", "create", "--harness", "claude", "--name", "one", "--workspace-id", "workspace-1", "--allow-to", "omp:reviewer,omp:origin", "--allow-to=claude:two", "--allow-operation", "send,request", "--allow-operation", "agents_list", "--delegate", "--model", "test", "--provider", "test-provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestInboundPolicyExplicitEmpty(t *testing.T) {
 	if err != nil || !bytes.Contains(raw, []byte(`"senders":[]`)) || !bytes.Contains(raw, []byte(`"inboundOperations":[]`)) {
 		t.Fatal("JSON lost explicit empty policy", string(raw), err)
 	}
-	_, _, body, _, err = command(append(base, "--allow-from=omp:source,claude:one", "--allow-from", "codex:two", "--allow-inbound-operation=request"))
+	_, _, body, _, err = command(append(base, "--allow-from=omp:source,claude:one", "--allow-from", "omp:two", "--allow-inbound-operation=request"))
 	if err != nil || len(body.(model.CreateAgent).Policy.Senders) != 3 {
 		t.Fatal("inbound list flags not accumulated", err)
 	}
@@ -298,7 +298,7 @@ func (traceRuntime) Run(_ context.Context, _ model.Turn, emit model.Emit) (strin
 }
 
 func TestMCPProxyAcceptsLargeBoundedTrace(t *testing.T) {
-	core, err := relay.Open(t.TempDir(), map[string]model.Adapter{"codex": {
+	core, err := relay.Open(t.TempDir(), map[string]model.Adapter{"omp": {
 		Factory: func(context.Context, model.Agent, model.Emit) (model.Runtime, error) {
 			return traceRuntime{}, nil
 		},
@@ -312,7 +312,7 @@ func TestMCPProxyAcceptsLargeBoundedTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dest, err := core.Create(admin, model.CreateAgent{Harness: "codex", Name: "dest"})
+	dest, err := core.Create(admin, model.CreateAgent{Harness: "omp", Name: "dest"})
 	if err != nil {
 		t.Fatal(err)
 	}

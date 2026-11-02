@@ -82,6 +82,9 @@ var migrationV18 string
 //go:embed migrations/019.sql
 var migrationV19 string
 
+//go:embed migrations/020.sql
+var migrationV20 string
+
 // schemaMigrations lists every embedded schema step in order. A new feature
 // appends its own step; existing steps are never renumbered.
 var schemaMigrations = []struct {
@@ -89,7 +92,7 @@ var schemaMigrations = []struct {
 	source  string
 }{
 	{10, migrationV10}, {11, migrationV11}, {12, migrationV12}, {13, migrationV13},
-	{14, migrationV14}, {15, migrationV15}, {16, migrationV16}, {17, migrationV17}, {18, migrationV18}, {19, migrationV19},
+	{14, migrationV14}, {15, migrationV15}, {16, migrationV16}, {17, migrationV17}, {18, migrationV18}, {19, migrationV19}, {20, migrationV20},
 }
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
@@ -402,7 +405,7 @@ func (r *Relay) prepareAgentLocked(p model.Principal, c model.CreateAgent) (mode
 	if !namePattern.MatchString(c.Name) {
 		return a, model.Err(400, "name must match [a-z][a-z0-9_-]{0,62}; IDs are lowercase")
 	}
-	if c.Harness != "omp" && c.Harness != "claude" && c.Harness != "codex" && c.Harness != "opencode" && c.Harness != "openai" && c.Harness != "acp" {
+	if c.Harness != "omp" && c.Harness != "claude" && c.Harness != "openai" {
 		return a, model.Err(400, "unsupported harness")
 	}
 	switch c.AvatarIcon {
@@ -581,6 +584,11 @@ func (r *Relay) Remove(p model.Principal, id string) error {
 	if _, err = tx.Exec("DELETE FROM credentials WHERE agent_id=?", id); err != nil {
 		return err
 	}
+	for _, table := range []string{"task_dispatch_order", "agent_queue_state"} {
+		if _, err = tx.Exec("DELETE FROM "+table+" WHERE agent_id=?", id); err != nil {
+			return err
+		}
+	}
 	for _, table := range []string{"conversation_participants", "context_acl"} {
 		if _, err = tx.Exec("DELETE FROM "+table+" WHERE agent_id=?", id); err != nil {
 			return err
@@ -717,7 +725,7 @@ func (r *Relay) actionWithLifecycle(p model.Principal, id, action string, profil
 	}
 	if a.ManagedChat || a.GenerationDraft {
 		// Managed identities are readiness slots, not durable model histories.
-		// Idle Codex threads may have no rollout to resume after a restart.
+		// Idle provider sessions may be unavailable after a restart.
 		a.SessionID = ""
 		a.Ephemeral = true
 	}

@@ -69,8 +69,8 @@ func TestPersonalConcurrencyAndDailyBudgetSurviveRestart(t *testing.T) {
 		}
 	})
 	savePreferences(t, r, func(v *model.PersonalSettings) { v.MaxParallelTurns = 1; v.DailyTurnLimit = 2 })
-	a := createTest(t, r, "codex", "budgetone")
-	b := createTest(t, r, "codex", "budgettwo")
+	a := createTest(t, r, "omp", "budgetone")
+	b := createTest(t, r, "omp", "budgettwo")
 	startTest(t, r, a.ID)
 	startTest(t, r, b.ID)
 	first, _ := r.Send(admin, model.SendRequest{From: "human:operator", To: a.ID, Text: "one"})
@@ -154,7 +154,7 @@ func TestStartedLimitAndIdleReapingPreservePendingAgents(t *testing.T) {
 func TestWorkspaceIsolationBoundedPreviewAndChatModel(t *testing.T) {
 	calls := make(chan model.Agent, 8)
 	ad := fakeAdapters(nil)
-	ad["codex"] = model.Adapter{Factory: func(_ context.Context, a model.Agent, _ model.Emit) (model.Runtime, error) {
+	ad["omp"] = model.Adapter{Factory: func(_ context.Context, a model.Agent, _ model.Emit) (model.Runtime, error) {
 		calls <- a
 		return &fakeRuntime{session: randomID()}, nil
 	}}
@@ -188,7 +188,7 @@ func TestWorkspaceIsolationBoundedPreviewAndChatModel(t *testing.T) {
 	if !preview["truncated"].(bool) || len(preview["content"].(string)) > 65536 {
 		t.Fatal("unbounded preview")
 	}
-	value, err = r.Console(admin, "chat-create", model.ConsoleRequest{Harness: "codex", WorkspaceID: w.ID, Config: model.Config{Model: "test-model"}})
+	value, err = r.Console(admin, "chat-create", model.ConsoleRequest{Harness: "omp", WorkspaceID: w.ID, Config: model.Config{Model: "test-model"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestWorkspaceIsolationBoundedPreviewAndChatModel(t *testing.T) {
 func TestModelDiscoveryBoundsAndAuthentication(t *testing.T) {
 	r, _ := openTest(t, nil)
 	r.mu.Lock()
-	ad := r.adapters["codex"]
+	ad := r.adapters["omp"]
 	ad.Models = func(context.Context) ([]model.ModelOption, error) {
 		out := []model.ModelOption{{ID: "sk-credential", Name: "hidden"}}
 		for i := 0; i < 250; i++ {
@@ -218,11 +218,11 @@ func TestModelDiscoveryBoundsAndAuthentication(t *testing.T) {
 		}
 		return out, nil
 	}
-	r.adapters["codex"] = ad
+	r.adapters["omp"] = ad
 	r.mu.Unlock()
-	_, err := r.Console(model.Principal{}, "models", model.ConsoleRequest{Harness: "codex"})
+	_, err := r.Console(model.Principal{}, "models", model.ConsoleRequest{Harness: "omp"})
 	requireStatus(t, err, 403)
-	value, err := r.Console(admin, "models", model.ConsoleRequest{Harness: "codex"})
+	value, err := r.Console(admin, "models", model.ConsoleRequest{Harness: "omp"})
 	if err != nil {
 		t.Fatal(err)
 	}

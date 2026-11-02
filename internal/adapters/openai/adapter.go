@@ -538,16 +538,19 @@ func (r *runtime) dispatch(ctx context.Context, executor model.ToolExecutor, cat
 		return toolFailure(call, "no tool executor is active for this turn"), nil
 	}
 	if emit != nil {
-		emit("progress", "OpenAI-compatible dispatching tool "+call.Function.Name)
+		emit("tool_use", model.ToolEventData(model.ToolEvent{ID: call.ID, Name: call.Function.Name, Input: arguments}))
 	}
 	result, err := executor.Call(ctx, model.ToolCall{ID: call.ID, Name: call.Function.Name, Arguments: arguments})
 	if err != nil {
+		emitToolResult(emit, call.ID, "tool call failed", true)
 		return toolFailure(call, "tool call failed: "+err.Error()), nil
 	}
 	content, err := toolContent(result, r.cfg.SupportsImages)
 	if err != nil {
+		emitToolResult(emit, call.ID, err.Error(), true)
 		return toolFailure(call, err.Error()), nil
 	}
+	emitToolResult(emit, call.ID, toolResultText(result), result.IsError)
 	return chatMessage{Role: "tool", ToolCallID: call.ID, Name: call.Function.Name, Content: content}, nil
 }
 
@@ -1075,4 +1078,23 @@ func redact(text, token string) string {
 		return strings.ReplaceAll(text, token, "[redacted]")
 	}
 	return text
+}
+
+func emitToolResult(emit model.Emit, id, output string, isError bool) {
+	if emit != nil {
+		emit("tool_result", model.ToolEventData(model.ToolEvent{ID: id, Output: output, IsError: isError}))
+	}
+}
+
+// toolResultText is the text of a tool result, for display only.
+func toolResultText(result model.ToolResult) string {
+	var b strings.Builder
+	for _, part := range result.Content {
+		if part.Type == "text" {
+			b.WriteString(part.Text)
+		} else {
+			b.WriteString("[" + part.Type + "]")
+		}
+	}
+	return b.String()
 }

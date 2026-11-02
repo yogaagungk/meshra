@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Three ways to run an AI
+
+- **Breaking:** remove the Codex, OpenCode and ACP harnesses, their adapters, bridges, connection screens and quota/status code. Only Claude, OMP and Direct API remain. OMP can itself use OpenCode, OpenRouter and Codex subscriptions.
+- Migration 20 deletes agents, profiles, queued tasks, chats and saved ACP configurations that belonged to the removed harnesses, and drops the `acp_agents` table.
+- Add **Direct API** as a first-class option for agents, profiles and one-to-one chats: pick a saved OpenAI-compatible endpoint and a model; no CLI is started.
+- Show tool calls in chats and agent replies. A running turn animates the tool in flight; the summary expands to each call's input and output. Claude, OMP and Direct API report them as `tool_use` and `tool_result` events, bounded to 4,000 characters and redacted.
+
 ### Automation revamp
 
 - Skills can now be written in the console and pinned to profiles from the skill editor or the profile editor; updating a skill shows which profiles still pin an older version.

@@ -36,6 +36,9 @@ type frame struct {
 	Status         string          `json:"status"`
 	SessionSettled bool            `json:"sessionSettled"`
 	ToolCallID     string          `json:"toolCallId"`
+	Args           json.RawMessage `json:"args"`
+	Result         json.RawMessage `json:"result"`
+	IsError        bool            `json:"isError"`
 	ToolName       string          `json:"toolName"`
 	Arguments      json.RawMessage `json:"arguments"`
 	TargetID       string          `json:"targetId"`
@@ -209,8 +212,9 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 	if emit != nil {
 		emit("session", r.session)
 	}
-	// Only forward text deltas, never full prompts, thoughts, tool arguments or secrets.
-	if _, err = r.command(startup, "set_event_filter", map[string]any{"events": []string{"message_update"}, "messageUpdates": "delta"}); err != nil {
+	// Forward text deltas and tool activity (bounded name, input and output).
+	// Prompts and thoughts are never forwarded.
+	if _, err = r.command(startup, "set_event_filter", map[string]any{"events": []string{"message_update", "tool_execution_start", "tool_execution_end"}, "messageUpdates": "delta"}); err != nil {
 		return nil, err
 	}
 	if r.managed {
@@ -729,6 +733,14 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (re
 			if f.SessionSettled {
 				return text.String(), nil
 			}
+		case "tool_execution_start":
+			if emit != nil && f.ToolCallID != "" {
+				emit("tool_use", model.ToolEventData(model.ToolEvent{ID: f.ToolCallID, Name: f.ToolName, Input: f.Args}))
+			}
+		case "tool_execution_end":
+			if emit != nil && f.ToolCallID != "" {
+				emit("tool_result", model.ToolEventData(model.ToolEvent{ID: f.ToolCallID, Output: toolOutputText(f.Result), IsError: f.IsError}))
+			}
 		case "session_settled":
 			if completed {
 				return text.String(), nil
@@ -755,4 +767,25 @@ func (r *runtime) emitContext(ctx context.Context, emit model.Emit) {
 	}
 	raw, _ := json.Marshal(model.ContextObservation{UsedTokens: state.Context.Tokens, WindowTokens: state.Context.Window, Estimated: true, Source: "OMP native context estimate"})
 	emit("context_usage", string(raw))
+}
+
+// toolOutputText renders a native tool result as bounded text.
+func toolOutputText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var parts struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(raw, &parts) == nil && len(parts.Content) > 0 {
+		var b strings.Builder
+		for _, c := range parts.Content {
+			b.WriteString(c.Text)
+		}
+		return b.String()
+	}
+	return string(raw)
 }
