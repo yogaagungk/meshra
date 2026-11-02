@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   Square,
   RotateCcw,
+  Route,
   Users,
   UserRound,
   X,
@@ -50,6 +51,22 @@ import {
   type Task,
 } from "./types";
 import { ProfileChat } from "./ProfileChat";
+import { ChatQueue, RetryWith, RoutingControl } from "./ChatCoordination";
+import {
+  readRouteNotes,
+  readRouting,
+  routeWithLead,
+  writeRouteNote,
+  type RoutedNote,
+} from "./leadRouting";
+import {
+  applyMention,
+  handle,
+  mentionOptions,
+  mentionQuery,
+  reasonText,
+  resolveRoute,
+} from "./routing";
 export function Chat(props: { id: string; agents: Agent[]; onNew: () => void }) {
   const conversation = useQuery({
     queryKey: ["conversation", props.id],
@@ -131,6 +148,33 @@ function LegacyChat({
   const members = agents.filter((a) =>
     conversation.data?.participants.includes(a.id),
   );
+  const [routing, setRouting] = useState(() => readRouting(id));
+  const [routeNotes, setRouteNotes] = useState(() => readRouteNotes(id));
+  const [routingBusy, setRoutingBusy] = useState(false);
+  const [caret, setCaret] = useState(0);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const route = resolveRoute({ draft, members, selected: targets, tasks });
+  const sendIds = isChat ? targets : route.ids;
+  const leadRoutes =
+    !isChat &&
+    !!routing.lead &&
+    members.length > 1 &&
+    members.some((m) => m.id === routing.lead && m.capabilities?.toolFreeDraft);
+  const canLeadRoute = leadRoutes && !sendIds.length && !!draft.trim();
+  const open = !isChat ? mentionQuery(draft, caret) : null;
+  const options = open ? mentionOptions(open.query, members) : [];
+  function pickMention(member: { id: string; name: string }) {
+    if (!open) return;
+    const next = applyMention(draft, caret, open.start, member);
+    setDraft(next.text);
+    pendingKey.current = "";
+    localWrite("pending-send:" + id, "");
+    requestAnimationFrame(() => {
+      input.current?.focus();
+      input.current?.setSelectionRange(next.caret, next.caret);
+      setCaret(next.caret);
+    });
+  }
   useEffect(() => {
     if (!conversation.data) return;
     setTargets((previous) => {
@@ -236,7 +280,7 @@ function LegacyChat({
       sending ||
       !draft.trim() ||
       (isChat && active) ||
-      !targets.length ||
+      (!sendIds.length && !canLeadRoute) ||
       new TextEncoder().encode(draft).length > 65536
     )
       return;
@@ -254,16 +298,41 @@ function LegacyChat({
           throw new Error("Reconnect the AI before sending another message.");
         client.invalidateQueries({ queryKey: ["agents"] });
       }
+      let recipients = sendIds;
+      let note: RoutedNote | undefined;
+      if (!recipients.length) {
+        setRoutingBusy(true);
+        try {
+          const picked = await routeWithLead({
+            conversationId: id,
+            lead: routing.lead,
+            text: draft,
+            purpose: routing.purpose,
+          });
+          if (!picked.ids.length)
+            throw new Error(
+              "The lead did not pick a recipient. Type @ to address an agent, or choose one below.",
+            );
+          recipients = picked.ids;
+          note = { by: routing.lead, reason: picked.reason, ids: picked.ids };
+        } finally {
+          setRoutingBusy(false);
+        }
+      }
       const result = await api<{
         tasks: Task[];
         errors: Record<string, string>;
       }>("send", {
         conversationId: id,
         text: draft,
-        recipients: targets,
+        recipients,
         contextRefs: refs,
         idempotencyKey: pendingKey.current,
       });
+      if (note) {
+        for (const sent of result.tasks) writeRouteNote(id, sent.messageId, note);
+        setRouteNotes(readRouteNotes(id));
+      }
       const failures = Object.entries(result.errors);
       if (failures.length) {
         setError(failures.map(([id, error]) => id + ": " + error).join("\n"));
@@ -561,7 +630,8 @@ function LegacyChat({
                     <>
                       Tell your agents what you’re working on.
                       <br />
-                      Select an exact recipient below to start.
+                      Type @ to address an agent, or just write. Meshra shows who
+                      receives it.
                     </>
                   )}
                 </p>
@@ -600,6 +670,15 @@ function LegacyChat({
                         </time>
                       </div>
                       <Markdown text={t.text} />
+                      {routeNotes[t.messageId] && (
+                        <p className="route-note">
+                          <Route size={12} />
+                          Routed by <code>{routeNotes[t.messageId].by}</code>
+                          {routeNotes[t.messageId].reason
+                            ? ": " + routeNotes[t.messageId].reason
+                            : ""}
+                        </p>
+                      )}
                       {!!t.contextRefs?.length && (
                         <div className="message-refs">
                           {t.contextRefs.map((ref) => (
@@ -657,6 +736,18 @@ function LegacyChat({
                                 another message.
                               </p>
                             )}
+                            {!isChat && (
+                              <RetryWith
+                                task={t}
+                                members={members}
+                                onSent={async () => {
+                                  nearBottom.current = true;
+                                  await client.invalidateQueries({
+                                    queryKey: ["timeline", id],
+                                  });
+                                }}
+                              />
+                            )}
                           </div>
                         </div>
                       )}
@@ -704,6 +795,7 @@ function LegacyChat({
             New messages · jump to latest
           </Button>
         )}
+        {!isChat && <ChatQueue conversationId={id} members={members} />}
         <div className="composer-area">
           {isChat && conversation.data && (
             <ChatAIStatus
@@ -755,11 +847,13 @@ function LegacyChat({
                 <span>To</span>
                 <details className="recipient-picker">
                   <summary>
-                    {targets.length === 0
-                      ? "Choose recipient"
-                      : targets.length === 1
-                        ? targets[0]
-                        : targets.length + " selected recipients"}
+                    {sendIds.length === 0
+                      ? leadRoutes
+                        ? "Lead chooses"
+                        : "Choose recipient"
+                      : sendIds.length === 1
+                        ? sendIds[0]
+                        : sendIds.length + " recipients"}
                     <ChevronDown size={13} />
                   </summary>
                   <div className="recipient-options">
@@ -794,11 +888,17 @@ function LegacyChat({
                     )}
                   </div>
                 </details>
+                <RoutingControl
+                  conversationId={id}
+                  members={members}
+                  value={routing}
+                  onChange={setRouting}
+                />
                 <span className="composer-private">
                   <ShieldCheck size={12} />
-                  {targets.length > 1
-                    ? "Explicit multi-recipient send"
-                    : "Targeted message"}
+                  {route.reason === "none" && leadRoutes
+                    ? "Lead " + routing.lead + " will choose"
+                    : reasonText[route.reason]}
                 </span>
               </div>
             )}
@@ -824,6 +924,28 @@ function LegacyChat({
                 ))}
               </div>
             )}
+            {open && options.length > 0 && (
+              <ul className="mention-list" id="mention-list" role="listbox" aria-label="Address an agent">
+                {options.map((m, i) => (
+                  <li
+                    key={m.id}
+                    role="option"
+                    aria-selected={i === Math.min(mentionIndex, options.length - 1)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickMention(m);
+                    }}
+                  >
+                    <strong>@{m.id === "everyone" ? "everyone" : handle(m)}</strong>
+                    <small>
+                      {m.id === "everyone"
+                        ? "Every member of this chat"
+                        : m.id}
+                    </small>
+                  </li>
+                ))}
+              </ul>
+            )}
             <label className="sr-only" htmlFor="message-draft">
               Message selected agents
             </label>
@@ -835,19 +957,46 @@ function LegacyChat({
               maxLength={60000}
               onChange={(e) => {
                 setDraft(e.target.value);
+                setCaret(e.target.selectionStart);
+                setMentionIndex(0);
                 pendingKey.current = "";
                 localWrite("pending-send:" + id, "");
               }}
+              onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+              role={open && options.length ? "combobox" : undefined}
+              aria-expanded={open && options.length ? true : undefined}
+              aria-controls={open && options.length ? "mention-list" : undefined}
               placeholder={
                 isChat
                   ? "Message your AI…"
-                  : targets.length
+                  : sendIds.length || leadRoutes
                     ? "Give your agent a clear task or ask a question…"
-                    : "Choose who should receive your message…"
+                    : "Type @ to address an agent, or choose a recipient…"
               }
               rows={2}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
+                if (open && options.length) {
+                  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setMentionIndex(
+                      (i) =>
+                        (i + (e.key === "ArrowDown" ? 1 : -1) + options.length) %
+                        options.length,
+                    );
+                    return;
+                  }
+                  if (e.key === "Enter" || e.key === "Tab") {
+                    e.preventDefault();
+                    pickMention(options[Math.min(mentionIndex, options.length - 1)]);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setCaret(0);
+                    return;
+                  }
+                }
                 if (
                   e.key === "Enter" &&
                   !e.shiftKey &&
@@ -892,15 +1041,17 @@ function LegacyChat({
                     sending ||
                     !draft.trim() ||
                     new TextEncoder().encode(draft).length > 65536 ||
-                    !targets.length ||
+                    (!sendIds.length && !canLeadRoute) ||
                     !navigator.onLine
                   }
                   size="sm"
                 >
-                  {sending
+                  {routingBusy
+                    ? "Lead is choosing…"
+                    : sending
                     ? "Sending…"
-                    : targets.length > 1
-                      ? "Send to " + targets.length + " agents"
+                    : sendIds.length > 1
+                      ? "Send to " + sendIds.length + " agents"
                       : "Send message"}
                   <Send size={14} />
                 </Button>
@@ -1044,7 +1195,7 @@ function LegacyChat({
       >
         <ContextBrowser
           compact
-          recipients={targets}
+          recipients={sendIds}
           onAttach={(ref) => {
             pendingKey.current = "";
             localWrite("pending-send:" + id, "");

@@ -38,7 +38,7 @@ func (s *server) automation(w http.ResponseWriter, r *http.Request, p model.Prin
 
 func automationStatus(operation string, payload json.RawMessage) int {
 	switch operation {
-	case "profiles.send", "profiles.generate", "routines.run", "voice.transcribe", "voice.synthesize":
+	case "profiles.send", "profiles.generate", "routing.route", "routines.run", "voice.transcribe", "voice.synthesize":
 		return http.StatusAccepted
 	case "profiles.createConversation", "routineTokens.create", "templates.import", "browser.open":
 		return http.StatusCreated

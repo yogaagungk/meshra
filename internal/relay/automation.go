@@ -49,6 +49,8 @@ func (r *Relay) Automation(ctx context.Context, p model.Principal, operation str
 		return r.profileStoreOperation(p, operation, payload)
 	case "profiles.createConversation", "profiles.conversations", "profiles.bindingAction", "profiles.switch", "profiles.switchPreview", "profiles.generate", "profiles.generationDraft":
 		return r.profileContinuityOperation(ctx, p, operation, payload)
+	case "routing.route", "routing.result":
+		return r.routingOperation(ctx, p, operation, payload)
 	case "profiles.binding", "skills.bindings":
 		return r.automationBindingQuery(ctx, p, operation, payload)
 	case "profiles.send":

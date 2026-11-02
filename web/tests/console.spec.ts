@@ -229,8 +229,12 @@ test("context access checks and cancelling queued collaboration stay usable with
     .filter({ has: page.getByText("omp:adsengine", { exact: true }) });
   await removed.getByRole("button", { name: "Remove", exact: true }).click();
   await page.getByRole("button", { name: "Close dialog" }).click();
+  // A single remaining member is addressed automatically and the reason is shown.
   await expect(page.locator(".recipient-picker summary")).toContainText(
-    "Choose recipient",
+    "claude:apmobilewallet",
+  );
+  await expect(page.locator(".composer-private")).toContainText(
+    "Only member of this chat",
   );
 });
 
@@ -447,4 +451,36 @@ test("chat renders Mermaid diagrams and tables without losing source", async ({ 
   await expect(page.locator(".markdown table").first()).toContainText("Ready");
   await page.getByRole("button", { name: "Code", exact: true }).first().click();
   await expect(page.locator(".code-block").first()).toContainText("A[Start] --> B[Done]");
+});
+
+test("mentions and implicit follow-ups route without choosing a recipient, and lead routing is offered", async ({
+  page,
+}) => {
+  await login(page);
+  await create(page, "Mention routing", ["claude:apmobilewallet", "omp:adsengine"]);
+  const composer = page.getByLabel("Message selected agents");
+  // Nothing resolves yet: the composer says so and never broadcasts.
+  await composer.fill("hello");
+  await expect(page.locator(".composer-private")).toContainText("Type @ to address an agent");
+  await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+  // Typing @ offers members and completes with the keyboard.
+  await composer.fill("@ads");
+  await expect(page.getByRole("listbox", { name: "Address an agent" })).toContainText("omp:adsengine");
+  await page.keyboard.press("Enter");
+  await expect(composer).toHaveValue("@adsengine ");
+  await composer.pressSequentially("approval check");
+  await expect(page.locator(".composer-private")).toContainText("Addressed by mention");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.locator(".message-target code")).toHaveText("omp:adsengine");
+  await expect(page.locator(".delivery-completed")).toBeVisible();
+  // The next plain message follows up with the agent addressed last.
+  await composer.fill("and one more thing");
+  await expect(page.locator(".composer-private")).toContainText("Follow-up to your last message");
+  await expect(page.locator(".recipient-picker summary")).toContainText("omp:adsengine");
+  // @everyone addresses every member explicitly.
+  await composer.fill("@everyone status?");
+  await expect(page.getByRole("button", { name: "Send to 2 agents", exact: true })).toBeEnabled();
+  // Lead routing is offered only for members that can run tool-free turns.
+  await page.getByText("Auto-route", { exact: true }).click();
+  await expect(page.getByLabel("Lead agent")).toBeVisible();
 });

@@ -38,6 +38,9 @@ import { Markdown } from "./Markdown";
 import { Delivery } from "./Chat";
 import { AgentAvatar, AvatarPicker, defaultAvatar } from "./components/AgentAvatar";
 import { harnessName } from "./HarnessLogo";
+
+/** Auto-created per-agent folders are not a project name worth showing. */
+const generalWorkspace = (cwd: string) => /\/agent-\d+\/?$/.test(cwd);
 import {
   mergeTasks,
   terminal,
@@ -250,8 +253,10 @@ function Agents({
           onChange={(e) => setFilter(e.target.value)}
         >
           <option value="all">All harnesses</option>
-          {["claude", "codex", "omp", "opencode"].map((h) => (
-            <option key={h}>{h}</option>
+          {[...new Set(agents.map((a) => a.harness))].sort().map((h) => (
+            <option key={h} value={h}>
+              {harnessName(h)}
+            </option>
           ))}
         </select>
         <Button onClick={() => setCreate(true)}>
@@ -292,23 +297,30 @@ function Agents({
                 className="agent-card-title"
                 onClick={() => setSelected(a)}
               >
-                <h2>{a.id}</h2>
+                <span className="agent-card-name">
+                  <h2>{a.name || a.id}</h2>
+                  <code className="agent-id" title="Exact agent identity">
+                    {a.id}
+                  </code>
+                </span>
                 <ArrowUpRight size={16} />
               </button>
               <p className="agent-workspace" title={a.cwd}>
-                {a.cwd}
+                {generalWorkspace(a.cwd) ? "General workspace" : a.cwd.split("/").filter(Boolean).pop() || a.cwd}
               </p>
               <div className="agent-card-details">
-                <span>{a.harness}</span>
-                <span>
-                  {a.policy.delegate ? "Delegation enabled" : "Direct requests"}
-                </span>
+                <span>{harnessName(a.harness)}</span>
+                {a.policy.delegate && <span>Can delegate to agents</span>}
               </div>
               {a.error && <p className="text-error">{a.error}</p>}
               <div className="agent-card-footer">
                 <span>
                   <span className="status-dot" />
-                  {a.sessionId ? "Owned session" : "No session allocated"}
+                  {a.state === "busy"
+                    ? "Working now"
+                    : a.sessionId
+                      ? "Session ready"
+                      : "Starts on first message"}
                 </span>
                 <Button
                   variant="outline"

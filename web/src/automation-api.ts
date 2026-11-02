@@ -423,6 +423,8 @@ export type AutomationOperations = {
   "profiles.resetContext": Operation<RevisionRequest & { conversationId: string }, { epoch: number; resetAfterSeq: number }>;
   "queue.list": Operation<{ agentId?: string; profileId?: string }, { items: QueueState[] }>;
   "queue.pause": Operation<{ agentId: string; expectedRevision: number }, QueueState>;
+  "routing.route": Operation<{ conversationId: string; leadAgentId: string; text: string; purpose?: string }, { taskId: string; state: string; startError?: string }>;
+  "routing.result": Operation<{ taskId: string }, { taskId: string; state: string; agentIds?: string[]; reason?: string; error?: string }>;
   "queue.resume": Operation<{ agentId: string; expectedRevision: number }, QueueState>;
   "queue.reorder": Operation<{ agentId: string; expectedRevision: number; taskIds: string[] }, QueueState>;
   "history.search": Operation<Pagination & {

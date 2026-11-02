@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Routing and coordination
+
+- Address agents with `@name` or `@everyone`, with keyboard autocomplete; a lone member or the agents last addressed receive plain messages, and the composer shows why. Nothing is ever broadcast implicitly.
+- Add optional lead routing (`routing.route`, `routing.result`): a lead on a verified tool-free harness picks recipients in a disposable turn; answers are strictly decoded and narrowed to current participants.
+- Show queued messages in chat with pause, resume, run next and cancel; offer "Try with another agent" on failed turns instead of replaying automatically.
+- Make agent cards lead with the friendly name and keep the exact ID visible; open the describe-an-agent draft by default for new profiles.
+- Refactor profile generation onto a shared disposable tool-free turn helper.
+
 ### Console revamp
 
 - Refresh the light and dark glass surfaces with flat backgrounds and colored navigation.
