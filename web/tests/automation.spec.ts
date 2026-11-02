@@ -27,6 +27,13 @@ async function post(page: Page, csrf: string, path: string, data: unknown) {
 
 test("automation: write a skill, pin it, build a flow with a diagram, and manage the queue", async ({ page }) => {
   const csrf = await connect(page);
+  // Routines: with no profile the dialog explains what is missing instead of asking for an ID.
+  await page.goto("./#automation/routines");
+  await page.getByRole("button", { name: "Create a routine" }).click();
+  await expect(page.getByText(/needs a profile/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create routine" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+
   const workspace = await post(page, csrf, "workspaces/add", { path: mkdtempSync(join(tmpdir(), "meshra-auto-")), name: "Automation workspace" });
   for (const name of ["Planner", "Builder"]) {
     await post(page, csrf, "automation/profiles.save", {
@@ -97,6 +104,27 @@ test("automation: write a skill, pin it, build a flow with a diagram, and manage
   await page.locator("article", { hasText: "Planner" }).getByRole("button", { name: "Edit" }).click();
   await expect(page.getByRole("checkbox", { name: "Pull request review" })).toBeChecked();
   await page.keyboard.press("Escape");
+
+  // Routines can be created from the UI: manual with a flow, and one-time with a date.
+  await page.goto("./#automation/routines");
+  await page.getByRole("button", { name: "Create a routine" }).click();
+  await page.getByLabel("Name", { exact: true }).fill("Weekly review");
+  await page.getByLabel("Who runs it").selectOption({ label: "Planner" });
+  await page.getByLabel("Instruction").fill("Review the week");
+  await page.getByLabel("Trigger").selectOption("manual");
+  await page.getByLabel("Run a flow (optional)").selectOption({ label: "Plan then build (2 steps)" });
+  await page.getByRole("button", { name: "Create routine" }).click();
+  await expect(page.locator("section.automation-card", { hasText: "Weekly review" })).toContainText("Flow: Plan then build");
+  await page.getByRole("button", { name: "New routine" }).click();
+  await page.getByLabel("Name", { exact: true }).fill("One-time kickoff");
+  await page.getByLabel("Who runs it").selectOption({ label: "Builder" });
+  await page.getByLabel("Instruction").fill("Kick things off");
+  await page.getByLabel("Trigger").selectOption("once");
+  await expect(page.getByRole("button", { name: "Create routine" })).toBeDisabled();
+  const tomorrow = new Date(Date.now() + 86400000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  await page.getByLabel("Run at").fill(tomorrow);
+  await page.getByRole("button", { name: "Create routine" }).click();
+  await expect(page.locator("section.automation-card", { hasText: "One-time kickoff" })).toBeVisible();
 
   // Routines and Runs: a manual run leaves a receipt that explains itself.
   const profiles = await (await page.request.post("./api/automation/profiles.list", { headers: { "X-Meshra-CSRF": csrf }, data: { limit: 100 } })).json();

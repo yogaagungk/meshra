@@ -477,6 +477,14 @@ function RoutineDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [secret, setSecret] = useState("");
+  const [at, setAt] = useState("");
+  const [timeZone, setTimeZone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  const [flowId, setFlowId] = useState("");
+  const profiles = useProfiles();
+  const flows = useQuery({ queryKey: ["flows"], queryFn: () => automation("flows.list", { limit: 100 }), enabled: open });
+  const activeProfiles = profiles.items.filter((p) => !p.archived);
+  const needsDate = kind === "once";
+  const ready = !!name.trim() && !!profileId && !!instruction.trim() && (!needsDate || !!at) && (kind !== "cron" || !!expression.trim());
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -484,10 +492,12 @@ function RoutineDialog({
     setError("");
     const trigger: RoutineTrigger =
       kind === "cron"
-        ? { kind: "cron", expression, timeZone: "UTC" }
+        ? { kind: "cron", expression, timeZone }
         : kind === "interval"
           ? { kind: "interval", everySeconds: Number(everySeconds) }
-          : { kind };
+          : kind === "once"
+            ? { kind: "once", at: new Date(at).toISOString() }
+            : { kind };
     try {
       const result = await automation("routines.save", {
         routine: {
@@ -495,6 +505,7 @@ function RoutineDialog({
           profileId,
           instruction,
           trigger,
+          ...(flowId ? { flowId } : {}),
           enabled,
           autoStart,
           timeoutSeconds: 3600,
@@ -518,7 +529,7 @@ function RoutineDialog({
       open={open}
       onOpenChange={onClose}
       title="New routine"
-      description="A routine claims one occurrence at a time and keeps a receipt for it."
+      description="Runs one profile with your instruction, on a schedule or when you trigger it. Every occurrence keeps a receipt in Runs."
     >
       <form className="form-stack" onSubmit={save}>
         <label htmlFor="routine-name">Name</label>
@@ -529,14 +540,24 @@ function RoutineDialog({
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
-        <label htmlFor="routine-profile">Profile</label>
-        <input
-          id="routine-profile"
-          required
-          value={profileId}
-          onChange={(e) => setProfileId(e.target.value)}
-          placeholder="Profile id"
-        />
+        <label htmlFor="routine-profile">Who runs it</label>
+        {profiles.isPending ? (
+          <p role="status" className="muted">Loading profiles…</p>
+        ) : !activeProfiles.length ? (
+          <p className="policy-note">
+            A routine needs a profile: a saved agent with instructions, a workspace and a provider.
+            You have none yet. <a href="#agents" onClick={onClose}>Create one under Agents → Profiles</a>, then come back.
+          </p>
+        ) : (
+          <select id="routine-profile" required value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+            <option value="">Choose a profile…</option>
+            {activeProfiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        )}
         <label htmlFor="routine-instruction">Instruction</label>
         <textarea
           id="routine-instruction"
@@ -554,8 +575,26 @@ function RoutineDialog({
           <option value="interval">Every interval</option>
           <option value="cron">Cron schedule</option>
           <option value="once">Once</option>
-          <option value="manual">Manual only</option>
+          <option value="webhook">When a webhook is called</option>
+          <option value="manual">Manual only (Run now)</option>
         </select>
+        {kind === "once" && (
+          <>
+            <label htmlFor="routine-at">Run at</label>
+            <input
+              id="routine-at"
+              type="datetime-local"
+              required
+              value={at}
+              min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+              onChange={(e) => setAt(e.target.value)}
+            />
+            <small className="muted">Your local time. It must be in the future.</small>
+          </>
+        )}
+        {kind === "webhook" && (
+          <small className="muted">A secret is generated when you create the routine and shown once. Calls must be signed with it.</small>
+        )}
         {kind === "interval" && (
           <>
             <label htmlFor="routine-interval">Interval in seconds</label>
@@ -578,6 +617,22 @@ function RoutineDialog({
               value={expression}
               onChange={(e) => setExpression(e.target.value)}
             />
+            <small className="muted">Minute, hour, day, month, weekday. Example: 0 9 * * 1-5 is 09:00 on weekdays.</small>
+            <label htmlFor="routine-zone">Time zone</label>
+            <input id="routine-zone" value={timeZone} onChange={(e) => setTimeZone(e.target.value)} />
+          </>
+        )}
+        {!!flows.data?.items.length && (
+          <>
+            <label htmlFor="routine-flow">Run a flow (optional)</label>
+            <select id="routine-flow" value={flowId} onChange={(e) => setFlowId(e.target.value)}>
+              <option value="">No: just run the instruction above</option>
+              {flows.data.items.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name || "Untitled flow"} ({f.nodes.length} steps)
+                </option>
+              ))}
+            </select>
           </>
         )}
         <label className="automation-inline">
@@ -586,7 +641,7 @@ function RoutineDialog({
             checked={autoStart}
             onChange={(e) => setAutoStart(e.target.checked)}
           />
-          Allow this routine to start its own bindings
+          Start the agent automatically if it is stopped
         </label>
         <label className="automation-inline">
           <input
@@ -628,7 +683,7 @@ function RoutineDialog({
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy || !name.trim() || !profileId}>
+          <Button type="submit" disabled={busy || !ready}>
             {busy ? "Saving…" : "Create routine"}
           </Button>
         </div>
