@@ -4,7 +4,7 @@ Adapter support is intentionally asymmetric. A registered identity is durable ev
 
 | Adapter | Inspected implementation | Prompt | Text stream | Resume | Cancel | Automatic task-bound MCP | Tool/approval policy |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Direct API | OpenAI-compatible `POST /chat/completions` over HTTP, no subprocess | Yes | Final text | None; Meshra sends bounded history each turn | Request cancellation | Broker tools only | Brokered tools only; never runs a native shell |
+| Direct API | OpenAI-compatible `POST /chat/completions` over HTTP, no subprocess | Yes | SSE where supported; buffered and redacted by the relay | None; Meshra sends bounded history each turn | Request cancellation | Broker tools only | Brokered tools only; approved commands run in a private sandbox |
 | OMP | CLI 18.12.1, custom RPC v2 over stdio | Yes | Yes | Saved session ID in per-identity session directory | Native abort, forced process cleanup if needed | No | **Full access**: builtin tools with `--approval-mode=yolo`; discovery/project MCP disabled. Tool-free profile drafts keep `--no-tools` |
 | Claude | Agent SDK 0.3.303, bundled Claude Code 2.1.303 | Yes | Yes | SDK native session ID | AbortController and owned process-group cleanup | Yes | **Full access**: `bypassPermissions`, every tool allowed. Tool-free profile drafts still deny all tools |
 
@@ -20,6 +20,17 @@ Exact commands, frame fields, version limitations, safety controls and native st
 ## Installation
 
 OMP must be on the daemon PATH. Install and authenticate it through its native procedure; OMP can itself use OpenCode, OpenRouter and Codex subscriptions. A Direct API connection needs no CLI: save its endpoint and key under Settings → Connections.
+
+Direct API profile turns separate stable instructions from the user task, enforce a
+configurable `maxToolCalls` (default 40), detect repeated calls, parallelize
+read-only tools and compact older tool context at 75% of the configured context
+window. Streaming falls back only when the endpoint explicitly rejects it.
+New Direct API tools include turn-local todos, profile-scoped session search,
+reviewable skill proposals, sandboxed background processes, and approved
+read-only Python with nested calls through the same broker. See
+[the execute-code threat model](design/execute-code.md). Commands and code
+require human approval; changes to the original workspace still require a
+separate changeset approval.
 
 ```sh
 npm ci --prefix bridges/claude-agent-sdk --ignore-scripts

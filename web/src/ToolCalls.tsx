@@ -23,6 +23,24 @@ type ToolItem = {
   done: boolean;
 };
 
+type TodoItem = { id: string; text: string; status: "pending" | "in_progress" | "done" };
+
+/** The latest todo event is a complete snapshot of the turn's plan. */
+function todoItems(events: TraceEvent[]): TodoItem[] | undefined {
+  const event = events.filter((e) => e.type === "todo").at(-1);
+  if (!event) return undefined;
+  try {
+    const data: unknown = JSON.parse(event.data);
+    if (!Array.isArray(data)) return undefined;
+    return data.filter((item): item is TodoItem =>
+      item !== null && typeof item === "object" &&
+      typeof item.id === "string" && typeof item.text === "string" &&
+      ["pending", "in_progress", "done"].includes(item.status));
+  } catch {
+    return undefined;
+  }
+}
+
 /** Pair tool_use and tool_result events by call id, in the order they began. */
 export function toolItems(events: TraceEvent[]): ToolItem[] {
   const items = new Map<string, ToolItem>();
@@ -90,14 +108,24 @@ export function ToolCalls({ task }: { task: Task }) {
   const wanted = running || (task.toolCalls ?? 0) > 0;
   const events = useQuery({
     queryKey: ["task-tools", task.taskId, task.toolCalls ?? 0, running],
-    queryFn: () => api<TraceEvent[]>("tasks/" + encodeURIComponent(task.taskId) + "/events?after=0"),
+    queryFn: async () => {
+      const all: TraceEvent[] = [];
+      let after = 0;
+      for (;;) {
+        const page = await api<TraceEvent[]>("tasks/" + encodeURIComponent(task.taskId) + "/events?after=" + after);
+        all.push(...page);
+        if (page.length < 256) return all;
+        after = page[page.length - 1].id;
+      }
+    },
     enabled: wanted,
     refetchInterval: running ? 1200 : false,
     staleTime: running ? 0 : Infinity,
     gcTime: 5 * 60_000,
   });
   const items = toolItems(events.data ?? []);
-  if (!items.length) return null;
+  const todos = todoItems(events.data ?? []);
+  if (!items.length && !todos) return null;
   const active = running ? items.filter((i) => !i.done).at(-1) : undefined;
   const failed = items.filter((i) => i.isError).length;
   return (
@@ -124,13 +152,28 @@ export function ToolCalls({ task }: { task: Task }) {
             </>
           ) : (
             <>
-              Used {items.length} tool{items.length === 1 ? "" : "s"}
+              {items.length ? `Used ${items.length} tool${items.length === 1 ? "" : "s"}` : "Turn plan"}
               {failed ? ` · ${failed} failed` : ""}
             </>
           )}
         </span>
       </button>
       {open && (
+        <>
+        {todos && (
+          <div className="tool-call-body">
+            <h4>Turn plan</h4>
+            {todos.length ? (
+              <ul>
+                {todos.map((todo) => (
+                  <li key={todo.id}>
+                    {todo.text} <span className="muted"> · {todo.status === "in_progress" ? "In progress" : todo.status === "done" ? "Done" : "Pending"}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="muted">No plan items.</p>}
+          </div>
+        )}
         <ol className="tool-calls-list">
           {items.map((item) => {
             const Icon = iconFor(item.name);
@@ -171,6 +214,7 @@ export function ToolCalls({ task }: { task: Task }) {
             );
           })}
         </ol>
+        </>
       )}
     </div>
   );

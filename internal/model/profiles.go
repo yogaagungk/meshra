@@ -27,6 +27,8 @@ type Profile struct {
 	WorkspaceID          string              `json:"workspaceId"`
 	Binding              ProfileProvider     `json:"binding"`
 	Capabilities         ProfileCapabilities `json:"capabilities"`
+	MemoryWriteApproval  string              `json:"memoryWriteApproval,omitempty"`
+	MaxToolCalls         int                 `json:"maxToolCalls,omitempty"`
 	AllowedProfileIDs    []string            `json:"allowedProfileIds"`
 	NotificationsEnabled bool                `json:"notificationsEnabled"`
 	Archived             bool                `json:"archived"`

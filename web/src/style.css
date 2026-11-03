@@ -4727,3 +4727,19 @@ h3 {
   margin-top: 10px;
   font-size: var(--font-meta);
 }
+.welcome-content > p {
+  margin-left: auto;
+  margin-right: auto;
+}
+.dialog-content textarea,
+.automation-page textarea {
+  padding: 10px 12px;
+  width: 100%;
+}
+@media (min-width: 760px) {
+  .dialog-content,
+  .dialog-content.dialog-wide {
+    min-width: 700px;
+    max-width: max(700px, 720px);
+  }
+}

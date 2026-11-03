@@ -133,6 +133,8 @@ func (r *Relay) profileHistoryOperation(ctx context.Context, p model.Principal, 
 		return nil, err
 	}
 	switch op {
+	case "session.search":
+		return r.profileSessionSearch(ctx, p, raw)
 	case "history.search":
 		var q profileHistorySearchRequest
 		if err := decodeAutomation(raw, &q); err != nil {

@@ -13,7 +13,7 @@ import { Attachments } from "./Attachments";
 import { BrowserPanel } from "./BrowserPanel";
 import { Voice } from "./Voice";
 import { ContextBrowser } from "./Operations";
-import { mergeTasks, stateLabel, terminal, type Agent, type Conversation, type Page } from "./types";
+import { mergeTasks, stateLabel, terminal, type Agent, type Conversation, type Page, type Task } from "./types";
 
 export function ProfileChat({ conversation, agents, onNew }: { conversation: Conversation; agents: Agent[]; onNew: () => void }) {
   const client = useQueryClient();
@@ -33,6 +33,8 @@ export function ProfileChat({ conversation, agents, onNew }: { conversation: Con
   const binding = useQuery({ queryKey: ["automation", "binding", recipient, id], queryFn: () => automation("profiles.binding", { profileId: recipient, conversationId: id }), enabled: !!recipient, gcTime: 0 });
   const agent = agents.find((item) => item.id === binding.data?.agentId);
   const timeline = useInfiniteQuery({ queryKey: ["timeline", id], queryFn: ({ pageParam }) => api<Page>("timeline?conversationId=" + encodeURIComponent(id) + "&limit=20&before=" + pageParam), initialPageParam: 0, getNextPageParam: (page) => page.hasMore ? page.nextBefore : undefined, maxPages: 1, gcTime: 0 });
+  const sourceTaskId = decodeURIComponent(location.hash.slice(1).split("/")[2] || "");
+  const sourceTask = useQuery({ queryKey: ["journey-source-task", id, sourceTaskId], queryFn: () => api<Task>("tasks/" + encodeURIComponent(sourceTaskId)), enabled: !!sourceTaskId, retry: false, gcTime: 0 });
   const tasks = mergeTasks(timeline.data?.pages || []);
   useEffect(() => {
     let timer: number | undefined;
@@ -70,6 +72,10 @@ export function ProfileChat({ conversation, agents, onNew }: { conversation: Con
     </div>
     {error && <Notice>{error}</Notice>}{profiles.isError && <Notice>{profiles.error.message}</Notice>}{binding.isError && <Notice>{binding.error.message}</Notice>}
     <div className="chat-timeline"><div className="timeline-inner">
+      {sourceTaskId && <section className="automation-card" aria-label="Source task">
+        <div className="automation-card-head"><strong>Source task</strong><Button variant="ghost" size="sm" onClick={() => go("chat", id)}>Close</Button></div>
+        {sourceTask.isPending ? <p role="status">Loading source task…</p> : sourceTask.isError ? <Notice>{sourceTask.error.message}</Notice> : !sourceTask.data || sourceTask.data.conversationId !== id ? <Notice>Source task is not in this conversation.</Notice> : <><small>{stateLabel(sourceTask.data)} · {new Date(sourceTask.data.createdAt).toLocaleString()}</small><Markdown text={sourceTask.data.text} />{sourceTask.data.result && <Markdown text={sourceTask.data.result} />}{sourceTask.data.error && <Notice>{sourceTask.data.error}</Notice>}</>}
+      </section>}
       {timeline.isError && <Notice>{timeline.error.message}</Notice>}{timeline.hasNextPage && <Button variant="outline" disabled={timeline.isFetchingNextPage} onClick={() => void timeline.fetchNextPage()}>Older messages</Button>}{timeline.data?.pageParams[0] !== 0 && <Button variant="outline" onClick={() => void client.resetQueries({ queryKey: ["timeline", id] })}>Latest messages</Button>}
       {tasks.map((task) => <article className="automation-card" key={task.taskId}><header className="automation-card-head"><strong>{profiles.data?.find((profile) => profile.id === task.to)?.name || task.to}</strong><span>{stateLabel(task)}</span></header><Markdown text={task.text} />{task.result && <Markdown text={task.result} />}{task.error && <Notice>{task.error}</Notice>}<Button variant="ghost" size="sm" onClick={() => { localWrite("routine-prefill", { name: task.text.slice(0, 60), profileId: task.to, instruction: task.text }); goAutomation("routines"); }}>Schedule this</Button>{!terminal(task.state) && <Button variant="outline" onClick={() => { void api("tasks/" + encodeURIComponent(task.taskId) + "/cancel", {}).then(() => client.invalidateQueries({ queryKey: ["timeline", id] })).catch((e: Error) => setError(e.message)); }}>Cancel task</Button>}{!!task.attachmentIds?.length && <small className="muted">Files: {task.attachmentIds.join(", ")}</small>}</article>)}
       {!timeline.isPending && !tasks.length && <p className="muted">Choose a recipient and queue your first message. Starting a binding is explicit; stopped automatic work stays queued.</p>}

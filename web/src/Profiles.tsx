@@ -92,6 +92,13 @@ const EMPTY_CAPABILITIES: ProfileCapabilities = {
   attachments: false,
 };
 
+const CAPABILITY_PRESETS: { name: string; keys: CapabilityKey[]; description: string }[] = [
+  { name: "Chat only", keys: [], description: "Conversation without brokered tools or attachments." },
+  { name: "Research", keys: ["workspaceRead", "attachments"], description: "Read workspace files and receive attachments; conversation history remains available." },
+  { name: "Developer", keys: ["workspaceRead", "workspaceWrite", "command"], description: "Read and edit workspace files and run commands." },
+  { name: "Full", keys: capabilityLabels.map(({ key }) => key), description: "Enable all capabilities, subject to configured backends and approvals." },
+];
+
 /**
  * Profiles are portable coworkers: an identity, a workspace, an explicit
  * capability set and the providers it may talk to. Every control here is
@@ -289,6 +296,8 @@ function ProfileDialog({
     { ...EMPTY_CAPABILITIES },
   );
   const [allowed, setAllowed] = useState<string[]>([]);
+  const [memoryWriteApproval, setMemoryWriteApproval] = useState<"off" | "on">("off");
+  const [maxToolCalls, setMaxToolCalls] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [picker, setPicker] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -354,6 +363,8 @@ function ProfileDialog({
       setCapabilities({ ...profile.capabilities });
       setAllowed([...profile.allowedProfileIds]);
       setNotifications(profile.notificationsEnabled);
+      setMemoryWriteApproval(profile.memoryWriteApproval || "off");
+      setMaxToolCalls(profile.maxToolCalls ? String(profile.maxToolCalls) : "");
     } else {
       setName("");
       setInstructions("");
@@ -364,6 +375,8 @@ function ProfileDialog({
       setCapabilities({ ...EMPTY_CAPABILITIES });
       setAllowed([]);
       setNotifications(false);
+      setMemoryWriteApproval("off");
+      setMaxToolCalls("");
     }
   }, [open, profile]);
 
@@ -407,7 +420,7 @@ function ProfileDialog({
   const formValid = !!name.trim() && !!workspaceId &&
     new TextEncoder().encode(name.trim()).length <= 128 &&
     new TextEncoder().encode(instructions).length <= 16384 &&
-    (!connectionHarness || !!provider);
+    (!connectionHarness || (!!provider && (maxToolCalls === "" || (/^\d+$/.test(maxToolCalls) && Number(maxToolCalls) <= 1000))));
 
   useEffect(() => {
     setPreview(null);
@@ -468,6 +481,8 @@ function ProfileDialog({
         capabilities,
         allowedProfileIds: allowed,
         notificationsEnabled: notifications,
+        memoryWriteApproval,
+        ...(connectionHarness ? { maxToolCalls: maxToolCalls === "" ? 0 : Number(maxToolCalls) } : {}),
       });
       await client.invalidateQueries({ queryKey: ["profiles"] });
       if (session === lifecycle.current) onClose();
@@ -666,6 +681,11 @@ function ProfileDialog({
               Model discovery unavailable. The native default stays available.
             </p>
           )}
+          {connectionHarness && <>
+            <label htmlFor="profile-max-tool-calls">Maximum tool calls per turn</label>
+            <input id="profile-max-tool-calls" type="number" min={0} max={1000} step={1} value={maxToolCalls} onChange={(e) => setMaxToolCalls(e.target.value)} placeholder="40 (default)" />
+            <small className="muted">Leave empty or enter 0 to use the default of 40. Maximum: 1000.</small>
+          </>}
           <section className="automation-card" aria-label="Provider and policy disclosure">
             <strong>Provider and policy disclosure</strong>
             <p>
@@ -695,6 +715,27 @@ function ProfileDialog({
           )}
           <fieldset className="automation-capabilities">
             <legend>Capabilities</legend>
+            <p className="muted">Apply a preset to replace the current selection, then adjust individual capabilities below.</p>
+            <div className="automation-inline">
+              {CAPABILITY_PRESETS.map((preset) => (
+                <Button
+                  key={preset.name}
+                  type="button"
+                  variant="outline"
+                  title={preset.description}
+                  onClick={() => {
+                    const next = { ...EMPTY_CAPABILITIES };
+                    for (const key of preset.keys) {
+                      if (savedProfile || !EXECUTION_CAPABILITIES[key]) next[key] = true;
+                    }
+                    setCapabilities(next);
+                  }}
+                >
+                  {preset.name}
+                </Button>
+              ))}
+            </div>
+            <small>Research includes workspace read and attachments. Developer includes read, write and commands. Full selects every capability. Conversation history is available without a separate capability. On new profiles, execution and external capabilities remain disabled, even when included in a preset.</small>
             {capabilityLabels.map((entry) => {
               const locked = !savedProfile && !!EXECUTION_CAPABILITIES[entry.key];
               return (
@@ -721,6 +762,11 @@ function ProfileDialog({
               the corresponding configured backend and operator-reviewed tool/network grants.
             </small>
           </fieldset>
+          <label className="automation-inline">
+            <input type="checkbox" checked={memoryWriteApproval === "on"} onChange={(e) => setMemoryWriteApproval(e.target.checked ? "on" : "off")} />
+            Review agent memory writes before saving
+          </label>
+          <small className="muted">When enabled, proposed memories wait in Automation → Journey for your approval. Off keeps the existing behavior.</small>
           <fieldset className="automation-capabilities">
             <legend>Allowed profiles</legend>
             <small>These are outbound profile communication grants, not conversation participants. At most 64 profiles may be allowed.</small>

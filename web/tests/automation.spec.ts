@@ -103,6 +103,17 @@ test("automation: write a skill, pin it, build a flow with a diagram, and manage
   await page.getByRole("button", { name: "Profiles", exact: true }).click();
   await page.locator("article", { hasText: "Planner" }).getByRole("button", { name: "Edit" }).click();
   await expect(page.getByRole("checkbox", { name: "Pull request review" })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Review agent memory writes before saving" })).not.toBeChecked();
+  await page.getByRole("checkbox", { name: "Review agent memory writes before saving" }).check();
+  await page.getByRole("button", { name: "Save profile" }).click();
+  await page.locator("article", { hasText: "Planner" }).getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByRole("checkbox", { name: "Review agent memory writes before saving" })).toBeChecked();
+  await expect(page.getByLabel("Maximum tool calls per turn")).toHaveCount(0);
+  await page.getByLabel("Provider", { exact: true }).selectOption("openai");
+  await expect(page.getByLabel("Maximum tool calls per turn")).toHaveAttribute("max", "1000");
+  await page.getByLabel("Maximum tool calls per turn").fill("100");
+  await page.getByLabel("Provider", { exact: true }).selectOption("omp");
+  await expect(page.getByLabel("Maximum tool calls per turn")).toHaveCount(0);
   await page.keyboard.press("Escape");
 
   // Routines can be created from the UI: manual with a flow, and one-time with a date.

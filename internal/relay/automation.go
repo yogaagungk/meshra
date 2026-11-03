@@ -59,8 +59,10 @@ func (r *Relay) Automation(ctx context.Context, p model.Principal, operation str
 		return r.queueOperation(p, operation, payload)
 	case "history.search", "history.read":
 		return r.profileHistoryOperation(ctx, p, operation, payload)
-	case "memory.list", "memory.save", "memory.remove":
+	case "memory.list", "memory.save", "memory.remove", "memory.pending.list", "memory.pending.review":
 		return r.profileMemoryOperation(ctx, p, operation, payload)
+	case "approval_policy.get", "approval_policy.set", "approval_rules.list", "approval_rules.create", "approval_rules.revoke", "approval_suggestions.list":
+		return r.approvalPolicyOperation(ctx, p, operation, payload)
 	case "attachments.list", "attachments.remove":
 		return r.attachmentOperation(p, operation, payload)
 	case "profiles.resetContext":
@@ -81,6 +83,8 @@ func (r *Relay) Automation(ctx context.Context, p model.Principal, operation str
 		return r.routineOperation(ctx, p, operation, payload)
 	case "skills.list", "skills.read", "skills.save", "skills.bind", "skills.remove":
 		return r.skillOperation(ctx, p, operation, payload)
+	case "skills.proposals.list", "skills.proposals.review":
+		return r.skillProposalOperation(ctx, p, operation, payload)
 	case "templates.list", "templates.export", "templates.importPreview", "templates.import":
 		return r.templateOperation(ctx, p, operation, payload)
 	case "connectors.list", "connectors.save", "connectors.test", "connectors.setEnabled", "connectors.routesSave", "connectors.remove", "connectors.deliveries", "connectors.retryDelivery":

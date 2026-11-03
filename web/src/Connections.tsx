@@ -88,12 +88,12 @@ function privateHost(origin: string) {
 export function Connections() {
   return (
     <div className="automation-page">
-      <RuntimeReadiness />
       <NetworkGrants />
       <ProviderConnections />
       <MCPConnections />
       <MessagingConnections />
       <VoiceReadiness />
+      <RuntimeReadiness />
     </div>
   );
 }

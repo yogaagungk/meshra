@@ -7,6 +7,28 @@ are `/v1/tasks/ID`. Events have stable increasing numeric IDs and 256-item pages
 Text deltas are deliberately buffered/redacted until completion. The UI must show
 running progress, never simulated token streaming or typing.
 
+## Direct API profile additions
+
+`profiles.save` accepts `maxToolCalls` (0 or omitted defaults to 40) and
+`memoryWriteApproval` (`off` by default, or `on`). With memory review enabled,
+agent memory saves are staged for the operator through `memory.pending.list`
+and `memory.pending.review`; the existing revisioned save path applies approved
+items. Skill proposals are inert until reviewed through `skills.proposals.list`
+and `skills.proposals.review`.
+
+Approval operations `approval_policy.get` / `approval_policy.set`,
+`approval_rules.list` / `approval_rules.create` / `approval_rules.revoke`, and
+`approval_suggestions.list` are local operator operations. The default policy is
+manual. Allowlist rules are opt-in, scoped to a profile, auditable and revocable;
+policy changes invalidate pending approvals. Rules do not authorize external MCP,
+publication, changeset application or unattended runs.
+
+Direct API tool calls can use `meshra_todo` and `meshra_session_search`; search
+results are bounded quoted data and respect profile and conversation access.
+`meshra_history_read` remains conversation-scoped. Background commands and
+code execution use broker approvals and the private workspace sandbox; applying
+workspace changes remains a separate operator decision.
+
 Add `/console/api` for authenticated local **human operator** sessions. Exchange
 an admin token once for a random HttpOnly SameSite=Strict cookie (8-hour absolute
 expiry) and CSRF token held in browser memory. No bearer token is persisted by the

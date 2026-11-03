@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Direct API agent tools
+
+- Separate Direct API system instructions from tasks, stream compatible
+  completions, bound repeated calls, parallelize read-only calls and compact
+  older in-turn context. Profiles can configure `maxToolCalls` (default 40).
+- Add turn-local todos, profile-scoped session search, capability presets,
+  reviewable skill proposals and opt-in memory staging.
+- Add opt-in exact approval rules with audit records, expiry and revocation;
+  unattended actions continue to require human approval.
+- Add confined background process control and reviewed Python execution with
+  nested calls through the same broker; original-workspace application remains
+  a separate approval.
+
 ### Three ways to run an AI
 
 - **Breaking:** remove the Codex, OpenCode and ACP harnesses, their adapters, bridges, connection screens and quota/status code. Only Claude, OMP and Direct API remain. OMP can itself use OpenCode, OpenRouter and Codex subscriptions.

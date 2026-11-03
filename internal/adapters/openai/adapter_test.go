@@ -213,8 +213,8 @@ func TestToolRoundTripDispatchesThroughExecutor(t *testing.T) {
 	if len(second.Tools) != 1 || second.Tools[0].Function.Name != "meshra_workspace_read" {
 		t.Fatalf("the admitted catalog was not offered: %+v", second.Tools)
 	}
-	if second.Stream {
-		t.Fatal("the adapter must request a non-streaming completion")
+	if !second.Stream {
+		t.Fatal("the adapter must request a streaming completion")
 	}
 	if second.Model != "test-model" {
 		t.Fatalf("unexpected model %q", second.Model)
@@ -414,7 +414,7 @@ func TestFailedRequestIsNotReplayed(t *testing.T) {
 func TestToolCallLimitIsEnforced(t *testing.T) {
 	executor := &fakeExecutor{definition: workspaceTool(), result: model.ToolResult{Content: []model.ToolContent{{Type: "text", Text: "ok"}}}}
 	f := newFixture(t, func(w http.ResponseWriter, r *http.Request, call int) {
-		fmt.Fprint(w, toolReply(fmt.Sprintf("call-%d", call), "meshra_workspace_read", `{"path":"a"}`))
+		fmt.Fprint(w, toolReply(fmt.Sprintf("call-%d", call), "meshra_workspace_read", fmt.Sprintf(`{"path":"a%d"}`, call)))
 	})
 	runtime := testRuntime(t, Config{BaseURL: f.server.URL, SupportsTools: true})
 	_, err := runtime.Run(context.Background(), model.Turn{Task: model.Task{Text: "go"}, Tools: executor}, nil)
@@ -524,11 +524,11 @@ func TestCredentialIsNeverReadFromTheEnvironment(t *testing.T) {
 	}
 }
 
-func TestToolCallsAreNeverConcurrent(t *testing.T) {
+func TestReadOnlyToolCallsRunConcurrently(t *testing.T) {
 	executor := &concurrencyExecutor{definition: workspaceTool()}
 	f := newFixture(t, func(w http.ResponseWriter, r *http.Request, call int) {
 		if call == 0 {
-			// Two tool calls in one reply: the adapter dispatches them one at a time.
+			// Independent admitted reads may overlap.
 			fmt.Fprint(w, `{"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":"meshra_workspace_read","arguments":"{\"path\":\"a\"}"}},{"id":"call-2","type":"function","function":{"name":"meshra_workspace_read","arguments":"{\"path\":\"b\"}"}}]}}]}`)
 			return
 		}
@@ -538,8 +538,8 @@ func TestToolCallsAreNeverConcurrent(t *testing.T) {
 	if _, err := runtime.Run(context.Background(), model.Turn{Task: model.Task{Text: "go"}, Tools: executor}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if executor.peak() != 1 {
-		t.Fatalf("tool calls overlapped: %d concurrent dispatches", executor.peak())
+	if executor.peak() != 2 {
+		t.Fatalf("read-only tool calls did not overlap: %d concurrent dispatches", executor.peak())
 	}
 	if executor.count() != 2 {
 		t.Fatalf("expected two tool executions, got %d", executor.count())

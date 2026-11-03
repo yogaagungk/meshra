@@ -145,10 +145,12 @@ type Event struct {
 }
 type Emit func(kind, data string)
 type Turn struct {
-	Tools  ToolExecutor `json:"-"`
-	Task   Task
-	MCPURL string
-	Token  string
+	Tools        ToolExecutor `json:"-"`
+	Task         Task
+	System       string
+	MaxToolCalls int
+	MCPURL       string
+	Token        string
 }
 type Runtime interface {
 	SessionID() string

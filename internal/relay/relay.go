@@ -85,6 +85,15 @@ var migrationV19 string
 //go:embed migrations/020.sql
 var migrationV20 string
 
+//go:embed migrations/021.sql
+var migrationV21 string
+
+//go:embed migrations/023.sql
+var migrationV23 string
+
+//go:embed migrations/024.sql
+var migrationV24 string
+
 // schemaMigrations lists every embedded schema step in order. A new feature
 // appends its own step; existing steps are never renumbered.
 var schemaMigrations = []struct {
@@ -93,6 +102,7 @@ var schemaMigrations = []struct {
 }{
 	{10, migrationV10}, {11, migrationV11}, {12, migrationV12}, {13, migrationV13},
 	{14, migrationV14}, {15, migrationV15}, {16, migrationV16}, {17, migrationV17}, {18, migrationV18}, {19, migrationV19}, {20, migrationV20},
+	{21, migrationV21}, {23, migrationV23}, {24, migrationV24},
 }
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)

@@ -31,6 +31,7 @@ type toolInvocation struct {
 	CallID         string            `json:"callId"`
 	Name           string            `json:"name"`
 	ActionHash     string            `json:"actionHash"`
+	ArgumentsHash  string            `json:"argumentsHash,omitempty"`
 	State          string            `json:"state"`
 	ProfileID      string            `json:"profileId"`
 	BindingID      string            `json:"bindingId"`
@@ -40,22 +41,24 @@ type toolInvocation struct {
 	CreatedAt      time.Time         `json:"createdAt"`
 	Preview        toolPreview       `json:"preview"`
 	Error          string            `json:"error,omitempty"`
+	AllowRuleID    string            `json:"allowRuleId,omitempty"`
 	Result         *model.ToolResult `json:"result,omitempty"`
 }
 type brokerCall struct {
-	requestHash string
-	invocation  toolInvocation
-	action      *toolAction
-	wake        chan struct{}
-	cancel      context.CancelFunc
-	owner       string
-	approvalID  string
-	answer      string
-	done        bool
+	requestHash        string
+	invocation         toolInvocation
+	action             *toolAction
+	wake               chan struct{}
+	cancel             context.CancelFunc
+	owner              string
+	approvalID         string
+	answer             string
+	done               bool
 	externalDispatched bool
-	humanApproved bool
-	result      model.ToolResult
-	err         error
+	humanApproved      bool
+	processStarted     bool
+	result             model.ToolResult
+	err                error
 }
 type toolAction struct {
 	args            any
@@ -68,22 +71,25 @@ type toolAction struct {
 	cleanup         func()
 }
 type toolBroker struct {
-	relay       *Relay
-	taskID      string
-	attempt     int
-	slot        *slot
-	snapshot    model.ProfileTaskSnapshot
-	definitions []model.ToolDefinition
-	ctx         context.Context
-	cancel      context.CancelFunc
-	calls       map[string]*brokerCall
-	mutation    string
-	closed      bool
-	callsWG     sync.WaitGroup
-	workspace   *sandbox.Snapshot
-	socketMu    sync.Mutex
-	socket      *activeToolSocket
-	mcpHandler  *toolmcp.Handler
+	relay          *Relay
+	taskID         string
+	attempt        int
+	slot           *slot
+	snapshot       model.ProfileTaskSnapshot
+	definitions    []model.ToolDefinition
+	ctx            context.Context
+	cancel         context.CancelFunc
+	calls          map[string]*brokerCall
+	mutation       string
+	closed         bool
+	callsWG        sync.WaitGroup
+	workspaceMu    sync.Mutex
+	workspace      *sandbox.Snapshot
+	processes      *brokerProcesses
+	processPending bool
+	socketMu       sync.Mutex
+	socket         *activeToolSocket
+	mcpHandler     *toolmcp.Handler
 }
 
 func (r *Relay) newToolBrokerLocked(ctx context.Context, t model.Task, s *slot) (*toolBroker, error) {
@@ -99,6 +105,7 @@ func (r *Relay) newToolBrokerLocked(ctx context.Context, t model.Task, s *slot) 
 	}
 	child, cancel := context.WithCancel(ctx)
 	b := &toolBroker{relay: r, taskID: t.ID, attempt: t.Attempts, slot: s, snapshot: snapshot, definitions: snapshot.ToolDefinitions, ctx: child, cancel: cancel, calls: make(map[string]*brokerCall)}
+	b.processes = &brokerProcesses{manager: sandbox.NewProcessManager(child), records: make(map[string]*processRecord)}
 	if snapshot.ToolPolicyRevision == 0 {
 		b.definitions = nil
 	}
@@ -224,21 +231,46 @@ func (b *toolBroker) Call(ctx context.Context, call model.ToolCall) (model.ToolR
 		r.mu.Unlock()
 		return result, oldErr
 	}
-	if len(b.calls) >= 40 {
-		r.mu.Unlock()
-		return zero, model.Err(429, "turn tool-call capacity reached")
+	maxCalls := 40
+	if b.snapshot.Binding.Harness == "openai" && b.snapshot.Profile.MaxToolCalls > 0 {
+		maxCalls = b.snapshot.Profile.MaxToolCalls
 	}
-	if action.mutation && b.mutation != "" {
+	if maxCalls > 1000 {
+		maxCalls = 1000
+	}
+	if len(b.calls) >= maxCalls {
+		r.mu.Unlock()
+		return zero, model.Err(429, fmt.Sprintf("turn tool-call capacity reached (%d)", maxCalls))
+	}
+	reserveMutation := action.mutation || call.Name == "meshra_execute_code"
+	if reserveMutation && b.mutation != "" {
 		r.mu.Unlock()
 		return zero, model.Err(409, "another mutation is outstanding for this turn")
 	}
-	invocation := toolInvocation{ID: randomID(), TaskID: t.ID, Attempt: t.Attempts, CallID: call.ID, Name: call.Name, State: "pending", ProfileID: b.snapshot.Profile.ID, BindingID: b.snapshot.Binding.ID, WorkspaceID: b.snapshot.Profile.WorkspaceID, PolicyRevision: b.snapshot.ToolPolicyRevision, Epoch: epoch, CreatedAt: now()}
+	processStart := false
+	if q, ok := action.args.(*toolProcessArgs); ok && q.Operation == "start" {
+		processStart = true
+	}
+	if b.processPending && (processStart || processWorkspaceConflict(call.Name)) {
+		r.mu.Unlock()
+		return zero, model.Err(409, "a background process owns the private workspace until its changeset is collected")
+	}
+	if processStart {
+		for _, pending := range b.calls {
+			if !pending.done && pending.invocation.Name == "meshra_execute_code" {
+				r.mu.Unlock()
+				return zero, model.Err(409, "code execution is outstanding for this workspace")
+			}
+		}
+		b.processPending = true
+	}
+	invocation := toolInvocation{ID: randomID(), TaskID: t.ID, Attempt: t.Attempts, CallID: call.ID, Name: call.Name, ArgumentsHash: requestHash, State: "pending", ProfileID: b.snapshot.Profile.ID, BindingID: b.snapshot.Binding.ID, WorkspaceID: b.snapshot.Profile.WorkspaceID, PolicyRevision: b.snapshot.ToolPolicyRevision, Epoch: epoch, CreatedAt: now()}
 	state := &brokerCall{requestHash: requestHash, invocation: invocation, action: action, wake: make(chan struct{}, 1), cancel: cancel}
 	if action.approval || action.question {
 		state.owner = b.snapshot.ConsoleSessionOwner
 	}
 	b.calls[call.ID] = state
-	if action.mutation {
+	if reserveMutation {
 		b.mutation = invocation.ID
 	}
 	b.callsWG.Add(1)
@@ -248,6 +280,9 @@ func (b *toolBroker) Call(ctx context.Context, call model.ToolCall) (model.ToolR
 		r.mu.Lock()
 		if b.mutation == invocation.ID {
 			b.mutation = ""
+		}
+		if processStart && !state.processStarted {
+			b.processPending = false
 		}
 		r.mu.Unlock()
 	}()
@@ -278,14 +313,27 @@ func (b *toolBroker) Call(ctx context.Context, call model.ToolCall) (model.ToolR
 	if activeErr == nil && currentEpoch != epoch {
 		activeErr = model.Err(409, "context epoch changed before tool admission")
 	}
+	if activeErr == nil && action.approval {
+		var ruleID string
+		ruleID, activeErr = b.matchingApprovalRuleLocked(action, call.Name)
+		if ruleID != "" {
+			invocation.AllowRuleID = ruleID
+			invocation.State = "auto_approved"
+			state.invocation = invocation
+		}
+	}
 	if activeErr == nil {
 		tx, beginErr := r.db.Begin()
 		activeErr = beginErr
 		if activeErr == nil {
 			body, _ := json.Marshal(invocation)
-			_, activeErr = tx.Exec("INSERT INTO tool_invocations(id,task_id,attempt,call_id,action_hash,state,body) VALUES(?,?,?,?,?,?,?)", invocation.ID, t.ID, t.Attempts, call.ID, invocation.ActionHash, invocation.State, redact(string(body)))
+			_, activeErr = tx.Exec("INSERT INTO tool_invocations(id,task_id,attempt,call_id,action_hash,state,body,allow_rule_id) VALUES(?,?,?,?,?,?,?,?)", invocation.ID, t.ID, t.Attempts, call.ID, invocation.ActionHash, invocation.State, redact(string(body)), invocation.AllowRuleID)
 			if activeErr == nil {
-				activeErr = insertAutomationEvent(tx, "tools.pending", invocation.ID, invocation.ProfileID, map[string]any{"taskId": t.ID, "name": call.Name})
+				event := "tools.pending"
+				if invocation.AllowRuleID != "" {
+					event = "tools.auto_approved"
+				}
+				activeErr = insertAutomationEvent(tx, event, invocation.ID, invocation.ProfileID, map[string]any{"taskId": t.ID, "name": call.Name, "ruleId": invocation.AllowRuleID})
 			}
 			if activeErr == nil {
 				activeErr = tx.Commit()
@@ -299,7 +347,7 @@ func (b *toolBroker) Call(ctx context.Context, call model.ToolCall) (model.ToolR
 		b.finishCall(state, zero, activeErr)
 		return zero, activeErr
 	}
-	if action.approval || action.question {
+	if (action.approval && invocation.AllowRuleID == "") || action.question {
 		if err = b.awaitHuman(child, state); err != nil {
 			b.finishCall(state, zero, err)
 			return zero, err
@@ -406,14 +454,22 @@ func (b *toolBroker) claim(call *brokerCall) error {
 	if err = r.db.QueryRow("SELECT state FROM tool_invocations WHERE id=? AND action_hash=?", call.invocation.ID, call.invocation.ActionHash).Scan(&state); err != nil {
 		return err
 	}
-	if call.action.approval && !call.humanApproved {
+	if call.action.approval && !call.humanApproved && call.invocation.AllowRuleID == "" {
 		return model.Err(403, "a live exact human approval is required")
 	}
 	alreadyClaimed := state == "claimed" && call.invocation.State == "claimed"
-	if !alreadyClaimed && state != "pending" && state != "approved" {
+	if !alreadyClaimed && state != "pending" && state != "approved" && state != "auto_approved" {
 		return model.Err(409, "tool invocation cannot be dispatched again")
 	}
-	if call.action.approval {
+	if call.action.approval && call.invocation.AllowRuleID != "" {
+		ruleID, matchErr := b.matchingApprovalRuleLocked(call.action, call.invocation.Name)
+		if matchErr != nil {
+			return matchErr
+		}
+		if ruleID != call.invocation.AllowRuleID {
+			return model.Err(409, "approval rule expired or was invalidated")
+		}
+	} else if call.action.approval {
 		var approvalStatus string
 		var expires string
 		if err = r.db.QueryRow("SELECT status,expires_at FROM tool_approvals WHERE id=? AND invocation_id=?", call.approvalID, call.invocation.ID).Scan(&approvalStatus, &expires); err != nil {
@@ -425,7 +481,9 @@ func (b *toolBroker) claim(call *brokerCall) error {
 			return model.Err(409, "approval expired or was invalidated")
 		}
 	}
-	if alreadyClaimed { return nil }
+	if alreadyClaimed {
+		return nil
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -442,7 +500,7 @@ func (b *toolBroker) claim(call *brokerCall) error {
 	if count != 1 {
 		return model.Err(409, "tool invocation claim conflicted")
 	}
-	if call.action.approval {
+	if call.action.approval && call.invocation.AllowRuleID == "" {
 		if _, err = tx.Exec("UPDATE tool_approvals SET status='claimed',revision=revision+1 WHERE id=? AND status='approved'", call.approvalID); err != nil {
 			return err
 		}
@@ -480,6 +538,9 @@ func (b *toolBroker) Close() {
 	}
 	b.socketMu.Unlock()
 	b.callsWG.Wait()
+	if b.processes != nil {
+		b.processes.manager.Close()
+	}
 	if b.workspace != nil {
 		b.workspace.Close()
 	}

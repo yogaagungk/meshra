@@ -882,7 +882,8 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 	if e == nil && a.ProfileManaged && !model.Terminal(current.State) {
 		tools, e = r.newToolBrokerLocked(ctx, current, s)
 	}
-	var injected string
+	var injected, system string
+	maxToolCalls := 0
 	if e == nil && !model.Terminal(current.State) {
 		injected, e = r.resolveTaskContext(current)
 	}
@@ -896,8 +897,19 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 	}
 	if e == nil && a.ProfileManaged && !model.Terminal(current.State) {
 		var profileText string
-		profileText, e = r.profilePrompt(current)
-		injected = profileText + injected
+		profileText, e = r.profilePrompt(current, a.Harness == "openai")
+		if a.Harness == "openai" {
+			system = profileText
+			if e == nil {
+				var snapshot model.ProfileTaskSnapshot
+				snapshot, e = r.profileSnapshot(current)
+				if e == nil {
+					maxToolCalls = snapshot.Profile.MaxToolCalls
+				}
+			}
+		} else {
+			injected = profileText + injected
+		}
 	}
 	r.mu.Unlock()
 	runtime := s.runtime
@@ -940,70 +952,77 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 		} else {
 			delivery.Text += injected
 		}
+		if a.Harness == "openai" && len(system)+len(delivery.Text) > chatPromptBytes {
+			e = model.Err(413, "prompt exceeds 256 KiB; shorten the message or remove attachments")
+		}
 		var executor model.ToolExecutor
 		if tools != nil {
 			executor = tools
 			ctx = context.WithValue(ctx, admittedConnectionKey{}, &tools.snapshot)
 		}
-		result, runErr = runtime.Run(ctx, model.Turn{Task: delivery, Token: token, MCPURL: url, Tools: executor}, func(kind, data string) {
-			data = strings.ReplaceAll(data, token, "[REDACTED]")
-			r.mu.Lock()
-			defer r.mu.Unlock()
-			task, err := r.task(t.ID)
-			if err != nil || model.Terminal(task.State) {
-				return
-			}
-			if eventCount >= 10000 {
+		if e == nil {
+			result, runErr = runtime.Run(ctx, model.Turn{Task: delivery, System: system, MaxToolCalls: maxToolCalls, Token: token, MCPURL: url, Tools: executor}, func(kind, data string) {
+				data = strings.ReplaceAll(data, token, "[REDACTED]")
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				task, err := r.task(t.ID)
+				if err != nil || model.Terminal(task.State) {
+					return
+				}
+				if eventCount >= 10000 {
+					if kind == "delta" {
+						deltaOverflow = true
+					}
+					return
+				}
+				eventCount++
 				if kind == "delta" {
-					deltaOverflow = true
+					// Do not persist raw fragments: a credential can span any native
+					// delta boundary. Progress stays immediate; text waits for success.
+					if !sawDelta {
+						sawDelta = true
+						_ = r.transition(task, "progress", "text buffered until completion for credential-safe persistence")
+					}
+					if !deltaOverflow && deltas.Len()+len(data) <= 256*1024 {
+						deltas.WriteString(data)
+					} else {
+						deltaOverflow = true
+					}
+					return
 				}
-				return
-			}
-			eventCount++
-			if kind == "delta" {
-				// Do not persist raw fragments: a credential can span any native
-				// delta boundary. Progress stays immediate; text waits for success.
-				if !sawDelta {
-					sawDelta = true
-					_ = r.transition(task, "progress", "text buffered until completion for credential-safe persistence")
+				if kind == "context_usage" {
+					r.recordContext(task, data)
+					return
 				}
-				if !deltaOverflow && deltas.Len()+len(data) <= 256*1024 {
-					deltas.WriteString(data)
-				} else {
-					deltaOverflow = true
+				if kind == "usage" {
+					r.recordUsage(task, data)
+					return
 				}
-				return
-			}
-			if kind == "context_usage" {
-				r.recordContext(task, data)
-				return
-			}
-			if kind == "usage" {
-				r.recordUsage(task, data)
-				return
-			}
-			if kind == "session" {
-				a, err := r.agent(t.To)
-				if err == nil && !t.Chat {
-					a.SessionID = data
-					_ = r.saveAgent(a)
+				if kind == "session" {
+					a, err := r.agent(t.To)
+					if err == nil && !t.Chat {
+						a.SessionID = data
+						_ = r.saveAgent(a)
+					}
+					task.DestinationSessionID = data
+					_ = r.transition(task, "session", data)
+					_, _ = r.db.Exec("UPDATE credentials SET session_id=? WHERE hash=?", data, tokenHash(token))
+					return
 				}
-				task.DestinationSessionID = data
-				_ = r.transition(task, "session", data)
-				_, _ = r.db.Exec("UPDATE credentials SET session_id=? WHERE hash=?", data, tokenHash(token))
-				return
-			}
-			if kind == "tool_use" || kind == "tool_result" {
-				data = redact(data)
-				if kind == "tool_use" {
-					task.ToolCalls++
+				if kind == "tool_use" || kind == "tool_result" {
+					data = redact(data)
+					if kind == "tool_use" {
+						task.ToolCalls++
+					}
 				}
-			}
-			if len(data) > 16384 {
-				data = truncate(data, 16384) + " [event truncated]"
-			}
-			_ = r.transition(task, kind, data)
-		})
+				if len(data) > 16384 {
+					data = truncate(data, 16384) + " [event truncated]"
+				}
+				_ = r.transition(task, kind, data)
+			})
+		} else {
+			runErr = e
+		}
 	} else {
 		runErr = e
 	}
@@ -1050,7 +1069,7 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 			current.Ambiguous = true
 		default:
 			text := deltas.String()
-			if deltaOverflow {
+			if deltaOverflow || (a.Harness == "openai" && sawDelta && text != result) {
 				text = result
 			}
 			text = redact(strings.ReplaceAll(text, token, "[REDACTED]"))

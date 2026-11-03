@@ -33,6 +33,7 @@ import { api, collab, localRead, localWrite } from "./api";
 import type { Agent, Conversation } from "./types";
 import { Approvals } from "./Approvals";
 import { SkillsPanel } from "./AutomationSkills";
+import { JourneyPanel } from "./Journey";
 import { FlowsPanel } from "./AutomationFlows";
 import { RunBadge, RunsPanel, useRecentRuns } from "./AutomationRuns";
 import { goAutomation, relativeTime, skipReasons, useProfiles } from "./automationShared";
@@ -67,6 +68,7 @@ const TABS = [
   ["runs", "Runs"],
   ["flows", "Flows"],
   ["skills", "Skills"],
+  ["journey", "Journey"],
   ["templates", "Templates"],
 ] as const;
 
@@ -104,6 +106,8 @@ export function Automation({ tab }: { tab?: string }) {
         <FlowsPanel focus={item || undefined} />
       ) : current === "skills" ? (
         <SkillsPanel focus={item || undefined} />
+      ) : current === "journey" ? (
+        <JourneyPanel />
       ) : (
         <TemplatesPanel />
       )}

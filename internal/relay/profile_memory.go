@@ -138,10 +138,16 @@ func (r *Relay) profileMemoryItems(p model.Principal, s profileDataScope, operat
 func (r *Relay) profileMemoryOperation(ctx context.Context, p model.Principal, op string, raw json.RawMessage) (any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.profileMemoryOperationLocked(ctx, p, op, raw, "")
+}
+
+func (r *Relay) profileMemoryOperationLocked(ctx context.Context, p model.Principal, op string, raw json.RawMessage, reviewing string) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	switch op {
+	case "memory.pending.list", "memory.pending.review":
+		return r.profileMemoryPendingOperation(ctx, p, op, raw)
 	case "memory.list":
 		var q profileMemoryListRequest
 		if err := decodeAutomation(raw, &q); err != nil {
@@ -239,6 +245,15 @@ func (r *Relay) profileMemoryOperation(ctx context.Context, p model.Principal, o
 		if m.SourceAvailable != nil && !*m.SourceAvailable && !sourceRetained {
 			return nil, model.Err(404, "memory source task unavailable")
 		}
+		if s.profile.MemoryWriteApproval == "on" || reviewing != "" {
+			if err = r.checkProfileMemoryBounds(m, reviewing); err != nil {
+				return nil, err
+			}
+		}
+		if !p.Admin && s.profile.MemoryWriteApproval == "on" {
+			m.SourceTaskID = p.TaskID
+			return r.stageProfileMemory(ctx, m, q.ID, q.ExpectedRevision)
+		}
 		tx, err := r.db.BeginTx(ctx, nil)
 		if err != nil {
 			return nil, err
@@ -258,6 +273,15 @@ func (r *Relay) profileMemoryOperation(ctx context.Context, p model.Principal, o
 		}
 		if err != nil {
 			return nil, err
+		}
+		if reviewing != "" {
+			result, err := tx.ExecContext(ctx, "DELETE FROM profile_memory_pending WHERE id=? AND profile_id=?", reviewing, m.ProfileID)
+			if err != nil {
+				return nil, err
+			}
+			if n, err := result.RowsAffected(); err != nil || n != 1 {
+				return nil, model.Err(409, "pending memory no longer available")
+			}
 		}
 		if err = insertAutomationEvent(tx, "memory.saved", m.ID, m.ProfileID, map[string]any{"revision": m.Revision, "conversationId": m.ConversationID}); err != nil {
 			return nil, err
@@ -284,6 +308,9 @@ func (r *Relay) profileMemoryOperation(ctx context.Context, p model.Principal, o
 		}
 		if !p.Admin && (!s.profile.Capabilities.MemoryWrite || m.Scope != "conversation" || m.ConversationID != s.conversationID) {
 			return nil, model.Err(403, "memory removal requires scope authority")
+		}
+		if !p.Admin && s.profile.MemoryWriteApproval == "on" {
+			return nil, model.Err(403, "memory removal requires operator review")
 		}
 		if m.Revision != q.ExpectedRevision {
 			return nil, model.Err(409, "stale memory revision")

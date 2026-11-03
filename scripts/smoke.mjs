@@ -82,7 +82,7 @@ try {
   assert.equal(recovered.attempts, 0);
   assert.equal(recovered.to, 'claude:exampleone');
   const agents = await cli('agent', 'list');
-  assert.deepEqual(agents.filter(agent => agent.harness === 'claude').map(agent => agent.id), ['claude:exampleone', 'claude:exampletwo']);
+  assert.deepEqual(agents.filter(agent => agent.harness === 'claude').map(agent => agent.id), ['claude:exampleone', 'claude:exampletwo', 'claude:testengine']);
   assert.equal((await cli('agent', 'status', 'claude:exampletwo')).state, 'registered');
   assert.equal((await cli('task', 'cancel', task.taskId)).state, 'cancelled');
   const trace = await cli('task', 'trace', task.taskId);

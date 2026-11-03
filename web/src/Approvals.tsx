@@ -11,6 +11,7 @@ import {
 import { automation, type AttentionItem } from "./automation-api";
 import { Notice } from "./App";
 import { Button } from "./components/ui/button";
+import { ApprovalRules } from "./ApprovalRules";
 
 const ATTENTION_STATUS_LABELS: Record<string, string> = {
   pending: "Waiting for you",
@@ -32,6 +33,21 @@ function argumentsText(item: AttentionItem) {
     }
   }
   return JSON.stringify(value, null, 2);
+}
+
+function exactRule(item: AttentionItem) {
+  const args = item.action?.arguments;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return null;
+  const value = args as Record<string, unknown>;
+  if (item.name === "meshra_workspace_command" && !value.shell && Array.isArray(value.inputArgv) &&
+      value.inputArgv.length > 0 && value.inputArgv.every((arg) => typeof arg === "string" && arg.length > 0 && !arg.includes("[REDACTED]"))) {
+    return { tool: item.name, matcherKind: "argv_exact" as const, matcher: JSON.stringify(value.inputArgv) };
+  }
+  if (item.name === "meshra_workspace_write" && typeof value.path === "string" &&
+      value.path && !["?", "*", "[", "]", "\\"].some((char) => (value.path as string).includes(char)) && !value.path.includes("[REDACTED]")) {
+    return { tool: item.name, matcherKind: "path_glob" as const, matcher: value.path };
+  }
+  return null;
 }
 
 /**
@@ -87,6 +103,43 @@ export function Approvals({ profileId }: { profileId?: string } = {}) {
     }
   }
 
+  async function alwaysAllow(item: AttentionItem) {
+    const rule = exactRule(item);
+    if (!rule || !window.confirm(`Approve this action, then create a rule for ${rule.matcher}? ${rule.matcherKind === "path_glob" ? "Future writes may replace any content at this path. " : ""}The rule applies to future matching actions when the allowlist policy is enabled. Creating it cancels other outstanding actions for this profile.`)) return;
+    setBusy(item.id);
+    setError("");
+    let approved = false;
+    try {
+      const result = await automation("approvals.decide", {
+        id: item.id, expectedRevision: item.revision, decision: "approve",
+        actionHash: item.actionHash, idempotencyKey: keyFor(item.id, "approve"),
+      });
+      approved = true;
+      setResults((v) => ({ ...v, [item.id]: result.status }));
+      // Policy changes invalidate admitted invocations; wait until this one has
+      // finished before creating the rule, rather than cancelling the approval.
+      let status = result.status;
+      const deadline = Date.now() + 120000;
+      while (status === "approved" || status === "claimed" || status === "pending") {
+        if (Date.now() >= deadline) throw new Error("The action is still running. No rule was created; add it later in Approval rules.");
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const current = await automation("approvals.list", { taskId: item.taskId });
+        const found = current.items.find((entry) => entry.id === item.id);
+        if (!found) throw new Error("Could not find the approved action. No rule was created; check its status and add the rule later.");
+        status = found.status;
+      }
+      if (status !== "completed" && status !== "failed") throw new Error(`The action ended as ${status}. No rule was created.`);
+      await automation("approval_rules.create", { profileId: item.profileId, ...rule });
+      await client.invalidateQueries({ queryKey: ["approval-rules", item.profileId] });
+      setResults((v) => ({ ...v, [item.id]: `${status} · allow rule created` }));
+    } catch (e) {
+      setError(`${approved ? "Action approved. " : ""}${(e as Error).message}`);
+    } finally {
+      await client.invalidateQueries({ queryKey: ["approvals"] });
+      setBusy("");
+    }
+  }
+
   async function answer(item: AttentionItem) {
     const text = (answers[item.id] || "").trim();
     if (!text) return;
@@ -107,16 +160,9 @@ export function Approvals({ profileId }: { profileId?: string } = {}) {
     }
   }
 
-  if (!list.isPending && !list.isError && !items.length && !error) {
-    return (
-      <p className="automation-attention-slim" role="status">
-        <ShieldCheck size={14} aria-hidden="true" />
-        Nothing is waiting for your approval. Tool approvals and questions are decided only here.
-      </p>
-    );
-  }
   return (
     <div className="automation-attention">
+      <ApprovalRules profileId={profileId} />
       <div className="automation-section-heading">
         <h2>Needs your attention</h2>
         <span className="muted">
@@ -139,7 +185,7 @@ export function Approvals({ profileId }: { profileId?: string } = {}) {
         <ul className="automation-attention-list">
           {items.map((item) => {
             const status = results[item.id] || item.status;
-            const pending = item.status === "pending";
+            const pending = item.status === "pending" && !results[item.id];
             const detail = argumentsText(item);
             return (
               <li key={item.id} className="automation-attention-item">
@@ -214,6 +260,11 @@ export function Approvals({ profileId }: { profileId?: string } = {}) {
                       <Check size={15} />
                       Approve this action
                     </Button>
+                    {exactRule(item) && <Button
+                      variant="outline"
+                      onClick={() => void alwaysAllow(item)}
+                      disabled={busy === item.id}
+                    >Always allow this</Button>}
                     <Button
                       variant="error"
                       onClick={() => void decide(item, "deny")}

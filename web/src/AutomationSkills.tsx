@@ -7,6 +7,7 @@ import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { Markdown } from "./Markdown";
 import { useProfiles } from "./automationShared";
+import { SkillProposals } from "./Journey";
 
 type Binding = { profileId: string; skillId: string; version: number; enabled: boolean; revision: number };
 
@@ -51,6 +52,7 @@ export function SkillsPanel({ focus }: { focus?: string }) {
           New skill
         </Button>
       </div>
+      <SkillProposals pendingOnly />
       {skills.isError && <Notice>{skills.error.message}</Notice>}
       {skills.isPending ? (
         <p role="status">Loading skills…</p>

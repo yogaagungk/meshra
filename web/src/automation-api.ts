@@ -27,6 +27,8 @@ export type ProfileFields = {
   capabilities: ProfileCapabilities;
   allowedProfileIds: string[];
   notificationsEnabled: boolean;
+  memoryWriteApproval?: "off" | "on";
+  maxToolCalls?: number;
 };
 export type Profile = ProfileFields & {
   id: string;
@@ -63,6 +65,32 @@ export type Memory = {
   sourceAvailable?: boolean;
   pinned: boolean;
   updatedAt: string;
+};
+export type PendingMemory = {
+  id: string;
+  profileId: string;
+  conversationId: string;
+  content: string;
+  pinned: boolean;
+  sourceTaskId?: string;
+  createdAt: string;
+  memoryId?: string;
+  expectedRevision?: number;
+};
+export type SkillProposal = {
+  id: string;
+  profileId: string;
+  taskId: string;
+  conversationId?: string;
+  name: string;
+  description: string;
+  instructions: string;
+  basedOn?: { id: string; version: number };
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  skillId?: string;
 };
 export type HistoryHit = { taskId: string; excerpt: string };
 export type HistoryExchange = {
@@ -120,6 +148,12 @@ export type AttentionItem = {
   actionHash: string;
   action: AttentionAction;
 };
+export type ApprovalRule = {
+  id: string; profileId: string; tool: string;
+  matcherKind: "argv_exact" | "argv_prefix" | "path_glob";
+  matcher: string; createdBy: string; createdAt: string; expiresAt?: string; revision: number;
+};
+export type ApprovalSuggestion = { tool: string; arguments: unknown; count: number };
 export type ChangesetEntry = {
   kind: string;
   hash?: string;
@@ -421,6 +455,8 @@ export type AutomationOperations = {
     limit?: number;
   }, { items: HistoryExchange[]; nextBefore?: number; hasMore: boolean }>;
   "memory.list": Operation<{ profileId: string; conversationId?: string }, { items: Memory[] }>;
+  "memory.pending.list": Operation<{ profileId: string }, { items: PendingMemory[] }>;
+  "memory.pending.review": Operation<{ profileId: string; id: string; decision: "approve" | "reject"; content?: string }, Memory | { ok: boolean }>;
   "memory.save": Operation<{
     profileId: string;
     id?: string;
@@ -448,6 +484,12 @@ export type AutomationOperations = {
     actionHash: string;
     idempotencyKey: string;
   }, AttentionItem>;
+  "approval_policy.get": Operation<{ profileId: string }, { profileId: string; policy: "manual" | "allowlist" }>;
+  "approval_policy.set": Operation<{ profileId: string; policy: "manual" | "allowlist" }, { profileId: string; policy: "manual" | "allowlist" }>;
+  "approval_rules.list": Operation<{ profileId: string }, { items: ApprovalRule[] }>;
+  "approval_rules.create": Operation<{ profileId: string; tool: string; matcherKind: ApprovalRule["matcherKind"]; matcher: string; expiresAt?: string }, ApprovalRule>;
+  "approval_rules.revoke": Operation<{ profileId: string; id: string }, { id: string }>;
+  "approval_suggestions.list": Operation<{ profileId: string }, { items: ApprovalSuggestion[] }>;
   "questions.answer": Operation<
     { id: string; expectedRevision: number; answer: string },
     AttentionItem
@@ -572,6 +614,8 @@ export type AutomationOperations = {
     edges: FlowEdge[];
   }, Flow>;
   "skills.list": Operation<Pagination, ResourcePage<Skill>>;
+  "skills.proposals.list": Operation<Pagination, ResourcePage<SkillProposal>>;
+  "skills.proposals.review": Operation<{ id: string; decision: "approve" | "reject" }, SkillProposal>;
   "skills.read": Operation<{ id: string; version?: number }, Skill>;
   "skills.save": Operation<{
     id?: string;

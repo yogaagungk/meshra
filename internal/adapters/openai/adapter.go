@@ -85,7 +85,7 @@ type Resolver func(context.Context, string) (Config, error)
 // identifier carried in agent.Config.Provider.
 func New(resolve Resolver) model.Adapter {
 	return model.Adapter{
-		Capabilities: map[string]bool{"prompt": true, "stream": false, "resume": false, "durableHistory": false, "toolFreeDraft": true, "cancel": true, "mcp": false, "read_only": true, "approval": false, "interactiveApproval": false, "authenticatedSmokeVerified": false, "profileAutomation": true, "supportsImages": true},
+		Capabilities: map[string]bool{"prompt": true, "stream": true, "resume": false, "durableHistory": false, "toolFreeDraft": true, "cancel": true, "mcp": false, "read_only": true, "approval": false, "interactiveApproval": false, "authenticatedSmokeVerified": false, "profileAutomation": true, "supportsImages": true},
 		Factory: func(ctx context.Context, agent model.Agent, emit model.Emit) (model.Runtime, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -250,11 +250,14 @@ type toolDefinition struct {
 	} `json:"function"`
 }
 type chatRequest struct {
-	Model      string           `json:"model"`
-	Messages   []chatMessage    `json:"messages"`
-	Tools      []toolDefinition `json:"tools,omitempty"`
-	ToolChoice string           `json:"tool_choice,omitempty"`
-	Stream     bool             `json:"stream"`
+	Model         string           `json:"model"`
+	Messages      []chatMessage    `json:"messages"`
+	Tools         []toolDefinition `json:"tools,omitempty"`
+	ToolChoice    string           `json:"tool_choice,omitempty"`
+	Stream        bool             `json:"stream"`
+	StreamOptions *struct {
+		IncludeUsage bool `json:"include_usage"`
+	} `json:"stream_options,omitempty"`
 }
 type chatUsage struct {
 	PromptTokens        *int64 `json:"prompt_tokens"`
@@ -455,8 +458,17 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 		}
 		emit("usage", string(data))
 	}()
-	messages := []chatMessage{{Role: "user", Content: turn.Task.Text}}
+	messages := make([]chatMessage, 0, 16)
+	if turn.System != "" {
+		messages = append(messages, chatMessage{Role: "system", Content: turn.System})
+	}
+	messages = append(messages, chatMessage{Role: "user", Content: turn.Task.Text})
 	calls := 0
+	limit := turn.MaxToolCalls
+	if limit <= 0 || limit > 1000 {
+		limit = MaxToolCalls
+	}
+	repeated := make(map[string]int)
 	for {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -466,7 +478,7 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 			request.Tools = definitions(catalog)
 			request.ToolChoice = "auto"
 		}
-		reply, err := r.chat(ctx, request)
+		reply, err := r.chatStream(ctx, request, turn.Token, emit)
 		if err != nil {
 			return "", err
 		}
@@ -494,18 +506,60 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 		if len(choice.Message.ToolCalls) == 0 {
 			return redact(text, turn.Token), nil
 		}
-		for _, call := range choice.Message.ToolCalls {
-			calls++
-			if calls > MaxToolCalls {
-				return "", fmt.Errorf("OpenAI-compatible turn exceeded the %d tool call limit", MaxToolCalls)
+		batch := choice.Message.ToolCalls
+		if len(batch) > limit-calls {
+			return "", fmt.Errorf("OpenAI-compatible turn exceeded the %d tool call limit", limit)
+		}
+		calls += len(batch)
+		results := make([]chatMessage, len(batch))
+		errorsByIndex := make([]error, len(batch))
+		skip := make([]bool, len(batch))
+		parallel := len(batch) > 1
+		for i, call := range batch {
+			if !readOnlyTool(call.Function.Name) {
+				parallel = false
 			}
-			// Calls are dispatched one at a time: at most one broker mutation
-			// is ever outstanding for this turn.
-			message, err := r.dispatch(ctx, executor, catalog, call, emit)
-			if err != nil {
-				return "", err
+			args, err := canonicalArguments(call.Function.Arguments)
+			if err == nil && len(call.Function.Arguments) <= MaxArgumentBytes {
+				key := call.Function.Name + "\x00" + string(args)
+				repeated[key]++
+				if repeated[key] >= 3 && call.ID != "" && len(call.ID) <= 200 && safeCallID(call.ID) {
+					results[i] = toolFailure(call, "repeated identical tool call; change approach")
+					skip[i] = true
+				}
+			}
+		}
+		var emitMu sync.Mutex
+		safeEmit := emit
+		if emit != nil && parallel {
+			safeEmit = func(kind, data string) { emitMu.Lock(); defer emitMu.Unlock(); emit(kind, data) }
+		}
+		dispatch := func(i int) {
+			if !skip[i] {
+				results[i], errorsByIndex[i] = r.dispatch(ctx, executor, catalog, batch[i], safeEmit)
+			}
+		}
+		if parallel {
+			var wg sync.WaitGroup
+			for i := range batch {
+				wg.Add(1)
+				go func(i int) { defer wg.Done(); dispatch(i) }(i)
+			}
+			wg.Wait()
+		} else {
+			for i := range batch {
+				dispatch(i)
+			}
+		}
+		for i, message := range results {
+			if errorsByIndex[i] != nil {
+				return "", errorsByIndex[i]
 			}
 			messages = append(messages, message)
+		}
+		if reply.Usage != nil && reply.Usage.PromptTokens != nil && r.cfg.ContextWindowTokens > 0 &&
+			*reply.Usage.PromptTokens > int64(r.cfg.ContextWindowTokens)*3/4 {
+			messages = r.compact(ctx, messages, &totals, emit)
 		}
 	}
 }

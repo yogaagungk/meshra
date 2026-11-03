@@ -91,7 +91,7 @@ func parseToolAction(call model.ToolCall) (*toolAction, error) {
 	action := &toolAction{preview: toolPreview{Label: call.Name}}
 	var dst any
 	switch call.Name {
-	case "meshra_history_search":
+	case "meshra_history_search", "meshra_session_search":
 		dst = &toolHistorySearchArgs{}
 	case "meshra_history_read":
 		dst = &toolHistoryReadArgs{}
@@ -108,6 +108,16 @@ func parseToolAction(call model.ToolCall) (*toolAction, error) {
 	case "meshra_routine_propose":
 		dst = &toolRoutineProposeArgs{}
 		action.mutation = true
+	case "meshra_todo":
+		dst = &toolTodoArgs{}
+	case "meshra_skill_propose":
+		dst = &toolSkillProposeArgs{}
+		action.mutation = true
+	case "meshra_execute_code":
+		dst = &toolExecuteCodeArgs{}
+		action.approval = true
+	case "meshra_process":
+		dst = &toolProcessArgs{}
 	case "meshra_workspace_read":
 		dst = &toolReadArgs{}
 	case "meshra_workspace_write":
@@ -149,6 +159,26 @@ func parseToolAction(call model.ToolCall) (*toolAction, error) {
 		action.preview.Arguments = body
 	}
 	switch q := dst.(type) {
+	case *toolExecuteCodeArgs:
+		if err := validateExecuteCode(q); err != nil {
+			return nil, err
+		}
+	case *toolProcessArgs:
+		if err := validateProcessArgs(q); err != nil {
+			return nil, err
+		}
+		if q.Operation == "start" {
+			action.mutation = true
+			action.approval = true
+		}
+	case *toolTodoArgs:
+		if err := validateTodo(q); err != nil {
+			return nil, err
+		}
+	case *toolSkillProposeArgs:
+		if err := validateSkillProposal(q); err != nil {
+			return nil, err
+		}
 	case *toolRoutineListArgs:
 		if q.After != "" && !profileIdentifier(q.After) {
 			return nil, model.Err(400, "invalid routine cursor")
@@ -221,6 +251,8 @@ func parseToolAction(call model.ToolCall) (*toolAction, error) {
 }
 
 func (b *toolBroker) ensureWorkspace(ctx context.Context) (*sandbox.Snapshot, error) {
+	b.workspaceMu.Lock()
+	defer b.workspaceMu.Unlock()
 	r := b.relay
 	r.mu.Lock()
 	existing := b.workspace
@@ -278,7 +310,14 @@ func isShell(path string) bool {
 
 func (b *toolBroker) prepareAction(ctx context.Context, call model.ToolCall, state *brokerCall) error {
 	action := state.action
+	if err := denyToolAction(action.args); err != nil {
+		return err
+	}
 	switch q := action.args.(type) {
+	case *toolExecuteCodeArgs:
+		return b.prepareExecuteCode(ctx, state, q)
+	case *toolProcessArgs:
+		return b.prepareProcess(ctx, call, state, q)
 	case *toolWriteArgs:
 		_, revision, err := requireRuntime(ctx, b.relay)
 		if err != nil {
@@ -315,7 +354,7 @@ func (b *toolBroker) prepareAction(ctx context.Context, call model.ToolCall, sta
 		}
 		action.preview.ManifestHash = baseline.Hash
 		baseline.Close()
-		argv := q.Argv
+		argv := append([]string(nil), q.Argv...)
 		if q.Shell != "" {
 			executable, err := resolveRuntimeExecutable(config, "sh")
 			if err != nil {
@@ -334,7 +373,7 @@ func (b *toolBroker) prepareAction(ctx context.Context, call model.ToolCall, sta
 			argv[0] = executable
 			action.preview.Label = "Execute exact argv in confined private snapshot"
 		}
-		body, _ := json.Marshal(map[string]any{"argv": argv, "timeoutSeconds": q.TimeoutSeconds, "runtimeRevision": revision})
+		body, _ := json.Marshal(map[string]any{"argv": argv, "inputArgv": q.Argv, "shell": q.Shell, "timeoutSeconds": q.TimeoutSeconds, "runtimeRevision": revision})
 		action.preview.Arguments = json.RawMessage(redact(string(body)))
 		action.args = &preparedCommand{input: *q, argv: argv, config: config}
 	case *toolPublishArgs:
@@ -375,12 +414,23 @@ func (b *toolBroker) executeAction(ctx context.Context, call model.ToolCall, sta
 	if err != nil {
 		return zero, err
 	}
-	if call.Name != "meshra_workspace_command" {
+	_, processStart := state.action.args.(*preparedProcessCommand)
+	if call.Name != "meshra_workspace_command" && call.Name != "meshra_execute_code" && !processStart {
 		if err = b.claim(state); err != nil {
 			return zero, err
 		}
 	}
 	switch q := state.action.args.(type) {
+	case *preparedExecuteCode:
+		return b.executeCode(ctx, state, q)
+	case *preparedProcessCommand:
+		return b.startProcess(state, q)
+	case *toolProcessArgs:
+		return b.processOperation(ctx, q)
+	case *toolTodoArgs:
+		return b.todoForTool(ctx, *q)
+	case *toolSkillProposeArgs:
+		return r.skillProposeForTool(ctx, b, *q)
 	case *toolRoutineListArgs:
 		return r.routineListForTool(ctx, b, *q)
 	case *toolRoutineProposeArgs:
@@ -389,7 +439,12 @@ func (b *toolBroker) executeAction(ctx context.Context, call model.ToolCall, sta
 		return r.dispatchExternalMCP(ctx, principal, b.snapshot.Profile.ID, state.invocation.ID, *q)
 	case *toolHistorySearchArgs:
 		raw, _ := json.Marshal(profileHistorySearchRequest{ProfileID: b.snapshot.Profile.ID, ConversationID: task.ConversationID, Query: q.Query, After: q.After, Limit: q.Limit})
-		v, err := r.profileHistoryOperation(ctx, principal, "history.search", raw)
+		operation := "history.search"
+		if call.Name == "meshra_session_search" {
+			raw, _ = json.Marshal(profileSessionSearchRequest{ProfileID: b.snapshot.Profile.ID, Query: q.Query, After: q.After, Limit: q.Limit})
+			operation = "session.search"
+		}
+		v, err := r.profileHistoryOperation(ctx, principal, operation, raw)
 		if err != nil {
 			return zero, err
 		}

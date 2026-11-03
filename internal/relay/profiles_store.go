@@ -355,7 +355,9 @@ func (r *Relay) profileStoreOperation(p model.Principal, op string, raw json.Raw
 			WorkspaceID          string                    `json:"workspaceId"`
 			Binding              model.ProfileProvider     `json:"binding"`
 			Capabilities         model.ProfileCapabilities `json:"capabilities"`
+			MemoryWriteApproval  *string                   `json:"memoryWriteApproval"`
 			AllowedProfileIDs    []string                  `json:"allowedProfileIds"`
+			MaxToolCalls         *int                      `json:"maxToolCalls"`
 			NotificationsEnabled bool                      `json:"notificationsEnabled"`
 		}
 		if err := decodeAutomation(raw, &q); err != nil {
@@ -364,8 +366,32 @@ func (r *Relay) profileStoreOperation(p model.Principal, op string, raw json.Raw
 		creating := q.ID == ""
 		v := model.Profile{ID: q.ID, Revision: 1, Name: q.Name, Instructions: q.Instructions, AvatarAttachmentID: q.AvatarAttachmentID,
 			WorkspaceID: q.WorkspaceID, Binding: q.Binding, Capabilities: q.Capabilities, AllowedProfileIDs: q.AllowedProfileIDs, NotificationsEnabled: q.NotificationsEnabled}
+		if q.MaxToolCalls != nil {
+			v.MaxToolCalls = *q.MaxToolCalls
+		} else if !creating {
+			old, err := r.profile(q.ID)
+			if err != nil {
+				return nil, err
+			}
+			v.MaxToolCalls = old.MaxToolCalls
+		}
+		if q.MemoryWriteApproval != nil {
+			v.MemoryWriteApproval = *q.MemoryWriteApproval
+		} else if !creating {
+			old, err := r.profile(q.ID)
+			if err != nil {
+				return nil, err
+			}
+			v.MemoryWriteApproval = old.MemoryWriteApproval
+		}
+		if v.MemoryWriteApproval != "" && v.MemoryWriteApproval != "off" && v.MemoryWriteApproval != "on" {
+			return nil, model.Err(400, "memoryWriteApproval must be off or on")
+		}
 		if v.AllowedProfileIDs == nil {
 			v.AllowedProfileIDs = []string{}
+		}
+		if v.MaxToolCalls < 0 || v.MaxToolCalls > 1000 {
+			return nil, model.Err(400, "maxToolCalls must be between 0 and 1000")
 		}
 		expected := 0
 		reconcile := len(v.AllowedProfileIDs) != 0
