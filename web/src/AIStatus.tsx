@@ -38,6 +38,7 @@ type Status = {
     inputTokens: number | null;
     outputTokens: number | null;
     cachedInputTokens: number | null;
+    cacheWriteInputTokens?: number | null;
     contextUsedTokens: number | null;
     contextWindowTokens: number | null;
     estimated: boolean | null;
@@ -111,6 +112,14 @@ function contextPercent(status?: Status) {
     ? (v.contextUsedTokens / v.contextWindowTokens) * 100
     : undefined;
 }
+function cacheRate(latest: Status["latest"] | undefined) {
+  if (latest?.harness !== "openai" || latest.inputTokens == null || latest.inputTokens <= 0 || latest.cachedInputTokens == null) return undefined;
+  return (latest.cachedInputTokens / latest.inputTokens) * 100;
+}
+function cacheLabel(latest: Status["latest"] | undefined) {
+  const rate = cacheRate(latest);
+  return rate == null ? undefined : `Cache ${rate.toFixed(1)}% · ${number(latest?.cachedInputTokens)} read`;
+}
 export function ChatAIStatus({
   conversationId,
   harness,
@@ -128,6 +137,7 @@ export function ChatAIStatus({
   }, [client, conversationId, revision]);
   const context = contextPercent(status.data);
   const warning = context != null && context >= 80;
+  const cache = cacheLabel(status.data?.latest);
   const label =
     context == null
       ? "Context not reported"
@@ -140,11 +150,12 @@ export function ChatAIStatus({
         type="button"
         className={"chat-ai-status" + (warning ? " ai-status-warning" : "")}
         onClick={() => setOpen(true)}
-        aria-label={"Open AI status. " + label}
-        title={label}
+        aria-label={"Open AI status. " + label + (cache ? ". " + cache : "")}
+        title={label + (cache ? " · " + cache : "")}
       >
         <Gauge size={14} />
         <span>{context == null ? "Context —" : label}</span>
+        {cache && <span>{cache}</span>}
       </button>
       <Dialog
         open={open}
@@ -384,13 +395,24 @@ export function AIStatusPanel({
                 <dd>{number(latest.inputTokens)}</dd>
                 <dt>Output tokens</dt>
                 <dd>{number(latest.outputTokens)}</dd>
-                <dt>Cached input (read/write)</dt>
+                <dt>{latest.harness === "openai" ? "Cache read tokens" : "Cached input (read/write)"}</dt>
                 <dd>{number(latest.cachedInputTokens)}</dd>
+                {latest.harness === "openai" && <>
+                  <dt>Cache rate</dt>
+                  <dd>{cacheRate(latest) == null ? "Not reported" : `${cacheRate(latest)!.toFixed(1)}%`}</dd>
+                </>}
+                {latest.harness === "openai" && <>
+                  <dt>Cache write tokens</dt>
+                  <dd>{number(latest.cacheWriteInputTokens)}</dd>
+                </>}
                 <dt>Source</dt>
                 <dd>{latest.contextSource || "Not reported"}</dd>
                 <dt>Snapshot time</dt>
                 <dd>{time(latest.observedAt)}</dd>
               </dl>
+              {latest.harness === "openai" && latest.inputTokens != null && latest.inputTokens >= 1024 && latest.cachedInputTokens === 0 && (
+                <p className="muted">No cache read was reported for this long turn. The endpoint may not cache prompts, or the prompt prefix may be changing.</p>
+              )}
               {context != null && context >= 80 && (
                 <p className="ai-status-warning">
                   The last native context snapshot is approaching capacity. The

@@ -379,7 +379,7 @@ function ModelsTab({ data }: { data: StatsSummary }) {
         <header><div><h3>All models</h3><p>Sorted by {sort}; choose a column heading to re-sort</p></div></header>
         <div className="stats-table-wrap">
           <table className="stats-table">
-            <thead><tr><th scope="col">Model</th>{th("requests", "Requests")}{th("cost", "Cost")}{th("tokens", "Tokens")}{th("cacheRate", "Cache rate")}{th("errors", "Errors")}{th("tps", "Tokens/s")}{th("ttft", "TTFT")}<th scope="col">Trend</th></tr></thead>
+            <thead><tr><th scope="col">Model</th>{th("requests", "Requests")}{th("cost", "Cost")}{th("tokens", "Tokens")}{th("cacheRate", "Cache rate")}<th scope="col">Cache write</th>{th("errors", "Errors")}{th("tps", "Tokens/s")}{th("ttft", "TTFT")}<th scope="col">Trend</th></tr></thead>
             <tbody>
               {rows.map((m) => (
                 <tr key={key(m)}>
@@ -388,6 +388,7 @@ function ModelsTab({ data }: { data: StatsSummary }) {
                   <td className="num">{money(m.cost)}</td>
                   <td className="num">{num(tokensOf(m))}</td>
                   <td className="num">{pct(cacheRate(m))}</td>
+                  <td className="num">{num(m.cacheWrite)}</td>
                   <td className="num">{pct(errorRate(m), 0)}</td>
                   <td className="num">{rate(m.tokensPerSec)}</td>
                   <td className="num">{ms(m.avgTtftMs)}</td>
@@ -446,7 +447,7 @@ function ProvidersTab({ data }: { data: StatsSummary }) {
         <header><div><h3>Provider totals</h3><p>Cost is an API-equivalent estimate reported by the harness; Meshra does not price requests.</p></div></header>
         <div className="stats-table-wrap">
           <table className="stats-table">
-            <thead><tr><th scope="col">Provider</th><th scope="col">Requests</th><th scope="col">Error rate</th><th scope="col">Models</th><th scope="col">Tokens</th><th scope="col">Share</th><th scope="col">Cost</th><th scope="col">Tokens/s</th><th scope="col">Premium</th></tr></thead>
+            <thead><tr><th scope="col">Provider</th><th scope="col">Requests</th><th scope="col">Error rate</th><th scope="col">Models</th><th scope="col">Tokens</th><th scope="col">Cache rate</th><th scope="col">Cache write</th><th scope="col">Share</th><th scope="col">Cost</th><th scope="col">Tokens/s</th><th scope="col">Premium</th></tr></thead>
             <tbody>
               {data.providers.map((p) => (
                 <tr key={p.provider}>
@@ -455,6 +456,8 @@ function ProvidersTab({ data }: { data: StatsSummary }) {
                   <td className="num">{p.failed}<span className="stats-pill">{pct(errorRate(p))}</span></td>
                   <td className="num">{p.models}</td>
                   <td className="num"><span className="stats-inline">{num(tokensOf(p))}<u style={{ width: `${(tokensOf(p) / maxTokens) * 56}px` }} /></span></td>
+                  <td className="num">{pct(cacheRate(p))}</td>
+                  <td className="num">{num(p.cacheWrite)}</td>
                   <td className="num">{pct(tokensOf(p) / totalTokens)}</td>
                   <td className="num">{money(p.cost)}</td>
                   <td className="num">{rate(p.tokensPerSec)}</td>
@@ -555,7 +558,7 @@ function RequestsTab({ range, harness, project, tz }: { range: 24 | 168 | 720; h
                 {items.map((r) => (
                   <Fragment key={r.id}>
                     <tr className={open === r.id ? "is-open" : ""} onClick={() => setOpen(open === r.id ? null : r.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(open === r.id ? null : r.id); } }} aria-expanded={open === r.id}>
-                      <th scope="row"><code>{r.model}</code><small>{r.provider} · {harnessName(r.harness)}</small></th>
+                      <th scope="row"><code>{r.model}</code><small>{r.provider} · {harnessName(r.harness)}{r.compacted ? " · Context compacted" : ""}</small></th>
                       <td title={new Date(r.ts).toLocaleString()}>{ago(r.ts)}</td>
                       <td className="proj" title={r.project}>{r.project || "—"}</td>
                       <td className="num">{num(r.input)}</td>

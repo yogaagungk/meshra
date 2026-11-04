@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -34,6 +35,31 @@ func TestDirectSystemAndRepeatedCalls(t *testing.T) {
 	last := f.request(t, 3)
 	if !strings.Contains(string(last.Messages[len(last.Messages)-1].Content), "change approach") {
 		t.Fatal("missing repeated-call guidance")
+	}
+}
+
+func TestDirectHistoryAlternatesAndKeepsPrefix(t *testing.T) {
+	f := newFixture(t, func(w http.ResponseWriter, r *http.Request, call int) { fmt.Fprint(w, textReply("answer")) })
+	rt := testRuntime(t, Config{BaseURL: f.server.URL})
+	history := []model.ChatMessage{{Role: "user", Content: "first"}, {Role: "assistant", Content: "answer one"}}
+	for _, turn := range []model.Turn{
+		{System: "stable", History: history, Task: model.Task{Text: "second"}, Token: "secret-one"},
+		{System: "stable", History: append(history, model.ChatMessage{Role: "user", Content: "second"}, model.ChatMessage{Role: "assistant", Content: "answer two"}), Task: model.Task{Text: "third"}, Token: "secret-two"},
+	} {
+		if _, err := rt.Run(context.Background(), turn, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, second := f.request(t, 0), f.request(t, 1)
+	if len(first.Messages) != 4 || len(second.Messages) != 6 {
+		t.Fatalf("wrong history lengths: %+v %+v", first.Messages, second.Messages)
+	}
+	for i := range first.Messages {
+		a, _ := json.Marshal(first.Messages[i])
+		b, _ := json.Marshal(second.Messages[i])
+		if string(a) != string(b) || strings.Contains(string(a), "secret-") {
+			t.Fatalf("unstable or secret prefix: %s vs %s", a, b)
+		}
 	}
 }
 
@@ -87,8 +113,8 @@ func TestCompactionPreservesLatestExchange(t *testing.T) {
 	messages := []chatMessage{{Role: "system", Content: "rules"}, {Role: "user", Content: "question"}, mk("old"), {Role: "tool", ToolCallID: "old", Content: strings.Repeat("x", 100)}, mk("new"), {Role: "tool", ToolCallID: "new", Content: "latest"}}
 	events := newRecorder()
 	var totals usageTotals
-	compacted := rt.compact(context.Background(), messages, &totals, events.emit)
-	if len(compacted) != 5 || compacted[0].Role != "system" || compacted[1].Role != "user" || compacted[3].ToolCalls[0].ID != "new" || compacted[4].Content != "latest" || events.count("context_compacted") != 1 {
+	compacted, changed := rt.compact(context.Background(), messages, &totals, events.emit)
+	if !changed || len(compacted) != 5 || compacted[0].Role != "system" || compacted[1].Role != "user" || compacted[3].ToolCalls[0].ID != "new" || compacted[4].Content != "latest" || events.count("context_compacted") != 1 {
 		t.Fatalf("invalid compacted messages: %+v", compacted)
 	}
 	if !strings.Contains(string(f.request(t, 0).Messages[3].Content), "truncated") {
@@ -156,5 +182,9 @@ func TestHighContextCompactsInsideTurn(t *testing.T) {
 	request := f.request(t, 3)
 	if len(request.Messages) != 5 || request.Messages[0].Role != "system" || request.Messages[1].Role != "user" || request.Messages[4].ToolCallID != "two" {
 		t.Fatalf("compacted request: %+v", request.Messages)
+	}
+	var stats requestStats
+	if err := json.Unmarshal([]byte(events.event(t, "model_request")), &stats); err != nil || !stats.Compacted {
+		t.Fatalf("compacted request not marked: %+v %v", stats, err)
 	}
 }

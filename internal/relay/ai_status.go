@@ -177,6 +177,7 @@ func (r *Relay) aiStatus(q model.ConsoleRequest) (any, error) {
 		Input         *int64  `json:"inputTokens"`
 		Output        *int64  `json:"outputTokens"`
 		Cached        *int64  `json:"cachedInputTokens"`
+		CacheWrite    *int64  `json:"cacheWriteInputTokens"`
 		ContextUsed   *int64  `json:"contextUsedTokens"`
 		ContextWindow *int64  `json:"contextWindowTokens"`
 		Estimated     *bool   `json:"estimated"`
@@ -184,7 +185,7 @@ func (r *Relay) aiStatus(q model.ConsoleRequest) (any, error) {
 		ObservedAt    *string `json:"observedAt"`
 	}
 	if q.ConversationID != "" {
-		err := r.db.QueryRow(`SELECT u.task_id,u.attempt,u.state,u.model,u.harness,u.input_tokens,u.output_tokens,u.cached_input_tokens,u.context_used_tokens,u.context_window_tokens,u.context_estimated,u.context_source,u.observed_at FROM run_usage u WHERE u.conversation_id=? ORDER BY u.started_at DESC,u.attempt DESC LIMIT 1`, q.ConversationID).Scan(&latest.TaskID, &latest.Attempt, &latest.State, &latest.Model, &latest.Harness, &latest.Input, &latest.Output, &latest.Cached, &latest.ContextUsed, &latest.ContextWindow, &latest.Estimated, &latest.Source, &latest.ObservedAt)
+		err := r.db.QueryRow(`SELECT u.task_id,u.attempt,u.state,u.model,u.harness,u.input_tokens,u.output_tokens,u.cached_input_tokens,u.cache_write_input_tokens,u.context_used_tokens,u.context_window_tokens,u.context_estimated,u.context_source,u.observed_at FROM run_usage u WHERE u.conversation_id=? ORDER BY u.started_at DESC,u.attempt DESC LIMIT 1`, q.ConversationID).Scan(&latest.TaskID, &latest.Attempt, &latest.State, &latest.Model, &latest.Harness, &latest.Input, &latest.Output, &latest.Cached, &latest.CacheWrite, &latest.ContextUsed, &latest.ContextWindow, &latest.Estimated, &latest.Source, &latest.ObservedAt)
 		if err != nil && err != sql.ErrNoRows {
 			return nil, err
 		}

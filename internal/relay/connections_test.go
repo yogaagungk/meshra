@@ -113,6 +113,44 @@ func TestEndpointURLValidation(t *testing.T) {
 	}
 }
 
+func TestEndpointPromptCacheSettings(t *testing.T) {
+	r, _ := openTest(t, nil)
+	payload := connectionsEndpointPayload()
+	endpoint := payload["endpoint"].(map[string]any)
+	endpoint["promptCacheKey"] = true
+	endpoint["promptCaching"] = "1h"
+	result, err := connectionsCall(t, r, admin, "connections.saveEndpoint", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := result.(ProviderEndpointView)
+	config, err := r.EndpointRuntimeConfig(context.Background(), view.ID)
+	if err != nil || !config.PromptCacheKey || config.PromptCaching != "1h" {
+		t.Fatalf("settings not passed to runtime: %+v, %v", config, err)
+	}
+	result, err = connectionsCall(t, r, admin, "connections.saveEndpoint", map[string]any{"expectedRevision": view.Revision, "endpoint": map[string]any{"id": view.ID, "name": "Renamed"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view = result.(ProviderEndpointView)
+	if !view.PromptCacheKey || view.PromptCaching != "1h" {
+		t.Fatalf("partial edit lost settings: %+v", view)
+	}
+	_, err = connectionsCall(t, r, admin, "connections.saveEndpoint", map[string]any{"expectedRevision": view.Revision, "endpoint": map[string]any{"id": view.ID, "promptCaching": "invalid"}})
+	if err == nil {
+		t.Fatal("invalid prompt caching mode accepted")
+	}
+	requireStatus(t, err, 400)
+	result, err = connectionsCall(t, r, admin, "connections.saveEndpoint", map[string]any{"expectedRevision": view.Revision, "endpoint": map[string]any{"id": view.ID, "promptCacheKey": false, "promptCaching": "off"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view = result.(ProviderEndpointView)
+	if view.PromptCacheKey || view.PromptCaching != "off" {
+		t.Fatalf("settings not updated: %+v", view)
+	}
+}
+
 func TestEndpointSaveGetDisableAndRemove(t *testing.T) {
 	r, _ := openTest(t, nil)
 	result, err := connectionsCall(t, r, admin, "connections.saveEndpoint", connectionsEndpointPayload())

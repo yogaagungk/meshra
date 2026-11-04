@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -138,6 +139,152 @@ func TestChatCancellationAndSingleActiveTurn(t *testing.T) {
 	next := awaitTask(t, r, sendChat(t, r, c, "Continue").ID)
 	if next.State != "completed" {
 		t.Fatal("cannot continue after cancellation", next)
+	}
+}
+
+func TestDirectChatHistoryEvictsWholeBlocks(t *testing.T) {
+	r, _ := openTest(t, nil)
+	ai := createTest(t, r, "omp", "assistant")
+	c := createChat(t, r, ai.ID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	insert := func(i int, state string) model.Task {
+		task := model.Task{ID: randomID(), ConversationID: c.ID, From: "human:operator", To: ai.ID, Text: fmt.Sprintf("question-%d", i), Result: fmt.Sprintf("answer-%d", i), State: state, CreatedAt: now(), UpdatedAt: now(), Deadline: now()}
+		body, err := json.Marshal(task)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.db.Exec("INSERT INTO tasks(id,sender,sender_session,recipient,operation,state,body) VALUES(?,?,?,?,?,?,?)", task.ID, task.From, "console", task.To, "request", state, string(body)); err != nil {
+			t.Fatal(err)
+		}
+		return task
+	}
+	var previous []model.ChatMessage
+	for i := range 15 {
+		current := insert(i, "queued")
+		history, err := r.directChatHistory(current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := i
+		if i >= 13 {
+			expected = i - 4
+		}
+		if len(history) != expected*2 {
+			t.Fatalf("turn %d: got %d messages", i, len(history))
+		}
+		if i > 0 && i != 13 {
+			for j := range previous {
+				if history[j] != previous[j] {
+					t.Fatalf("turn %d changed prefix at %d", i, j)
+				}
+			}
+		}
+		if i == 13 && history[0].Content != "question-4" {
+			t.Fatalf("incorrect eviction: %+v", history)
+		}
+		previous = history
+		current.State = "completed"
+		body, err := json.Marshal(current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.db.Exec("UPDATE tasks SET state=?, body=? WHERE id=?", current.State, string(body), current.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestDirectChatHistoryEvictsUntilEncodedBudgetFits(t *testing.T) {
+	r, _ := openTest(t, nil)
+	ai := createTest(t, r, "omp", "assistant")
+	c := createChat(t, r, ai.ID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	insert := func(text, result, state string) model.Task {
+		task := model.Task{ID: randomID(), ConversationID: c.ID, From: "human:operator", To: ai.ID, Text: text, Result: result, State: state, CreatedAt: now(), UpdatedAt: now(), Deadline: now()}
+		body, err := json.Marshal(task)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.db.Exec("INSERT INTO tasks(id,sender,sender_session,recipient,operation,state,body) VALUES(?,?,?,?,?,?,?)", task.ID, task.From, "console", task.To, "request", state, string(body)); err != nil {
+			t.Fatal(err)
+		}
+		return task
+	}
+	for range 8 {
+		insert("question", "answer", "completed")
+	}
+	// JSON encoding expands each control character to six bytes. Even one
+	// exchange can exceed the budget after all earlier blocks are removed.
+	insert(strings.Repeat("\x01", 4096), strings.Repeat("\x01", 8192), "completed")
+	current := insert("current", "", "queued")
+	history, err := r.directChatHistory(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("oversized encoded history was not fully evicted: %d messages", len(history))
+	}
+}
+
+func TestDirectChatHistoryPreservesLongExchangeBytes(t *testing.T) {
+	r, _ := openTest(t, nil)
+	ai := createTest(t, r, "omp", "assistant")
+	c := createChat(t, r, ai.ID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	insert := func(task model.Task) {
+		t.Helper()
+		body, err := json.Marshal(task)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.db.Exec("INSERT INTO tasks(id,sender,sender_session,recipient,operation,state,body) VALUES(?,?,?,?,?,?,?)", task.ID, task.From, "console", task.To, "request", task.State, string(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	user, answer := strings.Repeat("u", 5000), strings.Repeat("a", 9000)
+	first := model.Task{ID: randomID(), ConversationID: c.ID, From: "human:operator", To: ai.ID, Text: user, Result: answer, State: "completed", CreatedAt: now(), UpdatedAt: now(), Deadline: now()}
+	current := model.Task{ID: randomID(), ConversationID: c.ID, From: first.From, To: ai.ID, Text: "current", State: "queued", CreatedAt: now(), UpdatedAt: now(), Deadline: now()}
+	insert(first)
+	insert(current)
+	history, err := r.directChatHistory(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 || history[0].Content != user || history[1].Content != answer {
+		t.Fatal("long exchange was changed in the retained prefix")
+	}
+}
+
+func TestDirectProfilePrefixChangesOnlyWithMemory(t *testing.T) {
+	r, _ := continuityOpenTest(t, func(context.Context, model.Turn, model.Emit) (string, error) { return "answer", nil })
+	profile := profileStoreCreate(t, r, profileStoreRequest(profileStoreWorkspace(t, r)))
+	conversation := continuityConversation(t, r, "chat", profile)
+	first := awaitTask(t, r, continuitySend(t, r, profile, conversation, "first").ID)
+	second := awaitTask(t, r, continuitySend(t, r, profile, conversation, "second").ID)
+	prompt := func(task model.Task) (string, string) {
+		t.Helper()
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		stable, history, err := r.profilePrompt(task, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return stable, history
+	}
+	before, _ := prompt(first)
+	next, _ := prompt(second)
+	if before != next {
+		t.Fatal("stable profile instructions changed between turns")
+	}
+	if _, err := scopedMemoryCall(t, r, admin, "memory.save", map[string]any{"profileId": profile.ID, "content": "new memory canary", "pinned": true}); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := prompt(second)
+	if before == after || !strings.Contains(after, "new memory canary") {
+		t.Fatal("memory change did not update the stable profile prefix")
 	}
 }
 

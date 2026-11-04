@@ -21,6 +21,30 @@ message. `typesafe` stores a System One connection (`https://api.typesafe.ai`) a
 lists its models, but cannot run chat turns because System One answers typed
 questions and neither generates text nor calls tools.
 
+Anthropic-format endpoints use prompt caching by default (`promptCaching: "auto"`).
+Set `promptCaching` to `off` to disable cache markers, or `1h` to
+request the opt-in one-hour tier, which costs more to write. The default
+ephemeral tier lasts about five minutes and is refreshed on use. A gateway that
+explicitly rejects `cache_control` with HTTP 400 is retried without markers.
+Marker eligibility uses a conservative text/schema byte estimate; image bytes
+are excluded. Actual tokenization and model-specific minimums are determined by
+the provider, so an eligible request may still be too small to cache.
+OpenAI-format caching is provider-managed; `promptCacheKey` optionally sends a
+stable key derived from the profile and conversation IDs and defaults to false
+for compatibility with servers that reject unknown fields.
+OpenCode Go requests to `opencode.ai/zen/go` include a stable, hashed
+conversation identifier in `x-opencode-session`, and identify Meshra via
+`User-Agent`, as required by [OpenCode Go](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it).
+OpenCode Go specifies that clients should send typical coding-agent traffic.
+
+Cache reads and writes are token counts, not monetary savings. A long request
+with no cache reads can indicate an unsupported endpoint, a cold or expired
+cache, or a changed prefix. Compaction and history eviction change the prefix.
+Retained Direct API chat exchanges preserve their full text within the 32 KiB
+history budget; oversized history is evicted in blocks. Context and attachment
+excerpts, intermediate tool calls, and redacted output are not necessarily
+replayed byte-for-byte, so the next turn may miss the provider cache.
+
 ## Verified interface sources
 
 - [OMP RPC reference](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md): `ready`, v2 negotiation/chunk frames, command IDs, `get_state`, `new_session`, `prompt`, `prompt_result`, `abort`, `get_last_assistant_text`, async deltas. This is **not JSON-RPC 2.0**.

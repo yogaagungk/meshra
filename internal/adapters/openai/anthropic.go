@@ -32,33 +32,39 @@ func setAuthHeaders(header http.Header, cfg Config) {
 }
 
 type anthropicBlock struct {
-	Type      string           `json:"type"`
-	Text      string           `json:"text,omitempty"`
-	Source    *anthropicSource `json:"source,omitempty"`
-	ID        string           `json:"id,omitempty"`
-	Name      string           `json:"name,omitempty"`
-	Input     json.RawMessage  `json:"input,omitempty"`
-	ToolUseID string           `json:"tool_use_id,omitempty"`
-	Content   any              `json:"content,omitempty"`
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text,omitempty"`
+	Source       *anthropicSource       `json:"source,omitempty"`
+	ID           string                 `json:"id,omitempty"`
+	Name         string                 `json:"name,omitempty"`
+	Input        json.RawMessage        `json:"input,omitempty"`
+	ToolUseID    string                 `json:"tool_use_id,omitempty"`
+	Content      any                    `json:"content,omitempty"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 type anthropicSource struct {
 	Type      string `json:"type"`
 	MediaType string `json:"media_type"`
 	Data      string `json:"data"`
 }
+type anthropicCacheControl struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
+}
 type anthropicMessage struct {
 	Role    string `json:"role"`
 	Content any    `json:"content"`
 }
 type anthropicTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	InputSchema  json.RawMessage        `json:"input_schema"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 type anthropicRequest struct {
 	Model      string             `json:"model"`
 	MaxTokens  int                `json:"max_tokens"`
-	System     string             `json:"system,omitempty"`
+	System     any                `json:"system,omitempty"`
 	Messages   []anthropicMessage `json:"messages"`
 	Tools      []anthropicTool    `json:"tools,omitempty"`
 	ToolChoice map[string]string  `json:"tool_choice,omitempty"`
@@ -68,6 +74,10 @@ type anthropicRequest struct {
 // API. System messages become the system parameter; consecutive tool results
 // share one user message, as the API requires.
 func encodeAnthropicRequest(request chatRequest) ([]byte, error) {
+	return encodeAnthropicRequestWithCaching(request, "off")
+}
+
+func encodeAnthropicRequestWithCaching(request chatRequest, mode string) ([]byte, error) {
 	out := anthropicRequest{Model: request.Model, MaxTokens: AnthropicMaxTokens}
 	var system []string
 	for _, message := range request.Messages {
@@ -124,7 +134,50 @@ func encodeAnthropicRequest(request chatRequest) ([]byte, error) {
 	if len(out.Tools) > 0 {
 		out.ToolChoice = map[string]string{"type": "auto"}
 	}
+	if mode != "off" && anthropicCacheable(request, out) {
+		control := &anthropicCacheControl{Type: "ephemeral"}
+		if mode == "1h" {
+			control.TTL = "1h"
+		}
+		if len(out.Tools) > 0 {
+			out.Tools[len(out.Tools)-1].CacheControl = control
+		}
+		if text := strings.Join(system, "\n\n"); text != "" {
+			out.System = []anthropicBlock{{Type: "text", Text: text, CacheControl: control}}
+		}
+		blocks := out.Messages[len(out.Messages)-1].Content.([]anthropicBlock)
+		blocks[len(blocks)-1].CacheControl = control
+	}
 	return json.Marshal(out)
+}
+
+// anthropicCacheable estimates text tokens conservatively from encoded text.
+// Unknown models use 4096 tokens; known Claude models with lower thresholds
+// can start caching at 1024. Images are deliberately excluded.
+func anthropicCacheable(request chatRequest, out anthropicRequest) bool {
+	minimum := 4096
+	model := strings.ToLower(request.Model)
+	if strings.Contains(model, "claude-sonnet-4-5") || strings.Contains(model, "claude-sonnet-4-2025") || strings.Contains(model, "claude-3-7-sonnet") {
+		minimum = 1024
+	}
+	size := 0
+	for _, tool := range out.Tools {
+		size += len(tool.Name) + len(tool.Description) + len(tool.InputSchema)
+	}
+	if text, ok := out.System.(string); ok {
+		size += len(text)
+	}
+	for _, message := range out.Messages {
+		for _, block := range message.Content.([]anthropicBlock) {
+			size += len(block.Text) + len(block.Input)
+			if nested, ok := block.Content.([]anthropicBlock); ok {
+				for _, item := range nested {
+					size += len(item.Text)
+				}
+			}
+		}
+	}
+	return size/4 >= minimum
 }
 
 // appendMessage merges a message into the previous one when the role repeats.
@@ -260,7 +313,7 @@ func decodeAnthropicResponse(raw []byte) (chatResponse, error) {
 		FinishReason string           `json:"finish_reason"`
 	}{Message: assistantMessage{Role: "assistant", Content: content, ToolCalls: calls}, FinishReason: reply.StopReason})
 	if reply.Usage != nil {
-		usage := &chatUsage{CompletionTokens: reply.Usage.OutputTokens, CachedTokens: reply.Usage.CacheReadInputTokens}
+		usage := &chatUsage{CompletionTokens: reply.Usage.OutputTokens, CachedTokens: reply.Usage.CacheReadInputTokens, CacheWriteTokens: reply.Usage.CacheCreationInputTokens}
 		if reply.Usage.InputTokens != nil {
 			// Anthropic reports uncached input separately; the prompt size
 			// the console tracks is the whole input.

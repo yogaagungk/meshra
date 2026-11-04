@@ -264,24 +264,28 @@ func (r *Relay) discoverModels(harness string) (any, error) {
 
 func (r *Relay) recordUsage(t model.Task, data string) {
 	var v struct {
-		Input    *int64   `json:"inputTokens"`
-		Output   *int64   `json:"outputTokens"`
-		Cached   *int64   `json:"cachedInputTokens"`
-		Model    string   `json:"model"`
-		Provider string   `json:"provider"`
-		Cost     *float64 `json:"reportedCost"`
-		Currency string   `json:"currency"`
+		Input      *int64   `json:"inputTokens"`
+		Output     *int64   `json:"outputTokens"`
+		Cached     *int64   `json:"cachedInputTokens"`
+		CacheWrite *int64   `json:"cacheWriteInputTokens"`
+		Model      string   `json:"model"`
+		Provider   string   `json:"provider"`
+		Cost       *float64 `json:"reportedCost"`
+		Currency   string   `json:"currency"`
 	}
 	if len(data) > 2048 || json.Unmarshal([]byte(data), &v) != nil {
 		return
 	}
-	for _, tokens := range []*int64{v.Input, v.Output, v.Cached} {
+	for _, tokens := range []*int64{v.Input, v.Output, v.Cached, v.CacheWrite} {
 		if tokens != nil && (*tokens < 0 || *tokens > 1e12) {
 			return
 		}
 	}
 	if v.Cached != nil && v.Input != nil && *v.Cached > *v.Input {
 		v.Cached = nil
+	}
+	if v.CacheWrite != nil && v.Input != nil && (*v.CacheWrite > *v.Input || (v.Cached != nil && *v.CacheWrite > *v.Input-*v.Cached)) {
+		v.CacheWrite = nil
 	}
 	if len(v.Model) > 200 || len(v.Provider) > 200 || !safeRegistryText(v.Model) || !safeRegistryText(v.Provider) || redact(v.Model) != v.Model || redact(v.Provider) != v.Provider {
 		return
@@ -300,8 +304,8 @@ func (r *Relay) recordUsage(t model.Task, data string) {
 	if v.Cost == nil {
 		v.Currency = ""
 	}
-	if v.Input == nil && v.Output == nil && v.Cached == nil && v.Model == "" && v.Provider == "" && v.Cost == nil {
+	if v.Input == nil && v.Output == nil && v.Cached == nil && v.CacheWrite == nil && v.Model == "" && v.Provider == "" && v.Cost == nil {
 		return
 	}
-	_, _ = r.db.Exec(`UPDATE run_usage SET input_tokens=coalesce(?,input_tokens),output_tokens=coalesce(?,output_tokens),cached_input_tokens=coalesce(?,cached_input_tokens),reported_model=coalesce(nullif(?,''),reported_model),reported_provider=coalesce(nullif(?,''),reported_provider),reported_cost=coalesce(?,reported_cost),reported_currency=coalesce(nullif(?,''),reported_currency),observed_at=? WHERE task_id=? AND attempt=?`, v.Input, v.Output, v.Cached, v.Model, v.Provider, v.Cost, v.Currency, now().Format(time.RFC3339Nano), t.ID, t.Attempts)
+	_, _ = r.db.Exec(`UPDATE run_usage SET input_tokens=coalesce(?,input_tokens),output_tokens=coalesce(?,output_tokens),cached_input_tokens=coalesce(?,cached_input_tokens),cache_write_input_tokens=coalesce(?,cache_write_input_tokens),reported_model=coalesce(nullif(?,''),reported_model),reported_provider=coalesce(nullif(?,''),reported_provider),reported_cost=coalesce(?,reported_cost),reported_currency=coalesce(nullif(?,''),reported_currency),observed_at=? WHERE task_id=? AND attempt=?`, v.Input, v.Output, v.Cached, v.CacheWrite, v.Model, v.Provider, v.Cost, v.Currency, now().Format(time.RFC3339Nano), t.ID, t.Attempts)
 }

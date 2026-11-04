@@ -74,10 +74,11 @@ func (f *fixture) header(t *testing.T, index int) http.Header {
 }
 
 type recordedRequest struct {
-	Model    string           `json:"model"`
-	Messages []recordedMsg    `json:"messages"`
-	Tools    []toolDefinition `json:"tools"`
-	Stream   bool             `json:"stream"`
+	Model          string           `json:"model"`
+	Messages       []recordedMsg    `json:"messages"`
+	Tools          []toolDefinition `json:"tools"`
+	Stream         bool             `json:"stream"`
+	PromptCacheKey string           `json:"prompt_cache_key"`
 }
 type recordedMsg struct {
 	Role       string          `json:"role"`
@@ -162,6 +163,59 @@ func toolReply(id, name, arguments string) string {
 func textReply(text string) string {
 	body, _ := json.Marshal(text)
 	return fmt.Sprintf(`{"id":"chatcmpl-final","model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":"stop"}]}`, body)
+}
+
+func TestPromptCacheKeyOptInAndScope(t *testing.T) {
+	f := newFixture(t, func(w http.ResponseWriter, r *http.Request, call int) {
+		fmt.Fprint(w, textReply("done"))
+	})
+	turn := model.Turn{ProfileID: "profile-a", Task: model.Task{ConversationID: "conversation-a", Text: "hello"}}
+	disabled := testRuntime(t, Config{BaseURL: f.server.URL})
+	if _, err := disabled.Run(context.Background(), turn, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(f.bodies[0]), `"prompt_cache_key"`) {
+		t.Fatal("cache key must be omitted by default")
+	}
+	enabled := testRuntime(t, Config{BaseURL: f.server.URL, PromptCacheKey: true})
+	for _, item := range []model.Turn{turn, turn, {ProfileID: "profile-b", Task: turn.Task}, {ProfileID: turn.ProfileID, Task: model.Task{ConversationID: "conversation-b", Text: "hello"}}, {Task: turn.Task}} {
+		if _, err := enabled.Run(context.Background(), item, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := f.request(t, 1).PromptCacheKey
+	if key == "" || key != f.request(t, 2).PromptCacheKey {
+		t.Fatal("key must be present and stable for the same profile and conversation")
+	}
+	if key == f.request(t, 3).PromptCacheKey || key == f.request(t, 4).PromptCacheKey {
+		t.Fatal("key must vary with both profile and conversation")
+	}
+	if strings.Contains(string(f.bodies[5]), `"prompt_cache_key"`) {
+		t.Fatal("cache key must be omitted without a profile")
+	}
+	if strings.Contains(key, turn.ProfileID) || strings.Contains(key, turn.Task.ConversationID) {
+		t.Fatal("cache key must not expose profile or conversation identifiers")
+	}
+}
+
+func TestPromptCacheKeyStableAcrossToolLoop(t *testing.T) {
+	f := newFixture(t, func(w http.ResponseWriter, r *http.Request, call int) {
+		if call == 0 {
+			fmt.Fprint(w, toolReply("call-1", "meshra_workspace_read", `{"path":"notes.md"}`))
+			return
+		}
+		fmt.Fprint(w, textReply("done"))
+	})
+	executor := &fakeExecutor{definition: workspaceTool(), result: model.ToolResult{Content: []model.ToolContent{{Type: "text", Text: "contents"}}}}
+	runtime := testRuntime(t, Config{BaseURL: f.server.URL, SupportsTools: true, PromptCacheKey: true})
+	turn := model.Turn{ProfileID: "profile", Task: model.Task{ConversationID: "conversation", Text: "read"}, Tools: executor}
+	if _, err := runtime.Run(context.Background(), turn, nil); err != nil {
+		t.Fatal(err)
+	}
+	first, second := f.request(t, 0).PromptCacheKey, f.request(t, 1).PromptCacheKey
+	if first == "" || first != second {
+		t.Fatalf("cache key changed during tool loop: %q, %q", first, second)
+	}
 }
 
 func TestToolRoundTripDispatchesThroughExecutor(t *testing.T) {

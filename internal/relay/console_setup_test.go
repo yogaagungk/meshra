@@ -3,7 +3,10 @@ package relay
 import (
 	"context"
 	"fmt"
+	"meshra/internal/adapters/openai"
 	"meshra/internal/model"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -239,5 +242,42 @@ func TestDirectAPIChatRequiresEndpointAndModel(t *testing.T) {
 	}
 	if c.ChatSettings == nil || c.ChatSettings.Config.Provider != "endpoint1" || c.ChatSettings.Config.Model != "m1" {
 		t.Fatal("endpoint and model were not saved with the chat", c.ChatSettings)
+	}
+}
+
+func TestDirectAPIManagedChatStartsAndUsesConversationEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		fmt.Fprint(w, `{"content":[{"type":"text","text":"connected"}],"stop_reason":"end_turn"}`)
+	}))
+	defer server.Close()
+	r, _ := openTest(t, nil)
+	seen := make(chan string, 2)
+	r.adapters["openai"] = openai.New(func(_ context.Context, id string) (openai.Config, error) {
+		seen <- id
+		return openai.Config{BaseURL: server.URL, Format: openai.FormatAnthropic}, nil
+	})
+	var participant string
+	for _, endpoint := range []string{"endpoint-a", "endpoint-b"} {
+		v, err := r.Console(admin, "chat-create", model.ConsoleRequest{Harness: "openai", Config: model.Config{Provider: endpoint, Model: "model"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := v.(model.Conversation)
+		if participant == "" {
+			participant = c.Participants[0]
+			startTest(t, r, participant)
+		} else if c.Participants[0] != participant {
+			t.Fatal("managed identity was not reused")
+		}
+		reply := awaitTask(t, r, sendChat(t, r, c, "Hello").ID)
+		if reply.State != "completed" || reply.Result != "connected" {
+			t.Fatalf("chat failed: %+v", reply)
+		}
+		if got := <-seen; got != endpoint {
+			t.Fatalf("resolved %q, want %q", got, endpoint)
+		}
+		if got := <-seen; got != endpoint {
+			t.Fatalf("turn resolved %q, want %q", got, endpoint)
+		}
 	}
 }

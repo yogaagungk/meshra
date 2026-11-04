@@ -8,6 +8,62 @@ import (
 
 const chatHistoryBytes = 32 * 1024
 const chatPromptBytes = 256 * 1024
+const chatHistoryExchanges = 12
+const chatHistoryEvictionBlock = 4
+
+const directChatInstructions = "You are an AI assistant in a one-to-one conversation with a human. Answer the current user message naturally, using Markdown when useful. Earlier history may be omitted or shortened. Do not claim to remember omitted details. Do not delegate to other agents."
+
+// directChatHistory replays bounded exchanges in chronological order. Eviction
+// is performed in blocks while replaying, so adding a turn cannot shift the
+// prefix unless the window actually overflows.
+func (r *Relay) directChatHistory(t model.Task) ([]model.ChatMessage, error) {
+	rows, err := r.db.Query(`SELECT json_extract(body,'$.text'),coalesce(json_extract(body,'$.result'),'') FROM tasks
+ WHERE json_extract(body,'$.conversationId')=? AND recipient=? AND sender='human:operator' AND state='completed'
+ AND seq < (SELECT seq FROM tasks WHERE id=?) ORDER BY seq`, t.ConversationID, t.To, t.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type exchange struct {
+		user, assistant string
+		size            int
+	}
+	var history []exchange
+	used := 0
+	for rows.Next() {
+		var user, assistant string
+		if err := rows.Scan(&user, &assistant); err != nil {
+			return nil, err
+		}
+		item := exchange{user: user, assistant: assistant}
+		// Count encoded bytes, including JSON escaping and role envelopes.
+		b, err := json.Marshal([]model.ChatMessage{{Role: "user", Content: item.user}, {Role: "assistant", Content: item.assistant}})
+		if err != nil {
+			return nil, err
+		}
+		item.size = len(b)
+		history = append(history, item)
+		used += item.size
+		for len(history) > chatHistoryExchanges || used > chatHistoryBytes {
+			drop := chatHistoryEvictionBlock
+			if drop > len(history) {
+				drop = len(history)
+			}
+			for _, old := range history[:drop] {
+				used -= old.size
+			}
+			history = history[drop:]
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	messages := make([]model.ChatMessage, 0, len(history)*2)
+	for _, item := range history {
+		messages = append(messages, model.ChatMessage{Role: "user", Content: item.user}, model.ChatMessage{Role: "assistant", Content: item.assistant})
+	}
+	return messages, nil
+}
 
 func (r *Relay) isChat(id string) (bool, error) {
 	var n int

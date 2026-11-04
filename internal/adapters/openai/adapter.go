@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -66,6 +67,10 @@ type Config struct {
 	SupportsImages bool
 	// ContextWindowTokens is the operator-declared context capacity, when known.
 	ContextWindowTokens int
+	// PromptCacheKey enables an OpenAI cache routing key scoped to the profile and conversation.
+	PromptCacheKey bool
+	// PromptCaching selects Anthropic caching: empty or auto, off, or 1h.
+	PromptCaching string
 	// HTTPClient pins requests to the endpoint origin. The caller supplies the
 	// origin-pinned client; the adapter falls back to NewClient without one.
 	HTTPClient *http.Client
@@ -115,6 +120,11 @@ func New(resolve Resolver) model.Adapter {
 			}
 			if resolve == nil {
 				return nil, errors.New("OpenAI-compatible harness requires an endpoint resolver")
+			}
+			// Managed chat identities are shared readiness slots. Each turn creates
+			// a fresh runtime with that conversation's endpoint and model.
+			if agent.ManagedChat && agent.Config.Provider == "" && agent.Config.Model == "" {
+				return &runtime{life: ctx, agent: agent, session: sessionID(agent), resolve: resolve}, nil
 			}
 			if agent.Config.Provider == "" {
 				return nil, errors.New("OpenAI-compatible harness requires a configured endpoint identifier in the provider field")
@@ -199,17 +209,18 @@ func NormalizeBaseURL(raw string) (string, error) {
 }
 
 type runtime struct {
-	life    context.Context
-	agent   model.Agent
-	cfg     Config
-	base    string
-	client  *http.Client
-	session string
-	mu      sync.Mutex
-	closed  bool
-	cancel  context.CancelFunc
-	run     sync.Mutex
-	resolve Resolver
+	life            context.Context
+	agent           model.Agent
+	cfg             Config
+	base            string
+	client          *http.Client
+	session         string
+	providerSession string
+	mu              sync.Mutex
+	closed          bool
+	cancel          context.CancelFunc
+	run             sync.Mutex
+	resolve         Resolver
 	// ttft is the time to the first streamed token of the latest request.
 	ttft time.Duration
 }
@@ -275,12 +286,13 @@ type toolDefinition struct {
 	} `json:"function"`
 }
 type chatRequest struct {
-	Model         string           `json:"model"`
-	Messages      []chatMessage    `json:"messages"`
-	Tools         []toolDefinition `json:"tools,omitempty"`
-	ToolChoice    string           `json:"tool_choice,omitempty"`
-	Stream        bool             `json:"stream"`
-	StreamOptions *struct {
+	Model          string           `json:"model"`
+	Messages       []chatMessage    `json:"messages"`
+	Tools          []toolDefinition `json:"tools,omitempty"`
+	ToolChoice     string           `json:"tool_choice,omitempty"`
+	PromptCacheKey string           `json:"prompt_cache_key,omitempty"`
+	Stream         bool             `json:"stream"`
+	StreamOptions  *struct {
 		IncludeUsage bool `json:"include_usage"`
 	} `json:"stream_options,omitempty"`
 }
@@ -289,6 +301,7 @@ type chatUsage struct {
 	CompletionTokens    *int64 `json:"completion_tokens"`
 	TotalTokens         *int64 `json:"total_tokens"`
 	CachedTokens        *int64 `json:"cached_tokens"`
+	CacheWriteTokens    *int64 `json:"cache_write_input_tokens,omitempty"`
 	PromptTokensDetails *struct {
 		CachedTokens *int64 `json:"cached_tokens"`
 	} `json:"prompt_tokens_details"`
@@ -351,6 +364,7 @@ type usageReport struct {
 	prompt     *int64
 	completion *int64
 	cached     *int64
+	written    *int64
 }
 type usageTotals struct {
 	reports []usageReport
@@ -376,6 +390,10 @@ func (u *usageTotals) add(report *chatUsage) {
 	if cached != nil {
 		value := *cached
 		item.cached = &value
+	}
+	if report.CacheWriteTokens != nil {
+		value := *report.CacheWriteTokens
+		item.written = &value
 	}
 	u.reports = append(u.reports, item)
 }
@@ -405,6 +423,27 @@ func (u usageTotals) aggregate() (input, output, cached *int64) {
 	return sum(func(r usageReport) *int64 { return r.prompt }), sum(func(r usageReport) *int64 { return r.completion }), sum(func(r usageReport) *int64 { return r.cached })
 }
 
+func (u usageTotals) cacheWrites() *int64 {
+	var total int64
+	reported := false
+	for _, report := range u.reports {
+		if report.written != nil {
+			total += *report.written
+			reported = true
+		}
+	}
+	if !reported {
+		return nil
+	}
+	return &total
+}
+
+// promptCacheKey hashes length-delimited identities without exposing them to the provider.
+func promptCacheKey(profileID, conversationID string) string {
+	sum := sha256.Sum256([]byte(strconv.Itoa(len(profileID)) + ":" + profileID + conversationID))
+	return hex.EncodeToString(sum[:])
+}
+
 func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (string, error) {
 	r.run.Lock()
 	defer r.run.Unlock()
@@ -426,6 +465,17 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	if r.agent.Config.Provider == "" || r.agent.Config.Model == "" {
+		return "", errors.New("Direct API turn requires a configured endpoint and model")
+	}
+	conversation := turn.Task.ConversationID
+	if conversation == "" {
+		conversation = turn.Task.ID
+	}
+	if conversation == "" {
+		conversation = r.session
+	}
+	r.providerSession = promptCacheKey("", conversation)
 	// Resolve the admitted turn, not the revision seen at identity startup.
 	cfg, err := r.resolve(ctx, r.agent.Config.Provider)
 	if err != nil {
@@ -461,12 +511,16 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 			return
 		}
 		input, output, cached := totals.aggregate()
+		written := totals.cacheWrites()
 		body := map[string]any{}
 		if input != nil {
 			body["inputTokens"] = *input
 		}
 		if output != nil {
 			body["outputTokens"] = *output
+		}
+		if written != nil {
+			body["cacheWriteInputTokens"] = *written
 		}
 		if cached != nil {
 			body["cachedInputTokens"] = *cached
@@ -486,13 +540,18 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 		}
 		emit("usage", string(data))
 	}()
-	messages := make([]chatMessage, 0, 16)
+	messages := make([]chatMessage, 0, 16+len(turn.History))
 	if turn.System != "" {
 		messages = append(messages, chatMessage{Role: "system", Content: turn.System})
+	}
+	for _, item := range turn.History {
+		messages = append(messages, chatMessage{Role: item.Role, Content: item.Content})
 	}
 	messages = append(messages, chatMessage{Role: "user", Content: turn.Task.Text})
 	calls := 0
 	requests := 0
+	var lastCompactionTokens int64
+	compactedNext := false
 	limit := turn.MaxToolCalls
 	if limit <= 0 || limit > 1000 {
 		limit = MaxToolCalls
@@ -503,6 +562,9 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 			return "", err
 		}
 		request := chatRequest{Model: r.agent.Config.Model, Messages: messages, Stream: false}
+		if r.cfg.Format != FormatAnthropic && r.cfg.PromptCacheKey && turn.ProfileID != "" && turn.Task.ConversationID != "" {
+			request.PromptCacheKey = promptCacheKey(turn.ProfileID, turn.Task.ConversationID)
+		}
 		if len(catalog) > 0 {
 			request.Tools = definitions(catalog)
 			request.ToolChoice = "auto"
@@ -511,7 +573,8 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 		started := time.Now()
 		r.ttft = 0
 		reply, err := r.chatStream(ctx, request, turn.Token, emit)
-		r.emitRequest(emit, ctx, requests, started, r.ttft, reply, err)
+		r.emitRequest(emit, ctx, requests, started, r.ttft, reply, err, compactedNext)
+		compactedNext = false
 		if err != nil {
 			return "", err
 		}
@@ -590,9 +653,19 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 			}
 			messages = append(messages, message)
 		}
-		if reply.Usage != nil && reply.Usage.PromptTokens != nil && r.cfg.ContextWindowTokens > 0 &&
-			*reply.Usage.PromptTokens > int64(r.cfg.ContextWindowTokens)*3/4 {
-			messages = r.compact(ctx, messages, &totals, emit)
+		if reply.Usage != nil && reply.Usage.PromptTokens != nil && r.cfg.ContextWindowTokens > 0 {
+			used := *reply.Usage.PromptTokens
+			window := int64(r.cfg.ContextWindowTokens)
+			if used <= window*3/4 {
+				lastCompactionTokens = 0
+			} else if lastCompactionTokens == 0 || used >= lastCompactionTokens+window/4 {
+				var changed bool
+				messages, changed = r.compact(ctx, messages, &totals, emit)
+				if changed {
+					lastCompactionTokens = used
+					compactedNext = true
+				}
+			}
 		}
 	}
 }
@@ -694,23 +767,44 @@ func endpointURL(raw string) (string, error) {
 	return raw, nil
 }
 
-// chat performs exactly one endpoint request. A request whose outcome is
-// unknown is never replayed.
+// OpenCode Go requires conversation affinity for routing and prompt caching.
+// Do not disclose the conversation identifier itself or send it to other origins.
+func (r *runtime) setProviderHeaders(req *http.Request) {
+	req.Header.Set("User-Agent", "meshra/0.4")
+	if strings.EqualFold(req.URL.Hostname(), "opencode.ai") &&
+		(req.URL.Path == "/zen/go" || strings.HasPrefix(req.URL.Path, "/zen/go/")) &&
+		r.providerSession != "" {
+		req.Header.Set("x-opencode-session", r.providerSession)
+	}
+}
+
+// cacheRejections remembers definite gateway rejections per endpoint and URL.
+var cacheRejections sync.Map
+
+// chat retries only a definite cache_control rejection, never an unknown outcome.
 func (r *runtime) chat(ctx context.Context, request chatRequest) (chatResponse, error) {
+	target, err := r.chatURL()
+	if err != nil {
+		return chatResponse{}, err
+	}
+	key := r.agent.Config.Provider + "\x00" + target
+	mode := r.cfg.PromptCaching
+	if _, rejected := cacheRejections.Load(key); rejected {
+		mode = "off"
+	}
 	var body []byte
-	var err error
 	if r.cfg.Format == FormatAnthropic {
-		body, err = encodeAnthropicRequest(request)
+		body, err = encodeAnthropicRequestWithCaching(request, mode)
 	} else {
 		body, err = json.Marshal(request)
 	}
 	if err != nil {
 		return chatResponse{}, err
 	}
-	target, err := r.chatURL()
-	if err != nil {
-		return chatResponse{}, err
-	}
+	return r.chatEncoded(ctx, request, target, key, body, true)
+}
+
+func (r *runtime) chatEncoded(ctx context.Context, request chatRequest, target, key string, body []byte, canRetry bool) (chatResponse, error) {
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		return chatResponse{}, err
@@ -718,6 +812,7 @@ func (r *runtime) chat(ctx context.Context, request chatRequest) (chatResponse, 
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "application/json")
 	setAuthHeaders(httpRequest.Header, r.cfg)
+	r.setProviderHeaders(httpRequest)
 	response, err := r.client.Do(httpRequest)
 	if err != nil {
 		return chatResponse{}, fmt.Errorf("OpenAI-compatible request failed: %w", err)
@@ -729,6 +824,15 @@ func (r *runtime) chat(ctx context.Context, request chatRequest) (chatResponse, 
 	}
 	if len(raw) > MaxResponseBytes {
 		return chatResponse{}, errors.New("OpenAI-compatible response exceeds the 8 MiB bound")
+	}
+	if canRetry && r.cfg.Format == FormatAnthropic && response.StatusCode == http.StatusBadRequest &&
+		bytes.Contains(body, []byte(`"cache_control"`)) && cacheControlRejected(raw) {
+		cacheRejections.Store(key, struct{}{})
+		uncached, encodeErr := encodeAnthropicRequestWithCaching(request, "off")
+		if encodeErr != nil {
+			return chatResponse{}, encodeErr
+		}
+		return r.chatEncoded(ctx, request, target, key, uncached, false)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return chatResponse{}, fmt.Errorf("OpenAI-compatible endpoint returned HTTP %d: %s", response.StatusCode, r.snippet(raw))
@@ -746,6 +850,20 @@ func (r *runtime) chat(ctx context.Context, request chatRequest) (chatResponse, 
 		return chatResponse{}, errors.New("OpenAI-compatible endpoint error: " + reply.Error.Message)
 	}
 	return reply, nil
+}
+
+func cacheControlRejected(raw []byte) bool {
+	var body struct {
+		Message string `json:"message"`
+		Error   struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(body.Message), "cache_control") ||
+		strings.Contains(strings.ToLower(body.Error.Message), "cache_control")
 }
 
 // snippet renders a bounded, credential-free provider error.

@@ -20,7 +20,7 @@ func readOnlyTool(name string) bool {
 
 // compact preserves the original system/user messages and the latest complete
 // assistant/tool exchange. Provider tool-call pairing is never broken.
-func (r *runtime) compact(ctx context.Context, messages []chatMessage, totals *usageTotals, emit model.Emit) []chatMessage {
+func (r *runtime) compact(ctx context.Context, messages []chatMessage, totals *usageTotals, emit model.Emit) ([]chatMessage, bool) {
 	latest := -1
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == "assistant" && len(messages[i].ToolCalls) > 0 {
@@ -29,7 +29,7 @@ func (r *runtime) compact(ctx context.Context, messages []chatMessage, totals *u
 		}
 	}
 	if latest < 0 {
-		return messages
+		return messages, false
 	}
 	changed := false
 	for i := 0; i < latest; i++ {
@@ -51,7 +51,7 @@ func (r *runtime) compact(ctx context.Context, messages []chatMessage, totals *u
 		changed = true
 	}
 	first := 0
-	for first < latest && (messages[first].Role == "system" || messages[first].Role == "user") {
+	for first < latest && !(messages[first].Role == "assistant" && len(messages[first].ToolCalls) > 0) {
 		first++
 	}
 	if first < latest {
@@ -77,5 +77,5 @@ func (r *runtime) compact(ctx context.Context, messages []chatMessage, totals *u
 	if changed && emit != nil {
 		emit("context_compacted", `{"reason":"prompt_tokens exceeded 75% of context window"}`)
 	}
-	return messages
+	return messages, changed
 }

@@ -252,6 +252,7 @@ export type StatsRequestItem = {
   id: number; ts: number; harness: string; model: string; provider: string; project: string; agent: string;
   status: "ok" | "aborted" | "failed"; stopReason: string; error?: string; durationMs: number | null; ttftMs: number | null;
   input: number; cacheRead: number; cacheWrite: number; output: number; cost: number | null;
+  compacted?: boolean;
 };
 export type StatsRequests = {
   from: number; to: number; importing: boolean; hasMore: boolean; items: StatsRequestItem[];
@@ -267,6 +268,8 @@ export type ProviderEndpoint = {
   name: string;
   baseUrl: string;
   apiFormat?: ApiFormat;
+  promptCaching?: "auto" | "off" | "1h";
+  promptCacheKey?: boolean;
   enabled: boolean;
   secretRef?: string;
   allowInsecureHttp?: boolean;
@@ -559,6 +562,8 @@ export type AutomationOperations = {
       name: string;
       baseUrl: string;
       apiFormat?: ApiFormat;
+      promptCaching?: "auto" | "off" | "1h";
+      promptCacheKey?: boolean;
       enabled?: boolean;
       secretRef?: string;
       allowInsecureHttp?: boolean;

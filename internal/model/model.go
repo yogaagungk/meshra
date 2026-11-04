@@ -144,10 +144,17 @@ type Event struct {
 	Attempt       int       `json:"attempt"`
 }
 type Emit func(kind, data string)
+type ChatMessage struct {
+	Role    string
+	Content string
+}
+
 type Turn struct {
 	Tools        ToolExecutor `json:"-"`
 	Task         Task
 	System       string
+	History      []ChatMessage
+	ProfileID    string
 	MaxToolCalls int
 	MCPURL       string
 	Token        string

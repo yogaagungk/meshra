@@ -555,6 +555,8 @@ export function ProviderConnections() {
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiFormat, setApiFormat] = useState<ApiFormat>("openai");
+  const [promptCaching, setPromptCaching] = useState<"auto" | "off" | "1h">("auto");
+  const [promptCacheKey, setPromptCacheKey] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [supportsTools, setSupportsTools] = useState(true);
   const [supportsImages, setSupportsImages] = useState(false);
@@ -581,6 +583,8 @@ export function ProviderConnections() {
     setName(endpoint?.name || "");
     setBaseUrl(endpoint?.baseUrl || "");
     setApiFormat(endpoint?.apiFormat || "openai");
+    setPromptCaching(endpoint?.promptCaching || "auto");
+    setPromptCacheKey(endpoint?.promptCacheKey ?? false);
     setApiKey("");
     setSupportsTools(endpoint?.supportsTools ?? true);
     setSupportsImages(endpoint?.supportsImages ?? false);
@@ -608,6 +612,8 @@ export function ProviderConnections() {
           name: name.trim(),
           baseUrl: baseUrl.trim(),
           apiFormat,
+          promptCaching,
+          promptCacheKey,
           supportsTools: apiFormat === "typesafe" ? false : supportsTools,
           supportsImages: apiFormat === "typesafe" ? false : supportsImages,
           allowInsecureHttp,
@@ -784,6 +790,18 @@ export function ProviderConnections() {
               run chat or tool-calling turns, so agents cannot use this connection.
             </p>
           )}
+          {apiFormat === "anthropic" && <>
+            <label htmlFor="endpoint-prompt-caching">Prompt caching</label>
+            <select id="endpoint-prompt-caching" value={promptCaching} onChange={(e) => setPromptCaching(e.target.value as "auto" | "off" | "1h")}>
+              <option value="auto">Automatic (5 minute cache)</option>
+              <option value="off">Off</option>
+              <option value="1h">1 hour (higher write cost)</option>
+            </select>
+          </>}
+          {apiFormat === "openai" && <label className="automation-inline">
+            <input type="checkbox" checked={promptCacheKey} onChange={(e) => setPromptCacheKey(e.target.checked)} />
+            Send a prompt cache key (only enable if the endpoint supports it)
+          </label>}
           <label htmlFor="endpoint-url">Base URL</label>
           <input
             id="endpoint-url"

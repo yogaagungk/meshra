@@ -35,6 +35,8 @@ type ProviderEndpoint struct {
 	SupportsTools       bool   `json:"supportsTools"`
 	SupportsImages      bool   `json:"supportsImages"`
 	ContextWindowTokens int    `json:"contextWindowTokens,omitempty"`
+	PromptCacheKey      bool   `json:"promptCacheKey,omitempty"`
+	PromptCaching       string `json:"promptCaching,omitempty"`
 	CreatedAt           string `json:"createdAt"`
 	UpdatedAt           string `json:"updatedAt"`
 }
@@ -68,17 +70,19 @@ var localModelProbeURLs = []string{"http://127.0.0.1:11434/v1/models", "http://1
 // endpointRequest is the submitted endpoint definition. Absent fields keep
 // their stored value, so a partial edit cannot silently clear a reviewed flag.
 type endpointRequest struct {
-	ID                  string `json:"id,omitempty"`
-	Revision            int    `json:"revision,omitempty"`
-	Name                string `json:"name"`
-	BaseURL             string `json:"baseUrl"`
-	APIFormat           string `json:"apiFormat,omitempty"`
-	Enabled             *bool  `json:"enabled,omitempty"`
-	SecretRef           string `json:"secretRef,omitempty"`
-	AllowInsecureHTTP   bool   `json:"allowInsecureHttp,omitempty"`
-	SupportsTools       *bool  `json:"supportsTools,omitempty"`
-	SupportsImages      *bool  `json:"supportsImages,omitempty"`
-	ContextWindowTokens *int   `json:"contextWindowTokens,omitempty"`
+	ID                  string  `json:"id,omitempty"`
+	Revision            int     `json:"revision,omitempty"`
+	Name                string  `json:"name"`
+	BaseURL             string  `json:"baseUrl"`
+	APIFormat           string  `json:"apiFormat,omitempty"`
+	Enabled             *bool   `json:"enabled,omitempty"`
+	SecretRef           string  `json:"secretRef,omitempty"`
+	AllowInsecureHTTP   bool    `json:"allowInsecureHttp,omitempty"`
+	SupportsTools       *bool   `json:"supportsTools,omitempty"`
+	SupportsImages      *bool   `json:"supportsImages,omitempty"`
+	ContextWindowTokens *int    `json:"contextWindowTokens,omitempty"`
+	PromptCacheKey      *bool   `json:"promptCacheKey,omitempty"`
+	PromptCaching       *string `json:"promptCaching,omitempty"`
 }
 
 // connectionsOperation serves the operator only connection operations.
@@ -267,6 +271,11 @@ func validateEndpointDefinition(endpoint *ProviderEndpoint) error {
 	if endpoint.ContextWindowTokens < 0 || endpoint.ContextWindowTokens > 10_000_000 {
 		return model.Err(400, "contextWindowTokens is out of range")
 	}
+	switch endpoint.PromptCaching {
+	case "", "auto", "off", "1h":
+	default:
+		return model.Err(400, "promptCaching must be auto, off or 1h")
+	}
 	return nil
 }
 
@@ -431,6 +440,12 @@ func (r *Relay) saveEndpoint(ctx context.Context, raw json.RawMessage) (any, err
 	if request.ContextWindowTokens != nil {
 		incoming.ContextWindowTokens = *request.ContextWindowTokens
 	}
+	if request.PromptCacheKey != nil {
+		incoming.PromptCacheKey = *request.PromptCacheKey
+	}
+	if request.PromptCaching != nil {
+		incoming.PromptCaching = *request.PromptCaching
+	}
 	// The credential is prepared before the transaction so the vault key is
 	// never taken while the single database connection is busy. The definition
 	// is validated after the stored values are merged, so a partial edit that
@@ -484,6 +499,12 @@ func (r *Relay) saveEndpoint(ctx context.Context, raw json.RawMessage) (any, err
 		}
 		if request.ContextWindowTokens == nil {
 			incoming.ContextWindowTokens = previous.ContextWindowTokens
+		}
+		if request.PromptCacheKey == nil {
+			incoming.PromptCacheKey = previous.PromptCacheKey
+		}
+		if request.PromptCaching == nil {
+			incoming.PromptCaching = previous.PromptCaching
 		}
 		if request.SecretRef == "" {
 			incoming.SecretRef = previous.SecretRef

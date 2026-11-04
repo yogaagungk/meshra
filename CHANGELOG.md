@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Direct API prompt caching
+
+- Anthropic-format connections can request ephemeral prompt caching, with an
+  optional one-hour tier and a fallback for gateways that reject the field.
+  OpenAI-format connections can opt into a profile/conversation cache key.
+- Direct API chat history and compaction preserve prompt prefixes for longer;
+  cache reads, writes and rates are surfaced in usage and request statistics.
+- Preserve complete retained Direct API chat exchanges within the history
+  budget; evict whole blocks when an exchange cannot fit.
+- Fix Direct API chat startup when the shared chat identity has no endpoint of
+  its own; each conversation uses its selected endpoint and model for its turn.
+- Send OpenCode Go's required stable conversation session header on streaming
+  and buffered Direct API requests.
+
 ### Console motion, Settings and code view
 
 - Every tab menu (Settings, Automation, Agents, Workspaces Files/Changes, Stats,

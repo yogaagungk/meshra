@@ -115,7 +115,7 @@ func TestQuotaSanitizationAndBounds(t *testing.T) {
 }
 func TestContextUsageAndHistoryAreScopedAndRetained(t *testing.T) {
 	r, _ := openTest(t, func(_ context.Context, _ model.Turn, emit model.Emit) (string, error) {
-		emit("usage", `{"inputTokens":120,"outputTokens":40,"cachedInputTokens":80}`)
+		emit("usage", `{"inputTokens":120,"outputTokens":40,"cachedInputTokens":80,"cacheWriteInputTokens":30}`)
 		emit("context_usage", `{"usedTokens":160,"windowTokens":1000,"estimated":true,"source":"fixture native estimate"}`)
 		return "reply", nil
 	})
@@ -134,16 +134,17 @@ func TestContextUsageAndHistoryAreScopedAndRetained(t *testing.T) {
 	b, _ := json.Marshal(value)
 	var body struct {
 		Latest struct {
-			Used      *int64 `json:"contextUsedTokens"`
-			Window    *int64 `json:"contextWindowTokens"`
-			Cached    *int64 `json:"cachedInputTokens"`
-			Estimated *bool  `json:"estimated"`
+			Used       *int64 `json:"contextUsedTokens"`
+			Window     *int64 `json:"contextWindowTokens"`
+			Cached     *int64 `json:"cachedInputTokens"`
+			CacheWrite *int64 `json:"cacheWriteInputTokens"`
+			Estimated  *bool  `json:"estimated"`
 		} `json:"latest"`
 	}
 	if err = json.Unmarshal(b, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Latest.Used == nil || *body.Latest.Used != 160 || body.Latest.Window == nil || *body.Latest.Window != 1000 || body.Latest.Cached == nil || *body.Latest.Cached != 80 || body.Latest.Estimated == nil || !*body.Latest.Estimated {
+	if body.Latest.Used == nil || *body.Latest.Used != 160 || body.Latest.Window == nil || *body.Latest.Window != 1000 || body.Latest.Cached == nil || *body.Latest.Cached != 80 || body.Latest.CacheWrite == nil || *body.Latest.CacheWrite != 30 || body.Latest.Estimated == nil || !*body.Latest.Estimated {
 		t.Fatal(string(b))
 	}
 	value, err = r.Console(admin, "usage-history", model.ConsoleRequest{ConversationID: c.ID, Harness: "omp"})

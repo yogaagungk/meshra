@@ -43,6 +43,7 @@ func (r *runtime) chatStream(ctx context.Context, request chatRequest, token str
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream, application/json")
+	r.setProviderHeaders(req)
 	if r.cfg.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+r.cfg.APIKey)
 	}

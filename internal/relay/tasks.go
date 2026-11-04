@@ -882,7 +882,8 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 	if e == nil && a.ProfileManaged && !model.Terminal(current.State) {
 		tools, e = r.newToolBrokerLocked(ctx, current, s)
 	}
-	var injected, system string
+	var injected, system, profileID string
+	var history []model.ChatMessage
 	maxToolCalls := 0
 	if e == nil && !model.Terminal(current.State) {
 		injected, e = r.resolveTaskContext(current)
@@ -893,17 +894,24 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 		injected += excerpt
 	}
 	if e == nil && current.Chat && !model.Terminal(current.State) {
-		injected, e = r.chatPrompt(current, injected)
+		if a.Harness == "openai" {
+			history, e = r.directChatHistory(current)
+			system = directChatInstructions
+		} else {
+			injected, e = r.chatPrompt(current, injected)
+		}
 	}
 	if e == nil && a.ProfileManaged && !model.Terminal(current.State) {
-		var profileText string
-		profileText, e = r.profilePrompt(current, a.Harness == "openai")
+		var profileText, profileHistory string
+		profileText, profileHistory, e = r.profilePrompt(current, a.Harness == "openai")
 		if a.Harness == "openai" {
-			system = profileText
+			system += profileText
+			injected = profileHistory + injected
 			if e == nil {
 				var snapshot model.ProfileTaskSnapshot
 				snapshot, e = r.profileSnapshot(current)
 				if e == nil {
+					profileID = snapshot.Profile.ID
 					maxToolCalls = snapshot.Profile.MaxToolCalls
 				}
 			}
@@ -942,12 +950,12 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 	sawDelta := false
 	if e == nil && !model.Terminal(current.State) {
 		inputBytes := len(injected)
-		if !current.Chat {
+		if !current.Chat || a.Harness == "openai" {
 			inputBytes += len(current.Text)
 		}
 		_, _ = r.db.Exec("UPDATE run_usage SET input_bytes=? WHERE task_id=? AND attempt=?", inputBytes, t.ID, t.Attempts)
 		delivery := current
-		if current.Chat {
+		if current.Chat && a.Harness != "openai" {
 			delivery.Text = injected
 		} else {
 			delivery.Text += injected
@@ -961,7 +969,7 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 			ctx = context.WithValue(ctx, admittedConnectionKey{}, &tools.snapshot)
 		}
 		if e == nil {
-			result, runErr = runtime.Run(ctx, model.Turn{Task: delivery, System: system, MaxToolCalls: maxToolCalls, Token: token, MCPURL: url, Tools: executor}, func(kind, data string) {
+			result, runErr = runtime.Run(ctx, model.Turn{Task: delivery, System: system, History: history, ProfileID: profileID, MaxToolCalls: maxToolCalls, Token: token, MCPURL: url, Tools: executor}, func(kind, data string) {
 				data = strings.ReplaceAll(data, token, "[REDACTED]")
 				r.mu.Lock()
 				defer r.mu.Unlock()

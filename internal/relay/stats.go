@@ -426,7 +426,7 @@ func (r *Relay) statsRequests(ctx context.Context, f statsFilter, status, search
 		"medianTtftMs": percentile(ttfts, 0.5), "p95TtftMs": percentile(ttfts, 0.95),
 	}
 
-	query := `SELECT id,ts,harness,model,provider,project,agent_type,status,stop_reason,error,duration_ms,ttft_ms,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,cost FROM model_requests` + where
+	query := `SELECT id,ts,harness,model,provider,project,agent_type,status,stop_reason,error,duration_ms,ttft_ms,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,cost,compacted FROM model_requests` + where
 	if status != "" && status != "all" {
 		query += ` AND status=?`
 		args = append(args, status)
@@ -460,6 +460,7 @@ func (r *Relay) statsRequests(ctx context.Context, f statsFilter, status, search
 		CacheWrite int64    `json:"cacheWrite"`
 		Output     int64    `json:"output"`
 		Cost       *float64 `json:"cost"`
+		Compacted  bool     `json:"compacted"`
 	}
 	items := []item{}
 	more := false
@@ -467,7 +468,7 @@ func (r *Relay) statsRequests(ctx context.Context, f statsFilter, status, search
 		var v item
 		var dur, ttft sql.NullInt64
 		var c nf
-		if err = rows.Scan(&v.ID, &v.TS, &v.Harness, &v.Model, &v.Provider, &v.Project, &v.Agent, &v.Status, &v.StopReason, &v.Error, &dur, &ttft, &v.Input, &v.CacheRead, &v.CacheWrite, &v.Output, &c); err != nil {
+		if err = rows.Scan(&v.ID, &v.TS, &v.Harness, &v.Model, &v.Provider, &v.Project, &v.Agent, &v.Status, &v.StopReason, &v.Error, &dur, &ttft, &v.Input, &v.CacheRead, &v.CacheWrite, &v.Output, &c, &v.Compacted); err != nil {
 			return nil, err
 		}
 		if len(items) == limit {
@@ -519,11 +520,13 @@ func (r *Relay) recordModelRequest(t model.Task, data string) {
 		Input      int64  `json:"inputTokens"`
 		Output     int64  `json:"outputTokens"`
 		Cached     int64  `json:"cachedInputTokens"`
+		CacheWrite int64  `json:"cacheWriteInputTokens"`
+		Compacted  bool   `json:"compacted"`
 	}
 	if len(data) > 4096 || json.Unmarshal([]byte(data), &v) != nil {
 		return
 	}
-	for _, n := range []int64{v.Input, v.Output, v.Cached} {
+	for _, n := range []int64{v.Input, v.Output, v.Cached, v.CacheWrite} {
 		if n < 0 || n > 1e12 {
 			return
 		}
@@ -535,6 +538,9 @@ func (r *Relay) recordModelRequest(t model.Task, data string) {
 	}
 	if v.Cached > v.Input {
 		v.Cached = 0
+	}
+	if v.CacheWrite > v.Input-v.Cached {
+		v.CacheWrite = 0
 	}
 	provider := v.Provider
 	var body string
@@ -549,7 +555,7 @@ func (r *Relay) recordModelRequest(t model.Task, data string) {
 	row := statsRow{source: "meshra", harness: "openai", extID: fmt.Sprintf("%s/%d/%d", t.ID, t.Attempts, v.Seq), ts: now().UnixMilli(),
 		model: statsText(v.Model, 200), provider: statsText(provider, 200), project: statsText(t.To, 300), agentType: "main",
 		stopReason: statsText(v.StopReason, 40), errMs: statsText(v.Error, 300), duration: v.DurationMs, ttft: v.TTFTMs,
-		input: v.Input - v.Cached, output: v.Output, cacheRead: v.Cached}
+		input: v.Input - v.Cached - v.CacheWrite, output: v.Output, cacheRead: v.Cached, cacheWrite: v.CacheWrite}
 	if row.model == "" {
 		row.model = "unknown"
 	}
@@ -557,6 +563,6 @@ func (r *Relay) recordModelRequest(t model.Task, data string) {
 		row.provider = "unknown"
 	}
 	row.status = statsStatus(row.stopReason, row.errMs)
-	_, _ = r.db.Exec(`INSERT OR IGNORE INTO model_requests(source,harness,ext_id,ts,model,provider,project,agent_type,status,stop_reason,error,duration_ms,ttft_ms,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,premium,cost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NULL)`,
-		row.source, row.harness, row.extID, row.ts, row.model, row.provider, row.project, row.agentType, row.status, row.stopReason, row.errMs, row.duration, row.ttft, row.input, row.output, row.cacheRead, row.cacheWrite)
+	_, _ = r.db.Exec(`INSERT OR IGNORE INTO model_requests(source,harness,ext_id,ts,model,provider,project,agent_type,status,stop_reason,error,duration_ms,ttft_ms,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,premium,cost,compacted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NULL,?)`,
+		row.source, row.harness, row.extID, row.ts, row.model, row.provider, row.project, row.agentType, row.status, row.stopReason, row.errMs, row.duration, row.ttft, row.input, row.output, row.cacheRead, row.cacheWrite, v.Compacted)
 }

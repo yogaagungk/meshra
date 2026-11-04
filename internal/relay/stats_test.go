@@ -183,7 +183,7 @@ func TestRecordModelRequestAndRequestLog(t *testing.T) {
 		r.recordModelRequest(task, fmt.Sprintf(`{"seq":%d,%s}`, seq, body))
 		r.mu.Unlock()
 	}
-	record(1, `"model":"kimi-k3","provider":"conn-1","durationMs":1500,"ttftMs":400,"stopReason":"toolUse","inputTokens":1000,"outputTokens":50,"cachedInputTokens":800`)
+	record(1, `"model":"kimi-k3","provider":"conn-1","durationMs":1500,"ttftMs":400,"stopReason":"toolUse","inputTokens":1000,"outputTokens":50,"cachedInputTokens":800,"cacheWriteInputTokens":150,"compacted":true`)
 	record(2, `"model":"kimi-k3","provider":"conn-1","durationMs":3000,"stopReason":"stop","inputTokens":1200,"outputTokens":100,"cachedInputTokens":0`)
 	record(3, `"model":"kimi-k3","provider":"conn-1","durationMs":100,"stopReason":"error","error":"HTTP 429","inputTokens":0,"outputTokens":0,"cachedInputTokens":0`)
 	record(2, `"model":"kimi-k3","provider":"conn-1","stopReason":"stop","inputTokens":9,"outputTokens":9,"cachedInputTokens":0`) // replay of seq 2
@@ -197,8 +197,19 @@ func TestRecordModelRequestAndRequestLog(t *testing.T) {
 	}
 	items := log["items"].([]any)
 	first := items[len(items)-1].(map[string]any)
-	if number(t, first["input"]) != 200 || number(t, first["cacheRead"]) != 800 {
+	if number(t, first["input"]) != 50 || number(t, first["cacheRead"]) != 800 || number(t, first["cacheWrite"]) != 150 || first["compacted"] != true {
 		t.Fatalf("cached tokens must be split from input: %v", first)
+	}
+	stats := statsCall(t, r, "stats.summary", map[string]any{"harness": "openai"})
+	for _, group := range []string{"models", "providers"} {
+		rows := stats[group].([]any)
+		if len(rows) != 1 {
+			t.Fatalf("unexpected %s: %v", group, rows)
+		}
+		row := rows[0].(map[string]any)
+		if number(t, row["input"]) != 1250 || number(t, row["cacheRead"]) != 800 || number(t, row["cacheWrite"]) != 150 {
+			t.Fatalf("%s must retain uncached input, cache read and cache write for cache rate: %v", group, row)
+		}
 	}
 	failed := statsCall(t, r, "stats.requests", map[string]any{"status": "failed"})["items"].([]any)
 	if len(failed) != 1 || failed[0].(map[string]any)["error"] != "HTTP 429" {
