@@ -385,7 +385,32 @@ func serveOptions(args []string) (relay.Options, error) {
 	if base < time.Millisecond || cap < base || cap > time.Hour {
 		return opts, usage("effective retry base must be at least 1ms and no greater than retry cap; cap must not exceed 1h")
 	}
+	opts.StatsOMPDB, opts.StatsClaudeDir = statsSources()
 	return opts, nil
+}
+
+// statsSources returns the read-only import sources of the stats dashboard:
+// the OMP stats database and the Claude session logs of the current user.
+// MESHRA_STATS_IMPORT=off disables both; MESHRA_OMP_STATS_DB and
+// MESHRA_CLAUDE_PROJECTS_DIR override the locations.
+func statsSources() (omp, claude string) {
+	if strings.EqualFold(os.Getenv("MESHRA_STATS_IMPORT"), "off") {
+		return "", ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	pick := func(env, fallback string) string {
+		if value := os.Getenv(env); value != "" {
+			return value
+		}
+		if home == "" {
+			return ""
+		}
+		return filepath.Join(home, fallback)
+	}
+	return pick("MESHRA_OMP_STATS_DB", ".omp/stats.db"), pick("MESHRA_CLAUDE_PROJECTS_DIR", ".claude/projects")
 }
 
 func command(args []string) (method, path string, body any, follow bool, err error) {

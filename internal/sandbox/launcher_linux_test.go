@@ -38,7 +38,7 @@ func TestRealWorkerAggregateOutputAndDispatchClaim(t *testing.T){
 
 func TestRealWorkerCgroupLimitsConcurrencyAndSnapshotOwnership(t *testing.T){
  c:=realConfig(t);s:=snapshotTest(t,t.TempDir())
- for _,kind:=range []Kind{Command,Browser,Voice}{
+ for _,kind:=range []Kind{Command,Browser}{
   p,e:=Prepare(context.Background(),c,Request{Workspace:s,Argv:[]string{c.Executables["shell"],"-c","exit 0"},Kind:kind,ReadOnly:true});if e!=nil{t.Fatal(e)}
   memory,pids:="1073741824","128";if kind!=Command{memory,pids="2147483648","256"}
   for file,expected:=range map[string]string{"memory.max":memory,"pids.max":pids,"memory.swap.max":"0","memory.oom.group":"1"}{b,e:=os.ReadFile(filepath.Join(p.cg.dir,file));if e!=nil||strings.TrimSpace(string(b))!=expected{p.Close();t.Fatalf("unenforced %s: %q %v",file,b,e)}}

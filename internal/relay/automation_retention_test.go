@@ -130,21 +130,11 @@ func TestAutomationRetentionRequiresExpiredSensitiveArtifacts(t *testing.T) {
 	} {
 		retentionExec(t, r, `INSERT INTO browser_sessions(id,profile_id,conversation_id,state,body) VALUES(?,'profile','conversation','closed',?)`, item.id, item.body)
 	}
-	for _, item := range []struct{ id, state, body string }{
-		{"expired", "expired", `{"updatedAt":"` + retentionOld + `","audioAvailable":false}`},
-		{"audio", "expired", `{"updatedAt":"` + retentionOld + `","audioFile":"private.wav","audioAvailable":true}`},
-		{"completed", "completed", `{"updatedAt":"` + retentionOld + `"}`},
-		{"recent", "expired", `{"updatedAt":"` + retentionRecent + `"}`},
-	} {
-		retentionExec(t, r, `INSERT INTO voice_jobs(id,session_owner,state,expires_at,body) VALUES(?,'owner',?,?,?)`, item.id, item.state, retentionOld, item.body)
-	}
 	if err := r.pruneAutomationHistory(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 	retentionCount(t, r, `SELECT count(*) FROM browser_sessions`, 3)
-	retentionCount(t, r, `SELECT count(*) FROM voice_jobs`, 3)
 	retentionCount(t, r, `SELECT count(*) FROM browser_sessions WHERE id='expired'`, 0)
-	retentionCount(t, r, `SELECT count(*) FROM voice_jobs WHERE id='expired'`, 0)
 }
 
 func TestAutomationRetentionConnectorCapacityNeverEvicts(t *testing.T) {

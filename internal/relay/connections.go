@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"meshra/internal/adapters/openai"
 	"meshra/internal/model"
 	"meshra/internal/netpolicy"
 )
@@ -22,10 +23,12 @@ import (
 // ProviderEndpoint is an operator reviewed OpenAI-compatible endpoint. The
 // credential is referenced, never embedded: secretRef names a vault record.
 type ProviderEndpoint struct {
-	ID                  string `json:"id"`
-	Revision            int    `json:"revision"`
-	Name                string `json:"name"`
-	BaseURL             string `json:"baseUrl"`
+	ID       string `json:"id"`
+	Revision int    `json:"revision"`
+	Name     string `json:"name"`
+	BaseURL  string `json:"baseUrl"`
+	// APIFormat is the wire protocol: openai (default), anthropic or typesafe.
+	APIFormat           string `json:"apiFormat,omitempty"`
 	Enabled             bool   `json:"enabled"`
 	SecretRef           string `json:"secretRef,omitempty"`
 	AllowInsecureHTTP   bool   `json:"allowInsecureHttp,omitempty"`
@@ -69,6 +72,7 @@ type endpointRequest struct {
 	Revision            int    `json:"revision,omitempty"`
 	Name                string `json:"name"`
 	BaseURL             string `json:"baseUrl"`
+	APIFormat           string `json:"apiFormat,omitempty"`
 	Enabled             *bool  `json:"enabled,omitempty"`
 	SecretRef           string `json:"secretRef,omitempty"`
 	AllowInsecureHTTP   bool   `json:"allowInsecureHttp,omitempty"`
@@ -245,6 +249,18 @@ func validateEndpointDefinition(endpoint *ProviderEndpoint) error {
 		return err
 	}
 	endpoint.BaseURL = base
+	if !openai.ValidFormat(endpoint.APIFormat) {
+		return model.Err(400, "apiFormat must be openai, anthropic or typesafe")
+	}
+	if endpoint.APIFormat == "" {
+		endpoint.APIFormat = openai.FormatOpenAI
+	}
+	if endpoint.APIFormat == openai.FormatTypeSafe {
+		// System One answers typed questions; it never generates text or calls
+		// tools, so it cannot back a chat turn.
+		endpoint.SupportsTools = false
+		endpoint.SupportsImages = false
+	}
 	if endpoint.SecretRef != "" && !profileIdentifier(endpoint.SecretRef) {
 		return model.Err(400, "invalid secret reference")
 	}
@@ -398,6 +414,7 @@ func (r *Relay) saveEndpoint(ctx context.Context, raw json.RawMessage) (any, err
 	}
 	incoming.Name = request.Name
 	incoming.BaseURL = request.BaseURL
+	incoming.APIFormat = request.APIFormat
 	incoming.AllowInsecureHTTP = request.AllowInsecureHTTP
 	if request.SecretRef != "" {
 		incoming.SecretRef = request.SecretRef
@@ -452,6 +469,9 @@ func (r *Relay) saveEndpoint(ctx context.Context, raw json.RawMessage) (any, err
 		if request.BaseURL == "" {
 			incoming.BaseURL = previous.BaseURL
 			incoming.AllowInsecureHTTP = previous.AllowInsecureHTTP
+		}
+		if request.APIFormat == "" {
+			incoming.APIFormat = previous.APIFormat
 		}
 		if request.Enabled == nil {
 			incoming.Enabled = previous.Enabled
@@ -678,7 +698,14 @@ func (r *Relay) listEndpointModels(ctx context.Context, raw json.RawMessage) (an
 	request.Header.Set("Accept", "application/json")
 	// A local endpoint may be listed without a credential. The secret is used
 	// for the request only and is never returned or logged.
-	if config.APIKey != "" {
+	if config.Format == openai.FormatAnthropic {
+		request.Header.Set("anthropic-version", openai.AnthropicVersion)
+		if config.APIKey != "" {
+			request.Header.Set("x-api-key", config.APIKey)
+		}
+		// The Messages API lists 20 models by default.
+		request.URL.RawQuery = "limit=1000"
+	} else if config.APIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+config.APIKey)
 	}
 	response, err := config.HTTPClient.Do(request)
@@ -697,18 +724,30 @@ func (r *Relay) listEndpointModels(ctx context.Context, raw json.RawMessage) (an
 		return nil, model.Err(413, "the model listing exceeded the response bound")
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, model.Err(503, "the endpoint did not return a model listing")
+		return nil, model.Err(503, fmt.Sprintf("the endpoint returned HTTP %d for the model listing", response.StatusCode))
 	}
-	options, err := parseModelOptions(body)
+	options, err := parseModelOptions(body, endpoint.APIFormat)
 	if err != nil {
 		return nil, model.Err(503, "the endpoint did not return a model listing")
 	}
 	return options, nil
 }
 
+// protocolKey is the per-model protocol name that gateways such as OpenCode
+// publish under "api". It is empty for a format that has no such key.
+func protocolKey(format string) string {
+	switch format {
+	case "", openai.FormatOpenAI:
+		return "chat-completions"
+	case openai.FormatAnthropic:
+		return "messages"
+	}
+	return ""
+}
+
 // parseModelOptions accepts the common listing shapes. Unknown entries are
 // skipped, never guessed.
-func parseModelOptions(body []byte) ([]model.ModelOption, error) {
+func parseModelOptions(body []byte, format string) ([]model.ModelOption, error) {
 	var payload struct {
 		Data   []json.RawMessage `json:"data"`
 		Models []json.RawMessage `json:"models"`
@@ -738,14 +777,34 @@ func parseModelOptions(body []byte) ([]model.ModelOption, error) {
 	}
 	for _, raw := range entries {
 		var entry struct {
-			ID    string `json:"id"`
-			Model string `json:"model"`
-			Name  string `json:"name"`
+			ID          string                     `json:"id"`
+			Model       string                     `json:"model"`
+			Name        string                     `json:"name"`
+			DisplayName string                     `json:"display_name"`
+			Type        string                     `json:"type"`
+			API         map[string]json.RawMessage `json:"api"`
 		}
 		if err := json.Unmarshal(raw, &entry); err == nil {
+			// A gateway can list non-chat models and models that speak another
+			// protocol. Offer only what this connection's format can run.
+			if entry.Type != "" && entry.Type != "chat" {
+				continue
+			}
+			if want := protocolKey(format); want != "" && len(entry.API) > 0 {
+				if _, ok := entry.API[want]; !ok {
+					continue
+				}
+			}
 			id := entry.ID
 			if id == "" {
 				id = entry.Model
+			}
+			if id == "" {
+				// TypeSafe lists {"models":[{"name":...}]}.
+				id = entry.Name
+			}
+			if entry.Name == "" {
+				entry.Name = entry.DisplayName
 			}
 			if appendOption(id, entry.Name) {
 				break

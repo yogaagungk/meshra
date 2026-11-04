@@ -88,7 +88,7 @@ test("automation: write a skill, pin it, build a flow with a diagram, and manage
   const chat = await (await page.request.post("./api/collaboration/conversation.create", { headers: { "X-Meshra-CSRF": csrf }, data: { title: "Queue seed", participants: ["claude:apmobilewallet"] } })).json();
   for (const text of ["first queued", "second queued"])
     await post(page, csrf, "send", { conversationId: chat.conversationId, recipients: ["claude:apmobilewallet"], text, idempotencyKey: crypto.randomUUID() });
-  await page.getByRole("button", { name: /^Queue/ }).click();
+  await page.getByRole("tab", { name: /^Queue/ }).click();
   const card = page.getByRole("region", { name: "Queue for claude:apmobilewallet" });
   await expect(card).toContainText("2 waiting");
   await expect(page.getByRole("region", { name: "Queue for claude:apmobileprod" })).toHaveCount(0);

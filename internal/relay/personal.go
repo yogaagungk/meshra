@@ -161,9 +161,6 @@ func (r *Relay) reapIdle() {
 		case <-ticker.C:
 			r.releaseIdle()
 			r.cleanupProfileGenerations()
-			if err := r.sweepVoiceJobs(r.ctx, now()); err != nil && r.ctx.Err() == nil {
-				r.logger.Warn("local voice expiry cleanup failed")
-			}
 			if err := r.sweepBrowserSessions(r.ctx, now()); err != nil && r.ctx.Err() == nil {
 				r.logger.Warn("browser expiry cleanup failed")
 			}

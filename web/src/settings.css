@@ -1,0 +1,136 @@
+/* Settings: a quiet two-pane layout. Navigation on the left, one section at a time. */
+.settings {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+  min-width: 0;
+}
+.settings-nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  min-width: 0;
+}
+.settings-nav .tabbar > button { gap: 10px; padding: 8px 12px; }
+.settings-nav .tabbar > button svg { flex: none; opacity: 0.8; }
+.settings-nav .tabbar > button[aria-selected="true"] svg { opacity: 1; }
+.tabbar-heading {
+  padding: 18px 12px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tabbar-heading:first-child { padding-top: 0; }
+.settings-body { min-width: 0; max-width: 880px; }
+.settings-body .preferences,
+.settings-body .automation-page { max-width: none; }
+.settings-body > .tab-panel > * + * { margin-top: 16px; }
+
+@media (max-width: 899px) {
+  .settings { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .settings-nav {
+    top: -17px;
+    z-index: 6;
+    margin-inline: -20px;
+    padding: 10px 20px 8px;
+    background: linear-gradient(var(--bg) 82%, transparent);
+  }
+  .settings-nav .tabbar { gap: 4px; padding-bottom: 2px; }
+  .settings-nav .tabbar > button { padding: 7px 12px; }
+}
+@media (max-width: 640px) {
+  .settings-nav { margin-inline: -14px; padding-inline: 14px; }
+}
+
+/* ---------- Connection rows: name, tags, actions ---------- */
+.settings-body .automation-card-head .automation-actions {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.conn-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 14px 0 !important;
+}
+.conn-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.conn-main strong { font-weight: 600; }
+.conn-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-tags { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.conn-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.automation-tag.is-on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.conn-row > .automation-test-result { grid-column: 1 / -1; }
+@media (max-width: 900px) {
+  .conn-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .conn-tags { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
+  .conn-actions { grid-row: 1; grid-column: 2; }
+}
+@media (max-width: 520px) {
+  .conn-row { grid-template-columns: minmax(0, 1fr); }
+  .conn-actions { grid-row: 3; grid-column: 1; justify-content: flex-start; margin-left: -8px; }
+}
+
+/* ---------- Type and density inside settings ---------- */
+.page-heading { margin-bottom: 22px; }
+.page-heading h1 { margin: 6px 0 4px; }
+.page-heading p { line-height: 1.5; }
+.settings-body h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
+.settings-body section > p,
+.settings-body .personal-section-heading + p { margin: 4px 0 0; max-width: 66ch; color: var(--muted); font-size: var(--font-label); line-height: 1.55; }
+.settings-body .personal-preferences > section { padding-block: 22px; }
+.settings-body .personal-preferences > section:first-child { padding-top: 0; }
+
+/* Forms: two columns where fields are short, one narrow column for credentials */
+.settings-body .personal-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 24px;
+  max-width: 680px;
+  margin-top: 18px;
+}
+.settings-body .personal-form > .personal-actions,
+.settings-body .personal-form > .notice,
+.settings-body .personal-form > p { grid-column: 1 / -1; }
+.settings-body .personal-form input[type="number"] { max-width: none; }
+.settings-body .personal-form small { margin-top: -2px; }
+@media (max-width: 640px) {
+  .settings-body .personal-form { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+}
+
+/* Cards in settings are quiet: hairline, no nested emphasis */
+.settings-body .automation-card { border-radius: 12px; padding: 18px 20px; gap: 14px; }
+.settings-body .automation-card-head strong { font-size: 15px; font-weight: 600; }
+@media (max-width: 640px) {
+  .settings-body .automation-card { padding: 16px; }
+}
+
+/* Usage dashboard: smaller stat tiles */
+.settings-body .usage-dashboard-stats > div { padding: 14px 16px; gap: 4px; }
+.settings-body .usage-dashboard-stats svg { width: 16px; height: 16px; }
+.settings-body .usage-dashboard-stats span { font-size: var(--font-meta); color: var(--muted); }
+.settings-body .usage-dashboard-stats strong { font-size: 20px; }
+
+/* Field rows keep their inputs level; read-outs align on one baseline */
+.settings-body .personal-form label { align-content: start; }
+.settings-body .personal-stats { max-width: 560px; }
+.settings-body .personal-stats dt,
+.settings-body .personal-stats dd { margin: 0; padding: 11px 0; line-height: 1.4; }
+.settings-body .personal-stats dt { color: var(--muted); font-size: var(--font-label); }
+.settings-body .personal-stats dd { font-weight: 600; }
+
+/* Beat the generic connection-list column rule: tags and actions stay in a row */
+.settings-body .conn-row > .conn-tags,
+.settings-body .conn-row > .conn-actions {
+  flex-direction: row;
+  flex: none;
+  gap: 6px;
+}
+.settings-body .conn-row > .conn-actions { gap: 4px; }
+.settings-body .conn-row > .conn-main { flex: 1; }

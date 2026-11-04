@@ -10,6 +10,17 @@ Adapter support is intentionally asymmetric. A registered identity is durable ev
 
 “Yes” means implemented capability, not proof that every provider account/configuration has passed a live test. The [v0.2 adapter verification report](V0.2_ADAPTER_VERIFICATION.md) records fresh installed-version, schema, native credential-free protocol evidence, credential prerequisites, and the worktree-write enforcement matrix. Earlier authenticated outcomes remain in [verification.md](verification.md), separate from deterministic protocol contracts. Runtime capability metadata makes these differences discoverable.
 
+## Direct API compatibility formats
+
+Each provider connection has an `apiFormat`: `openai` (default),
+`anthropic` or `typesafe`. `openai` posts to `<base>/v1/chat/completions` with a
+bearer token. `anthropic` posts to `<base>/v1/messages` with `x-api-key` and
+`anthropic-version: 2023-06-01`; system text becomes the `system` parameter, tool
+calls become `tool_use` blocks, and consecutive tool results share one user
+message. `typesafe` stores a System One connection (`https://api.typesafe.ai`) and
+lists its models, but cannot run chat turns because System One answers typed
+questions and neither generates text nor calls tools.
+
 ## Verified interface sources
 
 - [OMP RPC reference](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md): `ready`, v2 negotiation/chunk frames, command IDs, `get_state`, `new_session`, `prompt`, `prompt_result`, `abort`, `get_last_assistant_text`, async deltas. This is **not JSON-RPC 2.0**.

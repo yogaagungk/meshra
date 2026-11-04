@@ -1,3 +1,4 @@
+import { TabBar } from "./components/Tabs";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, PanelRight, Plus } from "lucide-react";
@@ -11,7 +12,6 @@ import { Markdown } from "./Markdown";
 import { Approvals } from "./Approvals";
 import { Attachments } from "./Attachments";
 import { BrowserPanel } from "./BrowserPanel";
-import { Voice } from "./Voice";
 import { ContextBrowser } from "./Operations";
 import { mergeTasks, stateLabel, terminal, type Agent, type Conversation, type Page, type Task } from "./types";
 
@@ -64,7 +64,6 @@ export function ProfileChat({ conversation, agents, onNew }: { conversation: Con
     try { await automation("profiles.bindingAction", { profileId: recipient, conversationId: id, action }); await client.invalidateQueries({ queryKey: ["agents"] }); await binding.refetch(); }
     catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  const latestReply = [...tasks].reverse().find((task) => task.state === "completed" && task.result)?.result || "";
   return <div className={"chat-layout profile-chat " + (side ? "inspector-open" : "")}><section className="chat-main">
     <header className="chat-header"><div className="chat-title-row"><Button variant="ghost" size="icon" className="mobile-back" aria-label="Back to conversations" onClick={() => go("chat")}><ArrowLeft size={20} /></Button><div><h1>{conversation.title}</h1><div className="chat-subtitle">Profile {conversation.profileKind || "conversation"} · {connection} · queued sends</div></div></div><div className="chat-header-actions"><Button variant="ghost" onClick={onNew}><Plus size={16} />New conversation</Button><Button variant={side ? "outline" : "ghost"} aria-label="Profile conversation tools" onClick={() => setSide(!side)}><PanelRight size={18} /></Button></div></header>
     <div className="profile-binding-bar"><label htmlFor="profile-recipient">Recipient / channel lead</label><select id="profile-recipient" value={recipient} disabled={busy} onChange={(e) => { setRecipient(e.target.value); setAttachmentIds([]); key.current = ""; }}><option value="">Select one recipient</option>{profiles.data?.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select>
@@ -80,8 +79,8 @@ export function ProfileChat({ conversation, agents, onNew }: { conversation: Con
       {tasks.map((task) => <article className="automation-card" key={task.taskId}><header className="automation-card-head"><strong>{profiles.data?.find((profile) => profile.id === task.to)?.name || task.to}</strong><span>{stateLabel(task)}</span></header><Markdown text={task.text} />{task.result && <Markdown text={task.result} />}{task.error && <Notice>{task.error}</Notice>}<Button variant="ghost" size="sm" onClick={() => { localWrite("routine-prefill", { name: task.text.slice(0, 60), profileId: task.to, instruction: task.text }); goAutomation("routines"); }}>Schedule this</Button>{!terminal(task.state) && <Button variant="outline" onClick={() => { void api("tasks/" + encodeURIComponent(task.taskId) + "/cancel", {}).then(() => client.invalidateQueries({ queryKey: ["timeline", id] })).catch((e: Error) => setError(e.message)); }}>Cancel task</Button>}{!!task.attachmentIds?.length && <small className="muted">Files: {task.attachmentIds.join(", ")}</small>}</article>)}
       {!timeline.isPending && !tasks.length && <p className="muted">Choose a recipient and queue your first message. Starting a binding is explicit; stopped automatic work stays queued.</p>}
     </div></div>
-    <form className="profile-composer form-stack" onSubmit={send}><label htmlFor="profile-message">Queue a message{selected ? " to " + selected.name : ""}</label><textarea id="profile-message" value={draft} disabled={busy} placeholder="Messages can queue while a task is running…" onChange={(e) => { setDraft(e.target.value); key.current = ""; }} /><div className="automation-actions"><Button type="button" variant="outline" onClick={() => { setTab("files"); setSide(true); }}>Files ({attachmentIds.length})</Button><Button type="button" variant="outline" onClick={() => { setTab("voice"); setSide(true); }}>Voice draft</Button><Button type="submit" disabled={busy || !recipient || !draft.trim() || new TextEncoder().encode(draft).length > 65536}>{busy ? "Queuing…" : "Queue message"}</Button></div></form>
-  </section>{side && <aside className="chat-inspector profile-inspector"><div className="automation-tabs" role="group" aria-label="Profile conversation tools">{["memory", "history", "context", "files", "attention", "browser", "voice"].map((name) => <button key={name} aria-pressed={tab === name} onClick={() => setTab(name)}>{name}</button>)}</div>
+    <form className="profile-composer form-stack" onSubmit={send}><label htmlFor="profile-message">Queue a message{selected ? " to " + selected.name : ""}</label><textarea id="profile-message" value={draft} disabled={busy} placeholder="Messages can queue while a task is running…" onChange={(e) => { setDraft(e.target.value); key.current = ""; }} /><div className="automation-actions"><Button type="button" variant="outline" onClick={() => { setTab("files"); setSide(true); }}>Files ({attachmentIds.length})</Button><Button type="submit" disabled={busy || !recipient || !draft.trim() || new TextEncoder().encode(draft).length > 65536}>{busy ? "Queuing…" : "Queue message"}</Button></div></form>
+  </section>{side && <aside className="chat-inspector profile-inspector"><TabBar label="Profile conversation tools" value={tab} onChange={setTab} items={["memory", "history", "context", "files", "attention", "browser"].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }))} />
     {!recipient ? <p>Select a recipient to inspect its private tools and memory.</p>
       : tab === "memory" ? <ProfileMemory key={recipient} profileId={recipient} conversationId={id} />
       : tab === "history" ? <ProfileHistory key={recipient} profileId={recipient} conversationId={id} />
@@ -99,7 +98,7 @@ export function ProfileChat({ conversation, agents, onNew }: { conversation: Con
       : tab === "files" ? <Attachments key={recipient} conversationId={id} selected={attachmentIds} enabled={!!selected?.capabilities.attachments} onSelect={(ids) => { setAttachmentIds(ids); key.current = ""; }} />
       : tab === "attention" ? <Approvals key={recipient} profileId={recipient} />
       : tab === "browser" ? <BrowserPanel key={recipient} profileId={recipient} conversationId={id} enabled={!!selected?.capabilities.browser} />
-      : <Voice key={recipient} conversationId={id} reply={latestReply} onDraft={(text) => { setDraft((value) => value + (value ? "\n" : "") + text); key.current = ""; }} />}
+      : null}
   </aside>}
   <Dialog open={context} onOpenChange={setContext} title="Attach shared context" description="Select an authorized immutable context version to share with this profile conversation." wide>
     <ContextBrowser recipients={binding.data ? [binding.data.agentId] : []} onAttach={(ref) => {

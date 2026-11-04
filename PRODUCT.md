@@ -23,7 +23,7 @@ Friendly like an agent-team app, but with provable boundaries: exact canonical a
 - Single administrator on loopback (default 127.0.0.1:7331, `/console/`); sign-in with local admin token or username and password; no multi-user authorization.
 - Embedded React/TypeScript console served by the Go daemon; SQLite WAL storage.
 - Core surfaces: Chat (one-to-one AI chat and multi-recipient agent collaboration), Agents, Workspaces (registered local directories), Contexts, Automation, Activity, Settings.
-- Messaging connectors (Slack, Discord, Telegram), provider connections, MCP bridges, voice, browser panel and usage dashboard already exist.
+- Messaging connectors (Slack, Discord, Telegram), provider connections, MCP bridges, browser panel and usage dashboard already exist.
 
 ## Capabilities and Constraints
 

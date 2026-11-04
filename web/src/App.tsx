@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   ArrowLeft,
+  BarChart3,
   ArrowUpRight,
   BookOpen,
   Check,
@@ -40,6 +41,7 @@ import { Operations } from "./Operations";
 import { ConversationList, type ConversationFilter } from "./ConversationList";
 import { HarnessLogo, harnessName } from "./HarnessLogo";
 import { automation } from "./automation-api";
+import { modelCacheOptions } from "./modelCache";
 import { DirectApiFields, type DirectApiValue } from "./DirectApiFields";
 import { AutomationEvents } from "./AutomationEvents";
 export const navigation = [
@@ -49,6 +51,7 @@ export const navigation = [
   ["contexts", "Contexts", BookOpen],
   ["automation", "Automation", Workflow],
   ["activity", "Activity", Activity],
+  ["stats", "Stats", BarChart3],
   ["settings", "Settings", Settings],
 ] as const;
 export type View = (typeof navigation)[number][0];
@@ -908,9 +911,7 @@ function NewConversation({
     queryKey: ["models", harness],
     queryFn: () => api<{ items: ModelOption[] }>("models", { harness }),
     enabled: open && mode === "chat" && harness !== "openai",
-    retry: false,
-    gcTime: 0,
-    staleTime: 60000,
+    ...modelCacheOptions,
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1092,6 +1093,14 @@ function NewConversation({
               ))}
             </select>
             {models.isFetching && <p role="status">Discovering models…</p>}
+            {!models.isFetching && !models.isError && (
+              <p className="picker-hint">
+                Models are cached for 24 hours.{" "}
+                <button type="button" className="text-button" onClick={() => void models.refetch()}>
+                  Refresh models
+                </button>
+              </p>
+            )}
             {models.isError && (
               <p className="picker-hint">
                 Model discovery unavailable. Native default is still available.{" "}

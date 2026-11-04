@@ -20,7 +20,7 @@ test("operator enables password login, signs in, changes password and recovers",
   await page.getByRole("button", { name: "Connect to Meshra" }).click();
   await page.goto("./#settings");
   await page
-    .getByRole("button", { name: "Personal access", exact: true })
+    .getByRole("tab", { name: "Personal access", exact: true })
     .click();
   await page.getByLabel("Username", { exact: true }).fill("test.operator");
   await page.getByLabel("New password", { exact: true }).fill(password);
@@ -75,7 +75,7 @@ test("operator enables password login, signs in, changes password and recovers",
   ).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page
-    .getByRole("button", { name: "Personal access", exact: true })
+    .getByRole("tab", { name: "Personal access", exact: true })
     .click();
   await page.getByLabel("Current password or recovery token").fill(password);
   await page

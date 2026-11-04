@@ -86,7 +86,7 @@ func (r *Relay) retentionActiveTasksTx(tx *sql.Tx) error {
 }
 
 // pruneAutomationHistory is called with relay ownership and performs database
-// work only. Browser/voice lifecycles must expire ephemeral artifacts before
+// work only. Browser lifecycles must expire ephemeral artifacts before
 // these terminal control records become eligible; retention never stops workers
 // or pretends that a closed state proves that private files were removed.
 func (r *Relay) pruneAutomationHistory(before time.Time) error {
@@ -154,11 +154,6 @@ func (r *Relay) pruneAutomationHistory(before time.Time) error {
  AND json_extract(b.body,'$.leaseExpiresAt') IS NULL
  AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.id=b.task_id AND ` + retentionOpenTaskSQL + `)
  ORDER BY b.rowid LIMIT 256)`,
-		`DELETE FROM voice_jobs WHERE rowid IN (SELECT rowid FROM voice_jobs
- WHERE state IN ('expired','cancelled','failed') AND julianday(expires_at)<julianday(?)
- AND julianday(json_extract(body,'$.updatedAt'))<julianday(?)
- AND coalesce(json_extract(body,'$.audioAvailable'),0)=0 AND coalesce(json_extract(body,'$.audioFile'),'')=''
- ORDER BY rowid LIMIT 256)`,
 		`DELETE FROM template_import_previews WHERE rowid IN (SELECT rowid FROM template_import_previews WHERE julianday(expires_at)<julianday(?) ORDER BY rowid LIMIT 256)`,
 		`DELETE FROM mcp_auth_flows WHERE rowid IN (SELECT rowid FROM mcp_auth_flows WHERE julianday(expires_at)<julianday(?) ORDER BY rowid LIMIT 256)`,
 		`DELETE FROM routine_execution_tokens WHERE rowid IN (SELECT rowid FROM routine_execution_tokens WHERE julianday(nullif(revoked_at,''))<julianday(?) OR julianday(nullif(expires_at,''))<julianday(?) ORDER BY rowid LIMIT 256)`,
@@ -184,7 +179,6 @@ func (r *Relay) pruneAutomationHistory(before time.Time) error {
  AND NOT EXISTS(SELECT 1 FROM routine_runs rr WHERE rr.id=e.resource_id)
  AND NOT EXISTS(SELECT 1 FROM connector_outbox o WHERE o.id=e.resource_id AND o.state NOT IN ('sent','failed'))
  AND NOT EXISTS(SELECT 1 FROM browser_sessions b WHERE b.id=e.resource_id)
- AND NOT EXISTS(SELECT 1 FROM voice_jobs v WHERE v.id=e.resource_id)
  ORDER BY e.seq LIMIT 256)`, cutoff); err != nil {
 		return err
 	}

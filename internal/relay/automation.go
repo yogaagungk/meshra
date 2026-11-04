@@ -69,6 +69,8 @@ func (r *Relay) Automation(ctx context.Context, p model.Principal, operation str
 		return r.profileResetContext(p, payload)
 	case "usage.list":
 		return r.automationUsage(p, payload)
+	case "stats.summary", "stats.requests", "stats.refresh":
+		return r.statsOperation(ctx, p, operation, payload)
 	case "runtime.status", "runtime.configure":
 		return r.runtimeOperation(ctx, p, operation, payload)
 	case "network.list", "network.grant", "network.revoke":
@@ -91,8 +93,6 @@ func (r *Relay) Automation(ctx context.Context, p model.Principal, operation str
 		return r.connectorOperation(ctx, p, operation, payload)
 	case "browser.open", "browser.state", "browser.sessions", "browser.takeover", "browser.release", "browser.input", "browser.close", "browser.clearData":
 		return r.browserOperation(ctx, p, operation, payload)
-	case "voice.configure", "voice.status", "voice.transcribe", "voice.synthesize", "voice.job", "voice.cancel":
-		return r.voiceOperation(ctx, p, operation, payload)
 	case "approvals.list", "approvals.decide", "questions.answer":
 		return r.approvalOperation(ctx, p, operation, payload)
 	}
@@ -127,9 +127,6 @@ func (r *Relay) RevokeConsoleSession(id string) {
 		r.logger.Warn("OAuth flow cleanup failed after session revocation")
 	}
 	r.mu.Unlock()
-	if err := r.revokeVoiceSession(id); err != nil && r.ctx.Err() == nil {
-		r.logger.Warn("local voice cleanup failed after session revocation")
-	}
 	if err := r.revokeBrowserSession(id); err != nil {
 		r.logger.Warn("browser control cleanup failed after session revocation")
 	}

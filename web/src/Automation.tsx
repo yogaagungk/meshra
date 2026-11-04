@@ -1,3 +1,4 @@
+import { TabBar, TabPanel } from "./components/Tabs";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -88,14 +89,13 @@ export function Automation({ tab }: { tab?: string }) {
   return (
     <div className="automation-page">
       <Approvals />
-      <div className="automation-tabs" role="group" aria-label="Automation sections">
-        {TABS.map(([key, label]) => (
-          <button key={key} aria-pressed={current === key} onClick={() => goAutomation(key)}>
-            {label}
-            {!!counts[key] && <span className="tab-count">{counts[key]}</span>}
-          </button>
-        ))}
-      </div>
+      <TabBar
+        label="Automation sections"
+        value={current}
+        onChange={goAutomation}
+        items={TABS.map(([id, label]) => ({ id, label, count: counts[id] }))}
+      />
+      <TabPanel value={current} order={TABS.map(([id]) => id)}>
       {current === "queue" ? (
         <QueuePanel />
       ) : current === "routines" ? (
@@ -111,6 +111,7 @@ export function Automation({ tab }: { tab?: string }) {
       ) : (
         <TemplatesPanel />
       )}
+      </TabPanel>
     </div>
   );
 }

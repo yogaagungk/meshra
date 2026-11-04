@@ -1,0 +1,173 @@
+/* Motion system. One easing, three durations, reduced-motion aware. */
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 140ms;
+  --dur-base: 260ms;
+  --dur-slow: 380ms;
+}
+
+/* ---------- Tab bars: one sliding indicator for every menu ---------- */
+.tabbar {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  isolation: isolate;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.tabbar::-webkit-scrollbar { display: none; }
+.tabbar > button {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 13px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) ease;
+}
+.tabbar > button:hover:not([aria-selected="true"]):not(:disabled) { color: var(--text); }
+.tabbar > button[aria-selected="true"] { color: var(--text); }
+.tabbar > button:disabled { opacity: 0.45; cursor: not-allowed; }
+.tabbar > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tabbar-count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+.tabbar-indicator {
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.tabbar[data-ready="true"] .tabbar-indicator {
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    width var(--dur-base) var(--ease-out),
+    height var(--dur-base) var(--ease-out);
+}
+/* pill: a filled shape behind the active label */
+.tabbar[data-variant="pill"] .tabbar-indicator {
+  height: 100%;
+  border-radius: 8px;
+  background: var(--secondary-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--secondary-border) 55%, transparent);
+}
+.tabbar[data-variant="pill"] > button[aria-selected="true"] { color: var(--secondary-strong); }
+/* underline: a thin bar on the baseline */
+.tabbar[data-variant="underline"] { gap: 4px; border-bottom: 1px solid var(--border); }
+.tabbar[data-variant="underline"] > button { border-radius: 6px 6px 0 0; padding-bottom: 10px; }
+.tabbar[data-variant="underline"] .tabbar-indicator {
+  top: auto;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+/* segment: a raised thumb in a small track */
+.tabbar[data-variant="segment"] {
+  display: inline-flex;
+  padding: 3px;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.tabbar[data-variant="segment"] > button { min-height: 30px; padding: 4px 12px; font-size: var(--font-meta); border-radius: 7px; }
+.tabbar[data-variant="segment"] .tabbar-indicator {
+  top: 3px;
+  left: 3px;
+  height: calc(100% - 6px);
+  border-radius: 7px;
+  background: var(--surface-3);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+}
+/* vertical: used by the settings navigation */
+.tabbar[data-orientation="vertical"] { flex-direction: column; overflow: visible; gap: 1px; }
+.tabbar[data-orientation="vertical"] > button { justify-content: flex-start; width: 100%; }
+.tabbar[data-orientation="vertical"] .tabbar-indicator { width: 100%; height: auto; }
+.tabbar[data-orientation="vertical"][data-variant="pill"] .tabbar-indicator { transform-origin: top; }
+
+/* ---------- Content arrives from the side the tab moved toward ---------- */
+.tab-panel { animation: panel-in var(--dur-base) var(--ease-out) both; }
+.tab-panel[data-direction="forward"] { --from-x: 18px; }
+.tab-panel[data-direction="back"] { --from-x: -18px; }
+.tab-panel[data-direction="none"] { --from-x: 0px; }
+@keyframes panel-in {
+  from { opacity: 0; transform: translate3d(var(--from-x, 0), 6px, 0); }
+  to { opacity: 1; transform: none; }
+}
+/* the first blocks settle one after another, capped so nothing waits */
+.tab-panel > :nth-child(-n + 6) { animation: block-in var(--dur-slow) var(--ease-out) both; }
+.tab-panel > :nth-child(2) { animation-delay: 40ms; }
+.tab-panel > :nth-child(3) { animation-delay: 80ms; }
+.tab-panel > :nth-child(4) { animation-delay: 120ms; }
+.tab-panel > :nth-child(5) { animation-delay: 150ms; }
+.tab-panel > :nth-child(6) { animation-delay: 180ms; }
+@keyframes block-in {
+  from { opacity: 0; transform: translate3d(0, 10px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- Pages and lists ---------- */
+.operations { animation: page-in var(--dur-slow) var(--ease-out) both; }
+@keyframes page-in {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to { opacity: 1; transform: none; }
+}
+.stagger > * { animation: block-in var(--dur-slow) var(--ease-out) both; }
+.stagger > :nth-child(2) { animation-delay: 30ms; }
+.stagger > :nth-child(3) { animation-delay: 60ms; }
+.stagger > :nth-child(4) { animation-delay: 90ms; }
+.stagger > :nth-child(5) { animation-delay: 120ms; }
+.stagger > :nth-child(n + 6) { animation-delay: 150ms; }
+
+/* ---------- Feedback ---------- */
+.navigation nav a,
+.mobile-nav a,
+.button {
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-out);
+}
+.navigation nav a:active,
+.mobile-nav a:active { transform: scale(0.98); }
+details > summary { cursor: pointer; }
+.reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-base) var(--ease-out);
+}
+.reveal[data-open="true"] { grid-template-rows: 1fr; }
+.reveal > div { overflow: hidden; min-height: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-panel,
+  .tab-panel > *,
+  .operations,
+  .stagger > * { animation: panel-fade 120ms linear both; animation-delay: 0ms; }
+  .tabbar[data-ready="true"] .tabbar-indicator { transition: none; }
+  .reveal { transition: none; }
+  @keyframes panel-fade { from { opacity: 0; } to { opacity: 1; } }
+}

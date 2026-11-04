@@ -75,6 +75,29 @@ type Config struct {
 	// ModelsURL is the exact model list URL when an endpoint does not follow
 	// the <root>/v1/models layout.
 	ModelsURL string
+	// Format selects the wire protocol: FormatOpenAI (the default),
+	// FormatAnthropic or FormatTypeSafe.
+	Format string
+}
+
+const (
+	// FormatOpenAI is the OpenAI chat completions protocol.
+	FormatOpenAI = "openai"
+	// FormatAnthropic is the Anthropic Messages protocol.
+	FormatAnthropic = "anthropic"
+	// FormatTypeSafe is TypeSafe System One, a structured-judgment API that
+	// cannot drive a chat or tool-calling turn.
+	FormatTypeSafe = "typesafe"
+)
+
+// ValidFormat reports whether format is a supported wire protocol. An empty
+// value means the OpenAI protocol.
+func ValidFormat(format string) bool {
+	switch format {
+	case "", FormatOpenAI, FormatAnthropic, FormatTypeSafe:
+		return true
+	}
+	return false
 }
 
 // Resolver returns the configuration of a configured endpoint identifier.
@@ -187,6 +210,8 @@ type runtime struct {
 	cancel  context.CancelFunc
 	run     sync.Mutex
 	resolve Resolver
+	// ttft is the time to the first streamed token of the latest request.
+	ttft time.Duration
 }
 
 // SessionID is the Meshra-side turn identity of this stateless harness. The
@@ -410,6 +435,9 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 	if err != nil {
 		return "", err
 	}
+	if cfg.Format == FormatTypeSafe {
+		return "", errors.New("TypeSafe System One returns structured judgments (choice, score, noul) and cannot run a chat or tool-calling turn; choose an OpenAI or Anthropic compatible endpoint")
+	}
 	r.cfg, r.base, r.client = cfg, base, cfg.HTTPClient
 	if r.client == nil {
 		r.client = NewClient()
@@ -464,6 +492,7 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 	}
 	messages = append(messages, chatMessage{Role: "user", Content: turn.Task.Text})
 	calls := 0
+	requests := 0
 	limit := turn.MaxToolCalls
 	if limit <= 0 || limit > 1000 {
 		limit = MaxToolCalls
@@ -478,7 +507,11 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 			request.Tools = definitions(catalog)
 			request.ToolChoice = "auto"
 		}
+		requests++
+		started := time.Now()
+		r.ttft = 0
 		reply, err := r.chatStream(ctx, request, turn.Token, emit)
+		r.emitRequest(emit, ctx, requests, started, r.ttft, reply, err)
 		if err != nil {
 			return "", err
 		}
@@ -613,6 +646,9 @@ func (r *runtime) chatURL() (string, error) {
 	if r.cfg.ChatCompletionsURL != "" {
 		return endpointURL(r.cfg.ChatCompletionsURL)
 	}
+	if r.cfg.Format == FormatAnthropic {
+		return r.base + "/messages", nil
+	}
 	return r.base + "/chat/completions", nil
 }
 
@@ -624,6 +660,9 @@ func modelsURL(cfg Config) (string, error) {
 	base, err := NormalizeBaseURL(cfg.BaseURL)
 	if err != nil {
 		return "", err
+	}
+	if cfg.Format == FormatAnthropic {
+		return base + "/models?limit=1000", nil
 	}
 	return base + "/models", nil
 }
@@ -658,7 +697,13 @@ func endpointURL(raw string) (string, error) {
 // chat performs exactly one endpoint request. A request whose outcome is
 // unknown is never replayed.
 func (r *runtime) chat(ctx context.Context, request chatRequest) (chatResponse, error) {
-	body, err := json.Marshal(request)
+	var body []byte
+	var err error
+	if r.cfg.Format == FormatAnthropic {
+		body, err = encodeAnthropicRequest(request)
+	} else {
+		body, err = json.Marshal(request)
+	}
 	if err != nil {
 		return chatResponse{}, err
 	}
@@ -672,9 +717,7 @@ func (r *runtime) chat(ctx context.Context, request chatRequest) (chatResponse, 
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "application/json")
-	if r.cfg.APIKey != "" {
-		httpRequest.Header.Set("Authorization", "Bearer "+r.cfg.APIKey)
-	}
+	setAuthHeaders(httpRequest.Header, r.cfg)
 	response, err := r.client.Do(httpRequest)
 	if err != nil {
 		return chatResponse{}, fmt.Errorf("OpenAI-compatible request failed: %w", err)
@@ -691,7 +734,12 @@ func (r *runtime) chat(ctx context.Context, request chatRequest) (chatResponse, 
 		return chatResponse{}, fmt.Errorf("OpenAI-compatible endpoint returned HTTP %d: %s", response.StatusCode, r.snippet(raw))
 	}
 	var reply chatResponse
-	if err := json.Unmarshal(raw, &reply); err != nil {
+	if r.cfg.Format == FormatAnthropic {
+		reply, err = decodeAnthropicResponse(raw)
+		if err != nil {
+			return chatResponse{}, err
+		}
+	} else if err := json.Unmarshal(raw, &reply); err != nil {
 		return chatResponse{}, errors.New("OpenAI-compatible endpoint returned an invalid JSON response")
 	}
 	if reply.Error != nil && reply.Error.Message != "" {
@@ -739,9 +787,7 @@ func ListModels(ctx context.Context, client *http.Client, cfg Config) ([]model.M
 		return nil, err
 	}
 	request.Header.Set("Accept", "application/json")
-	if cfg.APIKey != "" {
-		request.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
+	setAuthHeaders(request.Header, cfg)
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI-compatible model list failed: %w", err)

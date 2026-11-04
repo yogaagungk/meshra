@@ -94,6 +94,12 @@ var migrationV23 string
 //go:embed migrations/024.sql
 var migrationV24 string
 
+//go:embed migrations/025.sql
+var migrationV25 string
+
+//go:embed migrations/026.sql
+var migrationV26 string
+
 // schemaMigrations lists every embedded schema step in order. A new feature
 // appends its own step; existing steps are never renumbered.
 var schemaMigrations = []struct {
@@ -102,7 +108,7 @@ var schemaMigrations = []struct {
 }{
 	{10, migrationV10}, {11, migrationV11}, {12, migrationV12}, {13, migrationV13},
 	{14, migrationV14}, {15, migrationV15}, {16, migrationV16}, {17, migrationV17}, {18, migrationV18}, {19, migrationV19}, {20, migrationV20},
-	{21, migrationV21}, {23, migrationV23}, {24, migrationV24},
+	{21, migrationV21}, {23, migrationV23}, {24, migrationV24}, {25, migrationV25}, {26, migrationV26},
 }
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
@@ -252,10 +258,6 @@ func OpenWithOptions(dir string, adapters map[string]model.Adapter, options Opti
 		cancel()
 		return nil, err
 	}
-	if err = r.recoverVoiceJobs(); err != nil {
-		cancel()
-		return nil, err
-	}
 	if err = r.recoverProfileExposure(); err != nil {
 		cancel()
 		return nil, err
@@ -268,6 +270,8 @@ func OpenWithOptions(dir string, adapters map[string]model.Adapter, options Opti
 	go r.schedule()
 	r.wg.Add(1)
 	go r.reapIdle()
+	r.wg.Add(1)
+	go r.statsLoop()
 	r.ensureRoutineScheduler()
 	return r, nil
 }
@@ -856,8 +860,7 @@ func (r *Relay) Close() error {
 	r.lifecycle.Unlock()
 	r.closeNetworkPolicy()
 	r.stopConnectors()
-	first := r.closeVoiceJobs()
-	first = errors.Join(first, r.closeBrowserSessions())
+	first := r.closeBrowserSessions()
 	r.wg.Wait()
 	r.mu.Lock()
 	slots := r.slots

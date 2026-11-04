@@ -348,3 +348,160 @@ func TestEndpointDiscoveryCancelsWhenDisabled(t *testing.T) {
 		t.Fatal("upstream discovery remained active after disable")
 	}
 }
+
+func TestEndpointAPIFormat(t *testing.T) {
+	r, _ := openTest(t, nil)
+	save := func(format string, extra map[string]any) (ProviderEndpointView, error) {
+		endpoint := map[string]any{"name": "Provider", "baseUrl": "https://api.example.com", "enabled": true, "supportsTools": true, "supportsImages": true}
+		if format != "" {
+			endpoint["apiFormat"] = format
+		}
+		for k, v := range extra {
+			endpoint[k] = v
+		}
+		result, err := connectionsCall(t, r, admin, "connections.saveEndpoint", map[string]any{"endpoint": endpoint})
+		if err != nil {
+			return ProviderEndpointView{}, err
+		}
+		return result.(ProviderEndpointView), nil
+	}
+	if view, err := save("", nil); err != nil || view.APIFormat != "openai" {
+		t.Fatalf("the default format must be openai: %+v %v", view, err)
+	}
+	if view, err := save("anthropic", nil); err != nil || view.APIFormat != "anthropic" || !view.SupportsTools {
+		t.Fatalf("anthropic endpoint was not stored: %+v %v", view, err)
+	}
+	view, err := save("typesafe", nil)
+	if err != nil || view.APIFormat != "typesafe" || view.SupportsTools || view.SupportsImages {
+		t.Fatalf("typesafe must be stored without tool or image support: %+v %v", view, err)
+	}
+	if _, err := save("gemini", nil); err == nil {
+		t.Fatal("an unknown API format was accepted")
+	} else {
+		requireStatus(t, err, 400)
+	}
+	// A partial edit that omits apiFormat keeps the stored protocol.
+	result, err := connectionsCall(t, r, admin, "connections.saveEndpoint", map[string]any{"expectedRevision": view.Revision, "endpoint": map[string]any{"id": view.ID, "name": "Renamed"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept := result.(ProviderEndpointView); kept.APIFormat != "typesafe" || kept.Name != "Renamed" {
+		t.Fatalf("a partial edit changed the protocol: %+v", kept)
+	}
+}
+
+// The OpenCode Go gateway lists models of several protocols and types under one
+// root. Each connection format offers only the models it can run.
+func TestModelListingOpenCodeGoFiltersByProtocol(t *testing.T) {
+	body := []byte(`{"object":"list","data":[
+		{"id":"kimi-k3","name":"Kimi K3","type":"chat","api":{"chat-completions":{}}},
+		{"id":"glm-5.3","name":"GLM 5.3","type":"chat","api":{"chat-completions":{}}},
+		{"id":"minimax-m3","name":"MiniMax M3","type":"chat","api":{"messages":{}}},
+		{"id":"gpt-6-luna","name":"GPT 6 Luna","type":"chat","api":{"responses":{}}},
+		{"id":"gemini-4-argon","type":"chat","api":{"generate-content":{}}},
+		{"id":"embed-1","type":"embedding","api":{"chat-completions":{}}}]}`)
+	ids := func(format string) []string {
+		options, err := parseModelOptions(body, format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []string{}
+		for _, option := range options {
+			out = append(out, option.ID)
+		}
+		return out
+	}
+	if got := strings.Join(ids("openai"), ","); got != "glm-5.3,kimi-k3" {
+		t.Fatalf("openai format must list chat-completions models only: %s", got)
+	}
+	if got := strings.Join(ids("anthropic"), ","); got != "minimax-m3" {
+		t.Fatalf("anthropic format must list messages models only: %s", got)
+	}
+	options, _ := parseModelOptions(body, "")
+	if options[1].Name != "Kimi K3" {
+		t.Fatalf("display names must be kept: %+v", options)
+	}
+}
+
+func TestModelListingTypeSafeShape(t *testing.T) {
+	body := []byte(`{"models":[{"name":"jev-latest","description":"General-purpose system one model.","release_date":"2026-09-15"},{"name":"jev-1","description":"x","release_date":"2026-01-01"}]}`)
+	options, err := parseModelOptions(body, "typesafe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(options) != 2 || options[0].ID != "jev-1" || options[1].ID != "jev-latest" {
+		t.Fatalf("TypeSafe models must be listed by name: %+v", options)
+	}
+}
+
+// Test API for model discovery: the exact request each provider format sends.
+func TestEndpointModelListingRequestPerFormat(t *testing.T) {
+	cases := []struct {
+		format, header, value, absent, query, response string
+		want                                           string
+	}{
+		{"openai", "Authorization", "Bearer sk-test", "x-api-key", "", `{"data":[{"id":"kimi-k3","api":{"chat-completions":{}}}]}`, "kimi-k3"},
+		{"anthropic", "x-api-key", "sk-test", "Authorization", "limit=1000", `{"data":[{"id":"claude-x","display_name":"Claude X"}]}`, "claude-x"},
+		{"typesafe", "Authorization", "Bearer sk-test", "x-api-key", "", `{"models":[{"name":"jev-latest","description":"d","release_date":"2026-09-15"}]}`, "jev-latest"},
+	}
+	for _, c := range cases {
+		t.Run(c.format, func(t *testing.T) {
+			r, _ := openTest(t, nil)
+			r.SetMCPURL("http://127.0.0.1:1/mcp")
+			var seen http.Header
+			var query string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				seen, query = request.Header.Clone(), request.URL.RawQuery
+				if request.URL.Path != "/v1/models" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				io.WriteString(w, c.response)
+			}))
+			defer server.Close()
+			result, err := connectionsCall(t, r, admin, "connections.saveEndpoint", map[string]any{"apiKey": "sk-test", "endpoint": map[string]any{"name": "Fixture", "baseUrl": server.URL, "allowInsecureHttp": true, "enabled": true, "apiFormat": c.format}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			view := result.(ProviderEndpointView)
+			if _, err := networkCall(t, r, admin, "network.grant", map[string]any{"connectionId": view.ID, "origin": server.URL, "allowPrivate": true}); err != nil {
+				t.Fatal(err)
+			}
+			options, err := connectionsCall(t, r, admin, "connections.models", map[string]any{"id": view.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			models := options.([]model.ModelOption)
+			if len(models) != 1 || models[0].ID != c.want {
+				t.Fatalf("unexpected models: %+v", models)
+			}
+			if seen.Get(c.header) != c.value || seen.Get(c.absent) != "" || query != c.query {
+				t.Fatalf("unexpected request: headers=%v query=%q", seen, query)
+			}
+			if c.format == "anthropic" && seen.Get("anthropic-version") == "" {
+				t.Fatal("anthropic-version header missing")
+			}
+		})
+	}
+}
+
+func TestEndpointModelListingReportsHTTPStatus(t *testing.T) {
+	r, _ := openTest(t, nil)
+	r.SetMCPURL("http://127.0.0.1:1/mcp")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, `{"detail":{"message":"Must supply an API key!"}}`)
+	}))
+	defer server.Close()
+	result, err := connectionsCall(t, r, admin, "connections.saveEndpoint", map[string]any{"endpoint": map[string]any{"name": "Fixture", "baseUrl": server.URL, "allowInsecureHttp": true, "enabled": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := result.(ProviderEndpointView)
+	if _, err := networkCall(t, r, admin, "network.grant", map[string]any{"connectionId": view.ID, "origin": server.URL, "allowPrivate": true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = connectionsCall(t, r, admin, "connections.models", map[string]any{"id": view.ID}); err == nil || !strings.Contains(err.Error(), "HTTP 403") {
+		t.Fatalf("the HTTP status must be reported: %v", err)
+	}
+}

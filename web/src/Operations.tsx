@@ -52,12 +52,14 @@ import {
   type TraceEvent,
   type Workspace,
 } from "./types";
-import { SettingsPanels } from "./Personal";
+import { Settings as SettingsPage } from "./Settings";
 import { Automation } from "./Automation";
 import { Profiles } from "./Profiles";
 import { AgentMesh } from "./AgentMesh";
 import { DirectApiFields, type DirectApiValue } from "./DirectApiFields";
 import { Workspaces } from "./Workspaces";
+import { Stats } from "./Stats";
+import { TabBar, TabPanel } from "./components/Tabs";
 export function Operations({
   view,
   resourceId,
@@ -97,7 +99,8 @@ export function Operations({
                   automation: "Automation",
                   contexts: "Shared context",
                   activity: "Activity & provenance",
-                  settings: "Make yourself at home",
+                  stats: "Usage stats",
+                  settings: "Settings",
                 } as Record<string, string>
               )[view]
             }
@@ -116,8 +119,10 @@ export function Operations({
                     "Small, immutable references. Explicit access for every agent.",
                   activity:
                     "A traceable record of what happened, where, and when.",
+                  stats:
+                    "Requests, tokens, latency and cost across every harness and direct provider.",
                   settings:
-                    "Appearance, personal access, resource limits, and AI models.",
+                    "Appearance, access, AI providers, connections and limits.",
                 } as Record<string, string>
               )[view]
             }
@@ -132,15 +137,20 @@ export function Operations({
         <Automation tab={resourceId} />
       ) : view === "contexts" ? (
         <ContextBrowser />
+      ) : view === "stats" ? (
+        <Stats />
       ) : view === "settings" ? (
-        <SettingsPanels>
-          <Preferences
-            theme={theme}
-            setTheme={setTheme}
-            dense={dense}
-            setDense={setDense}
-          />
-        </SettingsPanels>
+        <SettingsPage
+          section={resourceId}
+          appearance={
+            <Preferences
+              theme={theme}
+              setTheme={setTheme}
+              dense={dense}
+              setDense={setDense}
+            />
+          }
+        />
       ) : (
         <RecentActivity />
       )}
@@ -159,29 +169,22 @@ function AgentsWorkspace({
   const [tab, setTab] = useState("named");
   return (
     <>
-      <div
-        className="automation-tabs"
-        role="group"
-        aria-label="Agent sections"
-      >
-        {[
-          ["named", "Named agents"],
-          ["profiles", "Profiles"],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            aria-pressed={tab === key}
-            onClick={() => setTab(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {tab === "named" ? (
-        <Agents agents={agents} loading={loading} error={error} />
-      ) : (
-        <Profiles />
-      )}
+      <TabBar
+        label="Agent sections"
+        value={tab}
+        onChange={setTab}
+        items={[
+          { id: "named", label: "Named agents" },
+          { id: "profiles", label: "Profiles" },
+        ]}
+      />
+      <TabPanel value={tab} order={["named", "profiles"]}>
+        {tab === "named" ? (
+          <Agents agents={agents} loading={loading} error={error} />
+        ) : (
+          <Profiles />
+        )}
+      </TabPanel>
     </>
   );
 }

@@ -228,11 +228,45 @@ export type RuntimeReadiness = {
 };
 
 /** Operator reviewed provider endpoints. Secrets are referenced, never returned. */
+export type StatsFilter = { rangeHours?: 24 | 168 | 720; harness?: string; project?: string; tzOffsetMinutes?: number };
+export type StatsTotals = {
+  requests: number; failed: number; aborted: number; input: number; output: number;
+  cacheRead: number; cacheWrite: number; premium: number; cost: number | null; pricedRequests: number;
+  avgDurationMs: number | null; avgTtftMs: number | null; tokensPerSec: number | null;
+};
+export type StatsSummary = {
+  from: number; to: number; bucketMs: number; tzOffsetMinutes: number; importing: boolean; retentionDays: number;
+  totals: StatsTotals;
+  series: { t: number; requests: number; failed: number; tokens: number; cost: number | null }[];
+  agents: { agent: string; requests: number; tokens: number }[];
+  models: (StatsTotals & { model: string; provider: string; harness: string })[];
+  modelSeries: { t: number; model: string; provider: string; harness: string; requests: number }[];
+  providers: (StatsTotals & { provider: string; models: number })[];
+  providerSeries: { t: number; provider: string; requests: number; tokens: number; cost: number | null }[];
+  hourOfDay: { hour: number; provider: string; tokens: number }[];
+  harnesses: { name: string; requests: number }[];
+  projects: { name: string; requests: number }[];
+  sources: { source: string; available: boolean; lastRunAt: number; error?: string; requests: number }[];
+};
+export type StatsRequestItem = {
+  id: number; ts: number; harness: string; model: string; provider: string; project: string; agent: string;
+  status: "ok" | "aborted" | "failed"; stopReason: string; error?: string; durationMs: number | null; ttftMs: number | null;
+  input: number; cacheRead: number; cacheWrite: number; output: number; cost: number | null;
+};
+export type StatsRequests = {
+  from: number; to: number; importing: boolean; hasMore: boolean; items: StatsRequestItem[];
+  summary: {
+    requests: number; ok: number; aborted: number; failed: number; tokens: number; cost: number | null; firstTs: number;
+    medianDurationMs: number | null; p95DurationMs: number | null; medianTtftMs: number | null; p95TtftMs: number | null;
+  };
+};
+export type ApiFormat = "openai" | "anthropic" | "typesafe";
 export type ProviderEndpoint = {
   id: string;
   revision: number;
   name: string;
   baseUrl: string;
+  apiFormat?: ApiFormat;
   enabled: boolean;
   secretRef?: string;
   allowInsecureHttp?: boolean;
@@ -249,16 +283,6 @@ export type LocalModelScan = {
   status: "available" | "unreachable" | "error";
   models?: string[];
   detail?: string;
-};
-export type VoiceReadiness = {
-  revision: number;
-  configured: boolean;
-  state: string;
-  prerequisites: string[];
-  speakerId?: number;
-  autoReadReplies?: boolean;
-  stt?: { configured: boolean; model?: string };
-  tts?: { configured: boolean; modelDirectory?: string };
 };
 export type MCPTool = {
   name: string;
@@ -297,8 +321,6 @@ export type MCPServer = {
 export type ConnectorRoute = { id: string; revision: number; profileId: string; allow: { workspaces?: string[]; guilds?: string[]; channels?: string[]; chats?: string[]; users?: string[] }; autoStart: boolean; enabled: boolean };
 export type Connector = { id: string; revision: number; kind: string; name: string; enabled: boolean; secrets: Record<string, string>; routes: ConnectorRoute[]; lastError?: string; cursor?: string; createdAt: string; updatedAt: string };
 export type ConnectorDelivery = { id: string; taskId: string; chunk: number; state: string; remoteId?: string; error?: string; createdAt: string; updatedAt: string };
-export type VoiceSettings = { sttExecutable?: string; sttModelPath?: string; ttsExecutable?: string; ttsModelDirectory?: string; ffmpegExecutable?: string; speakerId: number; autoReadReplies: boolean };
-export type VoiceJob = { id: string; kind: string; state: string; expiresAt: string; transcript?: string; draft: boolean; autoSend: boolean; audioAvailable: boolean; error?: string };
 export type BrowserSession = { id: string; profileId: string; conversationId: string; state: string; epoch: number; frameSeq: number; leaseOwner?: string; leaseExpiresAt?: string; snapshotText?: string; tabs: number; lastError?: string };
 export type BrowserAction = { action: string; url?: string; selector?: string; text?: string; key?: string; direction?: string; amount?: number; tab?: number; attachmentId?: string };
 
@@ -470,6 +492,9 @@ export type AutomationOperations = {
   "memory.remove": Operation<RevisionRequest & { profileId: string }, { ok: boolean }>;
   "attachments.list": Operation<Pagination & { conversationId?: string }, Attachment[]>;
   "attachments.remove": Operation<{ id: string; confirm: true }, Attachment>;
+  "stats.summary": Operation<StatsFilter, StatsSummary>;
+  "stats.requests": Operation<StatsFilter & { status?: string; search?: string; beforeTs?: number; beforeId?: number; limit?: number }, StatsRequests>;
+  "stats.refresh": Operation<Record<string, never>, { importing: boolean }>;
   "usage.list": Operation<{ profileId?: string; bindingId?: string; conversationId?: string; harness?: string; limit?: number }, {
     items: RunUsage[]; hasMore: boolean; retentionDays: number;
   }>;
@@ -533,6 +558,7 @@ export type AutomationOperations = {
       revision?: number;
       name: string;
       baseUrl: string;
+      apiFormat?: ApiFormat;
       enabled?: boolean;
       secretRef?: string;
       allowInsecureHttp?: boolean;
@@ -569,11 +595,6 @@ export type AutomationOperations = {
   "connectors.remove": Operation<RevisionRequest, { id: string; removed: boolean }>;
   "connectors.deliveries": Operation<{ id: string; after?: string; limit?: number }, ConnectorDelivery[]>;
   "connectors.retryDelivery": Operation<{ deliveryId: string; confirmDuplicateRisk: true }, { id: string; state: string }>;
-  "voice.configure": Operation<VoiceSettings & { expectedRevision: number }, VoiceSettings & { revision: number }>;
-  "voice.transcribe": Operation<{ audioAttachmentId: string }, VoiceJob>;
-  "voice.synthesize": Operation<{ text: string; speakerId: number }, VoiceJob>;
-  "voice.job": Operation<{ id: string }, VoiceJob>;
-  "voice.cancel": Operation<{ id: string }, VoiceJob>;
   "browser.open": Operation<{ profileId: string; conversationId: string; taskId?: string }, BrowserSession>;
   "browser.state": Operation<{ id: string }, BrowserSession>;
   "browser.takeover": Operation<{ id: string; expectedEpoch: number }, BrowserSession>;
@@ -581,7 +602,6 @@ export type AutomationOperations = {
   "browser.input": Operation<{ id: string; epoch: number; frameSeq: number; action: BrowserAction }, { id: string; epoch: number; frameSeq: number; state: string; snapshot: { text: string }; url?: string; title?: string }>;
   "browser.close": Operation<{ id: string }, BrowserSession>;
   "browser.clearData": Operation<{ profileId: string; conversationId: string; confirm: true }, { cleared: boolean }>;
-  "voice.status": Operation<Record<string, never>, VoiceReadiness>;
   "routines.list": Operation<Pagination, UnverifiedList<Routine>>;
   "routines.save": Operation<
     { routine: RoutineDefinition; expectedRevision?: number },

@@ -38,7 +38,7 @@ func (r *Relay) EndpointRuntimeConfig(ctx context.Context, id string) (openai.Co
 }
 
 func (r *Relay) endpointConfig(ctx context.Context, endpoint ProviderEndpoint) (openai.Config, error) {
-	config := openai.Config{BaseURL: endpoint.BaseURL, SupportsTools: endpoint.SupportsTools, SupportsImages: endpoint.SupportsImages, ContextWindowTokens: endpoint.ContextWindowTokens}
+	config := openai.Config{BaseURL: endpoint.BaseURL, SupportsTools: endpoint.SupportsTools, SupportsImages: endpoint.SupportsImages, ContextWindowTokens: endpoint.ContextWindowTokens, Format: endpoint.APIFormat}
 	var err error
 	if endpoint.SecretRef != "" {
 		config.APIKey, err = r.readSecret(ctx, endpoint.SecretRef)

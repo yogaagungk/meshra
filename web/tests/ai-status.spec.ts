@@ -93,7 +93,7 @@ test("AI status separates provider quota, local budget and context with scoped h
   ).toBe(true);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("./#settings");
-  await page.getByRole("button", { name: "AI status", exact: true }).click();
+  await page.getByRole("tab", { name: "AI status", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Usage history", exact: true }),
   ).toBeVisible();
@@ -136,9 +136,9 @@ test("AI status separates provider quota, local budget and context with scoped h
   await expect(page.getByText(/This report is stale/)).toBeVisible();
   await expect(page.locator(".ai-quota-list")).toContainText("82.0% used");
   await page.unroute("**/console/api/quota");
-  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  await page.getByRole("tab", { name: "Appearance", exact: true }).click();
   await page.getByRole("button", { name: "Light", exact: true }).click();
-  await page.getByRole("button", { name: "AI status", exact: true }).click();
+  await page.getByRole("tab", { name: "AI status", exact: true }).click();
   await expect(page.locator(".ai-quota-list")).toContainText("82.0% used");
   await page.screenshot({
     path: join(evidence, "ai-status-settings-desktop-light.png"),

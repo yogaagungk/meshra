@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+### Console motion, Settings and code view
+
+- Every tab menu (Settings, Automation, Agents, Workspaces Files/Changes, Stats,
+  profile chat tools) now uses one tab bar with a sliding active marker, arrow
+  key navigation and content that arrives from the side the tab moved toward.
+  Pages fade in, the first blocks of a panel settle in a short sequence, and
+  `prefers-reduced-motion` reduces it to a short fade.
+- Settings is a two-pane layout grouped as General, AI, Connections and System
+  (Appearance, Personal access, Providers, Models & usage, AI status, Network
+  access, MCP servers, Messaging, Resources, Runtime), one section at a time,
+  deep-linkable as `#settings/<section>`. On narrow screens the navigation
+  becomes a scrolling tab strip. Connection rows group name, tags and actions;
+  adding a network origin opens inline with a connection picker.
+- Workspace file previews and Git diffs use a read-only code view with syntax
+  colors, line numbers, wrap and copy, in light and dark themes.
+
+### Usage stats
+
+- New **Stats** page with Overview, Models, Providers and Requests tabs: cost,
+  requests, conversation tokens, cache rate, error rate, latency, TTFT,
+  tokens/s, token mix, per-model and per-provider breakdowns, peak burn hours
+  and a filterable request log, for 24 hours, 7 days or 30 days.
+- Direct API calls are recorded per request (duration, time to first token,
+  stop reason, usage, failures) in the new `model_requests` table.
+- OMP and Claude are imported read-only: `~/.omp/stats.db` (per-request latency
+  and API-equivalent cost) and `~/.claude/projects/**/*.jsonl` (token usage per
+  message only; no latency or price). Only numbers, model, project path and
+  timestamps are stored, never message text. This reads files outside the data
+  directory, so it covers all usage on this machine, not just Meshra-run work;
+  the Project filter narrows it. Set `MESHRA_STATS_IMPORT=off` to disable, or
+  `MESHRA_OMP_STATS_DB` / `MESHRA_CLAUDE_PROJECTS_DIR` to relocate the sources.
+- Operations `stats.summary`, `stats.requests` and `stats.refresh`; stats are
+  kept 30 days (migration 026).
+
+### Removed
+
+- Remove the Local voice feature: speech-to-text and read-aloud jobs, the
+  `voice.*` automation operations, the console audio route, the Voice draft tab
+  and the Local voice readiness card. Migration 025 drops the `voice_settings`
+  and `voice_jobs` tables, and the sandbox no longer has a `voice` worker kind.
+
+### Provider API compatibility
+
+- Provider connections now choose an **API compatibility** format: `openai`
+  (chat completions, the default and the format of every existing endpoint),
+  `anthropic` (Messages API with `x-api-key`, tool use, images, usage and
+  cache accounting) or `typesafe` (System One).
+- Anthropic endpoints use one complete reply per step; Messages API streaming is
+  not implemented. `max_tokens` is fixed at 8192.
+- TypeSafe System One returns structured judgments (choice, score, noul), not
+  text or tool calls. It can be saved and its models listed, but a profile or
+  turn bound to it is refused with a clear error.
+
 ### Direct API agent tools
 
 - Separate Direct API system instructions from tasks, stream compatible

@@ -32,6 +32,9 @@ func (r *Relay) profileConnectionLocked(binding model.ProfileProvider, enabled b
 		if !found {
 			return nil, nil, model.Err(404, "endpoint not found")
 		}
+		if endpoint.APIFormat == "typesafe" {
+			return nil, nil, model.Err(400, "TypeSafe System One returns structured judgments and cannot run chat turns; choose an OpenAI or Anthropic compatible endpoint")
+		}
 		if enabled && !endpoint.Enabled {
 			return nil, nil, model.Err(409, "endpoint is disabled")
 		}

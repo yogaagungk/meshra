@@ -85,7 +85,7 @@ test("personal sessions, project inspection, model choice and resource controls 
       path: join(evidence, "workspace-desktop-dark.png"),
       fullPage: true,
     });
-    await page.getByRole("button", { name: /^Changes/ }).click();
+    await page.getByRole("tab", { name: /^Changes/ }).click();
     await expect(page.locator('pre[aria-label="Git diff"]')).toContainText(
       '+func main() { println("review me") }',
     );
@@ -123,7 +123,7 @@ test("personal sessions, project inspection, model choice and resource controls 
     expect(c.chatSettings.workspaceId).toBeTruthy();
     await page.goto("./#settings");
     await page
-      .getByRole("button", { name: "Personal access", exact: true })
+      .getByRole("tab", { name: "Personal access", exact: true })
       .click();
     await page.getByLabel("Display name", { exact: true }).fill("My Meshra");
     await page
@@ -137,7 +137,7 @@ test("personal sessions, project inspection, model choice and resource controls 
     });
     await page.reload();
     await page
-      .getByRole("button", { name: "Personal access", exact: true })
+      .getByRole("tab", { name: "Personal access", exact: true })
       .click();
     await expect(page.getByLabel("Display name", { exact: true })).toHaveValue(
       "My Meshra",
@@ -157,7 +157,7 @@ test("personal sessions, project inspection, model choice and resource controls 
       path: join(evidence, "access-desktop-dark.png"),
       fullPage: true,
     });
-    await page.getByRole("button", { name: "Resources", exact: true }).click();
+    await page.getByRole("tab", { name: "Resources", exact: true }).click();
     await page.getByLabel("Concurrent AI turns").fill("2");
     await page.getByLabel("Stop idle agents after (minutes)").fill("10");
     await page.getByLabel("Daily AI turn limit").fill("100");
@@ -170,7 +170,7 @@ test("personal sessions, project inspection, model choice and resource controls 
       fullPage: true,
     });
     await page
-      .getByRole("button", { name: "Models & usage", exact: true })
+      .getByRole("tab", { name: "Models & usage", exact: true })
       .click();
     await expect(page.locator(".personal-model-list")).toContainText(
       "Fixture model",
@@ -188,7 +188,7 @@ test("personal sessions, project inspection, model choice and resource controls 
       .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
       .analyze();
     expect(audit.violations).toEqual([]);
-    await page.getByRole("button", { name: "Appearance", exact: true }).click();
+    await page.getByRole("tab", { name: "Appearance", exact: true }).click();
     await page.getByRole("button", { name: "Light", exact: true }).click();
     await page.goto("./#workspaces");
     await page.getByRole("button", { name: "main.go", exact: true }).click();
@@ -207,7 +207,7 @@ test("personal sessions, project inspection, model choice and resource controls 
       ),
     ).toBe(true);
     await page.goto("./#settings");
-    await page.getByRole("button", { name: "Resources", exact: true }).click();
+    await page.getByRole("tab", { name: "Resources", exact: true }).click();
     await expect(page.getByLabel("Concurrent AI turns")).toHaveValue("2");
     await page.screenshot({
       path: join(evidence, "resources-mobile-light.png"),

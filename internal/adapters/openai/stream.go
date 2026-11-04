@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"meshra/internal/model"
 )
@@ -18,6 +19,12 @@ import (
 // chatStream retries only a definite, explicit rejection of streaming, never a
 // transport failure or a response whose completion outcome is unknown.
 func (r *runtime) chatStream(ctx context.Context, request chatRequest, token string, emit model.Emit) (chatResponse, error) {
+	if r.cfg.Format == FormatAnthropic {
+		// The Messages API streams a different event protocol; use one
+		// complete reply until that protocol is implemented.
+		return r.chat(ctx, request)
+	}
+	start := time.Now()
 	request.Stream = true
 	request.StreamOptions = &struct {
 		IncludeUsage bool `json:"include_usage"`
@@ -168,6 +175,9 @@ func (r *runtime) chatStream(ctx context.Context, request chatRequest, token str
 			}
 			if choice.FinishReason != "" {
 				reply.Choices[0].FinishReason = choice.FinishReason
+			}
+			if r.ttft == 0 && (choice.Delta.Content != "" || len(choice.Delta.ToolCalls) > 0) {
+				r.ttft = time.Since(start)
 			}
 			text.WriteString(choice.Delta.Content)
 			pending.WriteString(choice.Delta.Content)

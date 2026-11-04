@@ -25,6 +25,7 @@ import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { harnessName } from "./HarnessLogo";
+import { modelCacheOptions } from "./modelCache";
 import { ProfileSkills } from "./AutomationSkills";
 import { terminal, type ModelOption, type Task, type TraceEvent, type Workspace } from "./types";
 
@@ -326,9 +327,7 @@ function ProfileDialog({
     queryKey: ["models", harness],
     queryFn: () => api<{ items: ModelOption[] }>("models", { harness }),
     enabled: open && harness !== "openai",
-    retry: false,
-    gcTime: 0,
-    staleTime: 60000,
+    ...modelCacheOptions,
   });
 
   const connections = useQuery({
@@ -679,6 +678,14 @@ function ProfileDialog({
           {!connectionHarness && models.isError && (
             <p className="picker-hint">
               Model discovery unavailable. The native default stays available.
+            </p>
+          )}
+          {!connectionHarness && (
+            <p className="picker-hint">
+              {models.isFetching ? "Discovering models…" : "Models are cached for 24 hours."}{" "}
+              <button type="button" className="text-button" disabled={models.isFetching} onClick={() => void models.refetch()}>
+                Refresh models
+              </button>
             </p>
           )}
           {connectionHarness && <>

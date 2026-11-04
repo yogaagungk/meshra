@@ -30,6 +30,12 @@ type Options struct {
 	MaxDeliveryAttempts int
 	RetryBase           time.Duration
 	RetryCap            time.Duration
+
+	// StatsOMPDB is the OMP stats database and StatsClaudeDir the Claude
+	// session log directory. Both are read-only import sources for the stats
+	// dashboard; an empty value disables that source.
+	StatsOMPDB     string
+	StatsClaudeDir string
 }
 
 func (o Options) defaults() (Options, error) {

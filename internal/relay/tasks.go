@@ -998,6 +998,10 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 					r.recordUsage(task, data)
 					return
 				}
+				if kind == "model_request" {
+					r.recordModelRequest(task, data)
+					return
+				}
 				if kind == "session" {
 					a, err := r.agent(t.To)
 					if err == nil && !t.Chat {

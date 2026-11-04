@@ -73,7 +73,7 @@ func newCgroup(l Limits, kind Kind) (*cgroup, error) {
 	}()
 	memory := int64(1 << 30)
 	pids := 128
-	if kind == Browser || kind == Voice {
+	if kind == Browser {
 		memory = 2 << 30
 		pids = 256
 	}
@@ -156,7 +156,7 @@ func prepare(ctx context.Context, c Config, q Request, probe bool) (p *Prepared,
 	if q.Kind == "" {
 		q.Kind = Command
 	}
-	if q.Kind != Command && q.Kind != Code && q.Kind != Browser && q.Kind != Voice && q.Kind != ACP {
+	if q.Kind != Command && q.Kind != Code && q.Kind != Browser && q.Kind != ACP {
 		return nil, fmt.Errorf("invalid worker kind")
 	}
 	if q.Workspace == nil || q.Workspace.Root == "" {
@@ -168,10 +168,10 @@ func prepare(ctx context.Context, c Config, q Request, probe bool) (p *Prepared,
 	if (q.Kind == ACP || q.Kind == Code) && !q.ReadOnly {
 		return nil, fmt.Errorf("%w: worker workspace must be read-only", ErrDenied)
 	}
-	if (q.Kind == Command || q.Kind == Code || q.Kind == Voice) && (len(q.AuthFiles) != 0 || q.State != nil) {
+	if (q.Kind == Command || q.Kind == Code) && (len(q.AuthFiles) != 0 || q.State != nil) {
 		return nil, ErrDenied
 	}
-	if (q.Kind == Command || q.Kind == Code || q.Kind == Voice) && len(q.Env) != 0 {
+	if (q.Kind == Command || q.Kind == Code) && len(q.Env) != 0 {
 		return nil, ErrDenied
 	}
 	if len(q.Argv) == 0 || len(q.Argv) > 256 || !filepath.IsAbs(q.Argv[0]) {
@@ -199,11 +199,9 @@ func prepare(ctx context.Context, c Config, q Request, probe bool) (p *Prepared,
 	if q.Timeout == 0 {
 		if q.Kind == Command || q.Kind == Code {
 			q.Timeout = 60 * time.Second
-		} else if q.Kind == Voice {
-			q.Timeout = 180 * time.Second
 		}
 	}
-	if q.Timeout < 0 || q.Timeout > 0 && q.Timeout < time.Second || (q.Kind == Command || q.Kind == Code) && q.Timeout > 300*time.Second || q.Kind == Voice && q.Timeout > 180*time.Second {
+	if q.Timeout < 0 || q.Timeout > 0 && q.Timeout < time.Second || (q.Kind == Command || q.Kind == Code) && q.Timeout > 300*time.Second {
 		return nil, fmt.Errorf("invalid worker timeout")
 	}
 	if !probe {

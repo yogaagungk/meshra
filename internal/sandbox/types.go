@@ -68,7 +68,6 @@ const (
 	Command Kind = "command"
 	Code    Kind = "code"
 	Browser Kind = "browser"
-	Voice   Kind = "voice"
 	ACP     Kind = "acp"
 )
 
@@ -86,7 +85,7 @@ type Request struct {
 	Workspace *Snapshot
 	Argv      []string
 	Kind      Kind
-	// Zero selects command=60s/voice=180s. ACP/browser use the owning lifecycle
+	// Zero selects command=60s. ACP/browser use the owning lifecycle
 	// context; their turn deadlines and browser idle lease are enforced by callers.
 	Timeout time.Duration
 	// Env contains explicitly selected values, never the inherited daemon environment.

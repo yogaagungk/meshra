@@ -282,7 +282,7 @@ func (s *server) console(w http.ResponseWriter, r *http.Request) {
 	status := 200
 	parts := strings.Split(path, "/")
 	switch {
-	case len(parts) == 3 && ((parts[0] == "browser" && parts[2] == "frame") || (parts[0] == "voice" && parts[2] == "audio")):
+	case len(parts) == 3 && parts[0] == "browser" && parts[2] == "frame":
 		s.consoleMedia(w, r, p, parts[0], parts[1])
 		return
 	case len(parts) == 2 && parts[0] == "attachments":

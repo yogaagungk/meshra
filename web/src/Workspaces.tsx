@@ -1,3 +1,5 @@
+import { TabBar } from "./components/Tabs";
+import { CodeView } from "./components/CodeView";
 import { useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -250,20 +252,16 @@ function WorkspaceBrowser({ workspace }: { workspace: Workspace }) {
         </div>
       </div>
       <div className="workspace-view-tabs">
-        <div role="group" aria-label="Workspace view">
-          <button
-            aria-pressed={view === "files"}
-            onClick={() => setView("files")}
-          >
-            Files
-          </button>
-          <button
-            aria-pressed={view === "changes"}
-            onClick={() => setView("changes")}
-          >
-            Changes{changes.length > 0 && " · " + changes.length}
-          </button>
-        </div>
+        <TabBar
+          label="Workspace view"
+          value={view}
+          onChange={(id) => setView(id as "files" | "changes")}
+          variant="underline"
+          items={[
+            { id: "files", label: "Files" },
+            { id: "changes", label: "Changes", count: changes.length },
+          ]}
+        />
         {git.data?.isRepository && (
           <span>
             <GitBranch size={14} />
@@ -398,9 +396,7 @@ function WorkspaceBrowser({ workspace }: { workspace: Workspace }) {
                     {preview.data.truncated && (
                       <p role="status">Showing the first 64 KiB.</p>
                     )}
-                    <pre tabIndex={0} aria-label="File contents">
-                      {preview.data.content}
-                    </pre>
+                    <CodeView code={preview.data.content} path={file} label="File contents" />
                   </>
                 )}
               </>
@@ -422,9 +418,7 @@ function WorkspaceBrowser({ workspace }: { workspace: Workspace }) {
               {diff.isError && <Notice>{diff.error.message}</Notice>}
               {diff.data &&
                 (diff.data.content ? (
-                  <pre tabIndex={0} aria-label="Git diff">
-                    {diff.data.content}
-                  </pre>
+                  <CodeView code={diff.data.content} diff label="Git diff" />
                 ) : (
                   <p>
                     No {staged ? "staged" : "unstaged"} diff. Untracked file

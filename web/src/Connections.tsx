@@ -1,9 +1,9 @@
+import { TabBar } from "./components/Tabs";
 import { useEffect, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Globe,
   KeyRound,
-  Mic,
   Plus,
   RefreshCw,
   Server,
@@ -13,9 +13,9 @@ import {
   automation,
   type ConnectionList,
   type NetworkGrant,
+  type ApiFormat,
   type ProviderEndpoint,
   type RuntimeReadiness,
-  type VoiceReadiness,
   type AutomationResponse,
   type MCPServer,
 } from "./automation-api";
@@ -92,13 +92,12 @@ export function Connections() {
       <ProviderConnections />
       <MCPConnections />
       <MessagingConnections />
-      <VoiceReadiness />
       <RuntimeReadiness />
     </div>
   );
 }
 
-function RuntimeReadiness() {
+export function RuntimeReadiness() {
   const client = useQueryClient();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -325,11 +324,12 @@ function RuntimeReadiness() {
   );
 }
 
-function NetworkGrants() {
+export function NetworkGrants() {
   const client = useQueryClient();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
-  const [scope, setScope] = useState<"profile" | "connection">("profile");
+  const [scope, setScope] = useState<"profile" | "connection">("connection");
+  const [adding, setAdding] = useState(false);
   const [scopeId, setScopeId] = useState("");
   const [origin, setOrigin] = useState("");
   const [allowPrivate, setAllowPrivate] = useState(false);
@@ -338,6 +338,12 @@ function NetworkGrants() {
     queryFn: () => automation("network.list", {}),
   });
   const items: NetworkGrant[] = grants.data || [];
+  const connectionNames = useQuery({
+    queryKey: ["connections"],
+    queryFn: () => automation("connections.list", {}),
+  });
+  const nameOf = (id: string) =>
+    connectionNames.data?.endpoints.find((e) => e.id === id)?.name;
 
   async function grant(e: FormEvent) {
     e.preventDefault();
@@ -375,6 +381,7 @@ function NetworkGrants() {
       });
       setOrigin("");
       setAllowPrivate(false);
+      setAdding(false);
       await client.invalidateQueries({ queryKey: ["network-grants"] });
     } catch (e) {
       setError((e as Error).message);
@@ -408,14 +415,20 @@ function NetworkGrants() {
             Exact origins only. A grant never covers a subnet or a wildcard.
           </small>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Refresh network grants"
-          onClick={() => void grants.refetch()}
-        >
-          <RefreshCw size={14} />
-        </Button>
+        <div className="automation-actions">
+          <Button variant="outline" size="sm" onClick={() => setAdding((v) => !v)} aria-expanded={adding}>
+            <Plus size={13} />
+            Add origin
+          </Button>
+                  <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Refresh network grants"
+            onClick={() => void grants.refetch()}
+          >
+            <RefreshCw size={14} />
+          </Button>
+        </div>
       </header>
       {error && <Notice>{error}</Notice>}
       {grants.isError && <Notice>{grants.error.message}</Notice>}
@@ -426,31 +439,38 @@ function NetworkGrants() {
         </p>
       )}
       {items.length ? (
-        <ul className="automation-grant-list">
+        <ul className="automation-grant-list automation-connection-list">
           {items.map((item) => (
-            <li key={item.id}>
-              <span className="mono">{item.origin}</span>
-              <span className="muted">
-                {item.profileId
-                  ? "Profile " + item.profileId
-                  : item.connectionId
-                    ? "Connection " + item.connectionId
-                    : "Unscoped"}
-              </span>
-              {item.allowPrivate && (
-                <span className="automation-tag">Private allowed</span>
-              )}
-              <span className="automation-tag">
-                {item.enabled ? "Enabled" : "Revoked"}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy === item.id || !item.enabled}
-                onClick={() => void revoke(item)}
-              >
-                Revoke
-              </Button>
+            <li key={item.id} className="conn-row">
+              <div className="conn-main">
+                <strong className="mono">{item.origin}</strong>
+                <small className="muted">
+                  {item.profileId
+                    ? "Profile " + item.profileId
+                    : item.connectionId
+                      ? "Connection · " +
+                        (nameOf(item.connectionId) || "removed connection")
+                      : "Unscoped"}
+                </small>
+              </div>
+              <div className="conn-tags">
+                {item.allowPrivate && (
+                  <span className="automation-tag">Private allowed</span>
+                )}
+                <span className={"automation-tag " + (item.enabled ? "is-on" : "")}>
+                  {item.enabled ? "Enabled" : "Revoked"}
+                </span>
+              </div>
+              <div className="conn-actions">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy === item.id || !item.enabled}
+                  onClick={() => void revoke(item)}
+                >
+                  Revoke
+                </Button>
+              </div>
             </li>
           ))}
         </ul>
@@ -462,63 +482,79 @@ function NetworkGrants() {
           </p>
         )
       )}
-      <form className="form-stack automation-grant-form" onSubmit={grant}>
-        <div className="automation-inline">
-          <label htmlFor="grant-scope">Scope</label>
-          <select
-            id="grant-scope"
-            value={scope}
-            onChange={(e) => setScope(e.target.value as "profile" | "connection")}
-          >
-            <option value="profile">Profile</option>
-            <option value="connection">Connection</option>
-          </select>
-          <label htmlFor="grant-scope-id">
-            {scope === "profile" ? "Profile id" : "Connection id"}
+      <div className="reveal" data-open={adding}>
+        <div>
+      <form className="form-stack automation-grant-form" onSubmit={grant} inert={!adding}>
+        <TabBar
+          label="Grant scope"
+          variant="segment"
+          value={scope}
+          onChange={(id) => { setScope(id as "profile" | "connection"); setScopeId(""); }}
+          items={[{ id: "connection", label: "Connection" }, { id: "profile", label: "Profile" }]}
+        />
+        {scope === "connection" && connectionNames.data?.endpoints.length ? (
+          <label className="form-stack">
+            Connection
+            <select required value={scopeId} onChange={(e) => setScopeId(e.target.value)}>
+              <option value="">Choose a connection</option>
+              {connectionNames.data.endpoints.map((e) => (
+                <option key={e.id} value={e.id}>{e.name}</option>
+              ))}
+            </select>
           </label>
-          <input
-            id="grant-scope-id"
-            required
-            value={scopeId}
-            onChange={(e) => setScopeId(e.target.value)}
-            placeholder={scope === "profile" ? "profile id" : "connection id"}
-          />
-        </div>
-        <div className="automation-inline">
-          <label htmlFor="grant-origin">Origin</label>
-          <input
-            id="grant-origin"
-            required
-            value={origin}
-            onChange={(e) => setOrigin(e.target.value)}
-            placeholder="https://api.example.com"
-          />
-        </div>
-        <label className="automation-inline">
-          <input
-            type="checkbox"
-            checked={allowPrivate}
-            onChange={(e) => setAllowPrivate(e.target.checked)}
-          />
-          This origin is a private or loopback address. I confirm private
-          access explicitly.
+        ) : (
+          <label className="form-stack">
+            {scope === "profile" ? "Profile id" : "Connection id"}
+            <input required value={scopeId} onChange={(e) => setScopeId(e.target.value)} placeholder={scope === "profile" ? "profile id" : "connection id"} />
+          </label>
+        )}
+        <label className="form-stack">
+          Origin
+          <input required value={origin} onChange={(e) => setOrigin(e.target.value)} placeholder="https://api.example.com" />
         </label>
-        <Button type="submit" disabled={busy === "grant"}>
-          <Globe size={15} />
-          {busy === "grant" ? "Granting…" : "Grant this origin"}
-        </Button>
+        <label className="automation-inline">
+          <input type="checkbox" checked={allowPrivate} onChange={(e) => setAllowPrivate(e.target.checked)} />
+          This origin is a private or loopback address. I confirm private access explicitly.
+        </label>
+        <div className="automation-actions">
+          <Button type="submit" disabled={busy === "grant"}>
+            <Globe size={15} />
+            {busy === "grant" ? "Granting…" : "Grant this origin"}
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => setAdding(false)}>Cancel</Button>
+        </div>
       </form>
+        </div>
+      </div>
     </section>
   );
 }
 
-function ProviderConnections() {
+type ModelTest = {
+  running?: boolean;
+  models?: { id: string; name: string }[];
+  error?: string;
+};
+
+const API_FORMAT_LABELS: Record<ApiFormat, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  typesafe: "TypeSafe",
+};
+const API_FORMAT_PLACEHOLDERS: Record<ApiFormat, string> = {
+  openai: "https://models.example.com",
+  anthropic: "https://api.anthropic.com",
+  typesafe: "https://api.typesafe.ai",
+};
+
+export function ProviderConnections() {
   const client = useQueryClient();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [apiFormat, setApiFormat] = useState<ApiFormat>("openai");
   const [apiKey, setApiKey] = useState("");
   const [supportsTools, setSupportsTools] = useState(true);
   const [supportsImages, setSupportsImages] = useState(false);
@@ -526,11 +562,25 @@ function ProviderConnections() {
   const [enabled, setEnabled] = useState(false);
   const [editingEndpoint, setEditingEndpoint] = useState<ProviderEndpoint>();
   const [contextWindow, setContextWindow] = useState("0");
+  const [tests, setTests] = useState<Record<string, ModelTest>>({});
+
+  async function testModels(endpoint: ProviderEndpoint) {
+    setTests((t) => ({ ...t, [endpoint.id]: { running: true } }));
+    try {
+      const models = await automation("connections.models", { id: endpoint.id });
+      // A manual test refreshes the 24 hour model cache for this endpoint.
+      client.setQueryData(["connection-models", endpoint.id], models);
+      setTests((t) => ({ ...t, [endpoint.id]: { models } }));
+    } catch (e) {
+      setTests((t) => ({ ...t, [endpoint.id]: { error: (e as Error).message } }));
+    }
+  }
 
   function editEndpoint(endpoint?: ProviderEndpoint) {
     setEditingEndpoint(endpoint);
     setName(endpoint?.name || "");
     setBaseUrl(endpoint?.baseUrl || "");
+    setApiFormat(endpoint?.apiFormat || "openai");
     setApiKey("");
     setSupportsTools(endpoint?.supportsTools ?? true);
     setSupportsImages(endpoint?.supportsImages ?? false);
@@ -557,8 +607,9 @@ function ProviderConnections() {
           ...(editingEndpoint ? { id: editingEndpoint.id } : {}),
           name: name.trim(),
           baseUrl: baseUrl.trim(),
-          supportsTools,
-          supportsImages,
+          apiFormat,
+          supportsTools: apiFormat === "typesafe" ? false : supportsTools,
+          supportsImages: apiFormat === "typesafe" ? false : supportsImages,
           allowInsecureHttp,
           enabled,
           contextWindowTokens: Number(contextWindow),
@@ -569,6 +620,8 @@ function ProviderConnections() {
       setBaseUrl("");
       setApiKey("");
       setAdding(false);
+      // A changed URL, key or format can change the model list.
+      void client.invalidateQueries({ queryKey: ["connection-models"] });
       await client.invalidateQueries({ queryKey: ["connections"] });
     } catch (e) {
       setError((e as Error).message);
@@ -632,28 +685,70 @@ function ProviderConnections() {
       ) : (
         <ul className="automation-connection-list">
           {list?.endpoints?.map((endpoint) => (
-            <li key={endpoint.id}>
-              <div>
+            <li key={endpoint.id} className="conn-row">
+              <div className="conn-main">
                 <strong>{endpoint.name}</strong>
                 <small className="muted mono">{endpoint.baseUrl}</small>
               </div>
-              <span className="automation-tag">
-                {endpoint.enabled ? "Enabled" : "Disabled"}
-              </span>
-              <span className="automation-tag">
-                <KeyRound size={12} />
-                {SECRET_STATUS_LABELS[endpoint.secretStatus] ||
-                  endpoint.secretStatus}
-              </span>
-              <Button variant="outline" size="sm" disabled={!!busy} onClick={() => editEndpoint(endpoint)}>Edit / enable</Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy === endpoint.id || !endpoint.enabled}
-                onClick={() => void disable(endpoint)}
-              >
-                Disable
-              </Button>
+              <div className="conn-tags">
+                <span className="automation-tag">
+                  {API_FORMAT_LABELS[endpoint.apiFormat || "openai"]}
+                </span>
+                <span className={"automation-tag " + (endpoint.enabled ? "is-on" : "")}>
+                  {endpoint.enabled ? "Enabled" : "Disabled"}
+                </span>
+                <span className="automation-tag">
+                  <KeyRound size={12} />
+                  {SECRET_STATUS_LABELS[endpoint.secretStatus] ||
+                    endpoint.secretStatus}
+                </span>
+              </div>
+              <div className="conn-actions">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!endpoint.enabled || tests[endpoint.id]?.running}
+                  title={endpoint.enabled ? "List the models this endpoint serves" : "Enable the endpoint to test it"}
+                  onClick={() => void testModels(endpoint)}
+                >
+                  {tests[endpoint.id]?.running ? "Testing…" : "Test"}
+                </Button>
+                <Button variant="outline" size="sm" disabled={!!busy} onClick={() => editEndpoint(endpoint)}>Edit</Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy === endpoint.id || !endpoint.enabled}
+                  onClick={() => void disable(endpoint)}
+                >
+                  Disable
+                </Button>
+              </div>
+              {tests[endpoint.id] && !tests[endpoint.id].running && (
+                <div className="automation-test-result" role="status">
+                  {tests[endpoint.id].error ? (
+                    <Notice>{tests[endpoint.id].error}</Notice>
+                  ) : (
+                    <>
+                      <strong>
+                        {tests[endpoint.id].models?.length || 0} models available
+                      </strong>
+                      <ul>
+                        {(tests[endpoint.id].models || []).slice(0, 12).map((m) => (
+                          <li key={m.id}>
+                            <span>{m.name}</span>
+                            {m.name !== m.id && <code>{m.id}</code>}
+                          </li>
+                        ))}
+                      </ul>
+                      {(tests[endpoint.id].models?.length || 0) > 12 && (
+                        <small className="muted">
+                          and {(tests[endpoint.id].models?.length || 0) - 12} more
+                        </small>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -673,13 +768,29 @@ function ProviderConnections() {
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
+          <label htmlFor="endpoint-format">API compatibility</label>
+          <select
+            id="endpoint-format"
+            value={apiFormat}
+            onChange={(e) => setApiFormat(e.target.value as ApiFormat)}
+          >
+            <option value="openai">OpenAI (chat completions)</option>
+            <option value="anthropic">Anthropic (Messages)</option>
+            <option value="typesafe">TypeSafe (System One)</option>
+          </select>
+          {apiFormat === "typesafe" && (
+            <p className="muted">
+              TypeSafe returns structured judgments (choice, score, noul). It cannot
+              run chat or tool-calling turns, so agents cannot use this connection.
+            </p>
+          )}
           <label htmlFor="endpoint-url">Base URL</label>
           <input
             id="endpoint-url"
             required
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://models.example.com"
+            placeholder={API_FORMAT_PLACEHOLDERS[apiFormat]}
           />
           <label htmlFor="endpoint-key">API key</label>
           <input
@@ -744,57 +855,6 @@ function ProviderConnections() {
   );
 }
 
-function VoiceReadiness() {
-  const voice = useQuery({
-    queryKey: ["voice-status"],
-    queryFn: () => automation("voice.status", {}),
-    retry: false,
-  });
-  const status: VoiceReadiness | undefined = voice.data;
-  return (
-    <section className="automation-card">
-      <header className="automation-card-head">
-        <div>
-          <strong>Local voice</strong>
-          <small className="muted">
-            Speech to text and read-aloud run on this machine. Nothing is
-            recorded unless you ask for it.
-          </small>
-        </div>
-        <div className="automation-actions">
-          <Mic size={16} />
-          <Status state={status?.state === "ready" ? "idle" : "error"} />
-        </div>
-      </header>
-      {voice.isError ? (
-        <Notice>{voice.error.message}</Notice>
-      ) : voice.isPending ? (
-        <p role="status">Checking voice readiness…</p>
-      ) : status ? (
-        <>
-          <div className="agent-card-details">
-            <span>{READINESS_LABELS[status.state] || status.state}</span>
-            <span>
-              {status.stt?.configured ? "Speech to text ready" : "No speech model"}
-            </span>
-            <span>
-              {status.tts?.configured ? "Read-aloud ready" : "No voice model"}
-            </span>
-            {status.autoReadReplies && <span>Reads replies aloud</span>}
-          </div>
-          {status.prerequisites?.length ? (
-            <ul className="automation-prerequisites">
-              {status.prerequisites.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : null}
-        </>
-      ) : null}
-    </section>
-  );
-}
-
 function lines(value: string) {
   return value.split("\n").map((line) => line.trim()).filter(Boolean);
 }
@@ -837,7 +897,7 @@ function ProfileSelect({ value, onChange, workspaceId }: { value: string; onChan
   </>;
 }
 
-function MCPConnections() {
+export function MCPConnections() {
   const client = useQueryClient();
   const servers = useInfiniteQuery({
     queryKey: ["automation", "mcp"],

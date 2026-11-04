@@ -9,6 +9,7 @@ import { Notice } from "./App";
 import { HarnessLogo, harnessName } from "./HarnessLogo";
 import { Button } from "./components/ui/button";
 import { UsageDashboard } from "./UsageDashboard";
+import { modelCacheOptions } from "./modelCache";
 import type { ModelOption, PersonalPreferences } from "./types";
 
 type Session = {
@@ -82,7 +83,7 @@ export function SettingsPanels({ children }: { children: ReactNode }) {
     </>
   );
 }
-function PersonalControls({ access }: { access: boolean }) {
+export function PersonalControls({ access }: { access: boolean }) {
   const client = useQueryClient();
   const preferences = useQuery({
     queryKey: ["preferences"],
@@ -350,14 +351,12 @@ function PersonalControls({ access }: { access: boolean }) {
     </div>
   );
 }
-function ModelsUsage() {
+export function ModelsUsage() {
   const [harness, setHarness] = useState("claude");
   const models = useQuery({
     queryKey: ["models", harness],
     queryFn: () => api<{ items: ModelOption[] }>("models", { harness }),
-    retry: false,
-    gcTime: 0,
-    staleTime: 60000,
+    ...modelCacheOptions,
   });
   const usage = useQuery({
     queryKey: ["usage"],
