@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"fmt"
 	"context"
 	"encoding/json"
 	"strings"
@@ -44,7 +45,7 @@ func TestProfileMemoryDefaultsRevisionsAndExternalInjection(t *testing.T) {
 	private = save(map[string]any{"id": private.ID, "expectedRevision": 1, "content": "operator-private-canary-updated", "pinned": true})
 	_, err = scopedMemoryCall(t, r, admin, "memory.remove", map[string]any{"profileId": profile.ID, "id": private.ID, "expectedRevision": 1})
 	requireStatus(t, err, 409)
-	task := awaitTask(t, r, continuitySend(t, r, profile, one, "personal").ID)
+	task := awaitTask(t, r, continuitySend(t, r, profile, one, "recall thread-one-canary and thread-two-canary").ID)
 	r.mu.Lock()
 	injected, err := r.profileMemoriesForTask(task)
 	r.mu.Unlock()
@@ -208,7 +209,7 @@ func TestProfileMemorySourcesRetentionAndBounds(t *testing.T) {
 	// Fill through the real operation, so both the per-profile limit and the
 	// bounded, pinned-first injection exercise production SQL and serialization.
 	for i := range 255 {
-		_, err = scopedMemoryCall(t, r, admin, "memory.save", map[string]any{"profileId": profile.ID, "content": strings.Repeat("x", 4000), "pinned": i == 0})
+		_, err = scopedMemoryCall(t, r, admin, "memory.save", map[string]any{"profileId": profile.ID, "content": fmt.Sprintf("%s%04d", strings.Repeat("x", 900), i), "pinned": i == 0})
 		if err != nil {
 			t.Fatal(err)
 		}

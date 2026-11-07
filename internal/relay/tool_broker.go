@@ -43,6 +43,8 @@ type toolInvocation struct {
 	Error          string            `json:"error,omitempty"`
 	AllowRuleID    string            `json:"allowRuleId,omitempty"`
 	Result         *model.ToolResult `json:"result,omitempty"`
+	// Mutation marks an invocation that can change state outside the model turn.
+	Mutation bool `json:"mutation,omitempty"`
 }
 type brokerCall struct {
 	requestHash        string
@@ -264,7 +266,7 @@ func (b *toolBroker) Call(ctx context.Context, call model.ToolCall) (model.ToolR
 		}
 		b.processPending = true
 	}
-	invocation := toolInvocation{ID: randomID(), TaskID: t.ID, Attempt: t.Attempts, CallID: call.ID, Name: call.Name, ArgumentsHash: requestHash, State: "pending", ProfileID: b.snapshot.Profile.ID, BindingID: b.snapshot.Binding.ID, WorkspaceID: b.snapshot.Profile.WorkspaceID, PolicyRevision: b.snapshot.ToolPolicyRevision, Epoch: epoch, CreatedAt: now()}
+	invocation := toolInvocation{ID: randomID(), TaskID: t.ID, Attempt: t.Attempts, CallID: call.ID, Name: call.Name, ArgumentsHash: requestHash, State: "pending", ProfileID: b.snapshot.Profile.ID, BindingID: b.snapshot.Binding.ID, WorkspaceID: b.snapshot.Profile.WorkspaceID, PolicyRevision: b.snapshot.ToolPolicyRevision, Epoch: epoch, CreatedAt: now(), Mutation: action.mutation}
 	state := &brokerCall{requestHash: requestHash, invocation: invocation, action: action, wake: make(chan struct{}, 1), cancel: cancel}
 	if action.approval || action.question {
 		state.owner = b.snapshot.ConsoleSessionOwner

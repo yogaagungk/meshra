@@ -90,7 +90,7 @@ export function MessagingConnections() {
       <strong>{value.name}</strong><p>{value.kind} · {value.enabled ? "Enabled" : "Disabled"} · revision {value.revision}</p>
       <p className="muted">{Object.entries(value.secrets).map(([slot, status]) => slot + ": " + status).join(" · ")}</p>
       {value.lastError && <Notice>{value.lastError}</Notice>}
-      <ul>{value.routes.map((route) => <li key={route.id}>Profile {route.profileId} · {route.enabled ? "route enabled" : "route disabled"} · {route.autoStart ? "automatic startup reviewed" : "manual startup"}</li>)}</ul>
+      <ul>{value.routes.map((route) => <li key={route.id}>Profile {route.profileId} · {route.enabled ? "route enabled" : "route disabled"}{route.blockedReason ? ` — BLOCKED FOR REVIEW: ${route.blockedReason}` : ""} · {route.autoStart ? "automatic startup reviewed" : "manual startup"}</li>)}</ul>
       <div className="automation-actions">
         <Button variant="outline" disabled={busy} onClick={() => edit(value)}>Edit credentials</Button>
         <Button variant="outline" disabled={busy} onClick={() => { setSelected(value); setRoutes(value.routes.map((route) => ({ ...route, allow: { ...route.allow } }))); }}>Review routes</Button>

@@ -621,3 +621,21 @@
 .automation-test-result ul li code {
   color: var(--muted);
 }
+
+.mode-badge { font-weight: 600; }
+.mode-badge.mode-restricted { color: var(--ok, #1a7f4b); }
+.mode-badge.mode-trusted { color: var(--warn, #a15c00); }
+
+.effects-panel { display: grid; gap: 12px; }
+.effects-intro { margin: 0; color: var(--muted-foreground, inherit); max-width: 70ch; }
+.effects-filter { display: inline-flex; gap: 8px; align-items: center; justify-self: start; }
+.effects-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.effect-row { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+.effect-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.effect-source { font-size: 0.85em; opacity: 0.7; }
+.effect-head time { margin-left: auto; font-size: 0.85em; opacity: 0.7; }
+.effect-risk { margin: 0; color: var(--secondary); }
+.effect-error { margin: 0; color: var(--error); overflow-wrap: anywhere; }
+.effect-details { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 6px 0 0; }
+.effect-details dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .effect-details { grid-template-columns: 1fr; } .effect-head time { margin-left: 0; } }

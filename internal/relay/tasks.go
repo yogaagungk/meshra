@@ -195,6 +195,9 @@ func (r *Relay) admitLocked(p model.Principal, q model.SendRequest, meta *admiss
 		if err = r.validateProfileAdmission(q, *meta.profile); err != nil {
 			return t, err
 		}
+		if err = r.enforceModeAdmission(p, ingress, destination, *meta.profile); err != nil {
+			return t, err
+		}
 	}
 	if destination.GenerationDraft && (meta == nil || meta.generationAgentID != destination.ID) {
 		return t, model.Err(403, "draft identities require trusted generation admission")
@@ -880,6 +883,9 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 	}
 	var tools *toolBroker
 	if e == nil && a.ProfileManaged && !model.Terminal(current.State) {
+		e = r.checkModeAtDispatch(current)
+	}
+	if e == nil && a.ProfileManaged && !model.Terminal(current.State) {
 		tools, e = r.newToolBrokerLocked(ctx, current, s)
 	}
 	var injected, system, profileID string
@@ -1051,6 +1057,7 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 		s.turnCancel()
 	}
 	delete(r.repos, s.repo)
+	var ackErr error
 	current, e = r.task(t.ID)
 	if e == nil && !model.Terminal(current.State) {
 		switch {
@@ -1111,7 +1118,16 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 		if sid := runtimeSessionID(runtime); sid != "" {
 			current.DestinationSessionID = sid
 		}
-		_ = r.transition(current, current.State, current.Error)
+		// Execution returned; whether its outcome is durable is a separate fact.
+		// Retry only the bookkeeping write, never the model or tool turn.
+		for attempt := 0; attempt < 3; attempt++ {
+			if ackErr = r.transition(current, current.State, current.Error); ackErr == nil {
+				break
+			}
+		}
+		if ackErr != nil {
+			r.logger.Error("terminal task acknowledgment not durable", "requestId", t.ID, "state", current.State, "errorClass", "storage")
+		}
 	}
 	_, _ = r.db.Exec("DELETE FROM credentials WHERE hash=?", tokenHash(token))
 	s.lastUsed = now()
@@ -1125,7 +1141,12 @@ func (r *Relay) execute(ctx context.Context, a model.Agent, s *slot, t model.Tas
 				latest.SessionID = s.runtime.SessionID()
 			}
 			if latest.State == "busy" {
-				if !t.Chat && (runErr != nil || ctxErr != nil) {
+				if ackErr != nil {
+					// Stop dispatch to this identity: the effect may have happened but its
+					// terminal state is not durable. Never report healthy idle.
+					latest.State = "error"
+					latest.Error = "task " + t.ID + " finished but its terminal state could not be saved; inspect the task and restart the agent before dispatching more work"
+				} else if !t.Chat && (runErr != nil || ctxErr != nil) {
 					latest.State = "error"
 					latest.Error = "harness turn failed or was interrupted; inspect task status and restart agent before dispatching more work"
 				} else {

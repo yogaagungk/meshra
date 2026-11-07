@@ -659,11 +659,19 @@ func (r *runtime) Run(ctx context.Context, turn model.Turn, emit model.Emit) (st
 			if used <= window*3/4 {
 				lastCompactionTokens = 0
 			} else if lastCompactionTokens == 0 || used >= lastCompactionTokens+window/4 {
-				var changed bool
-				messages, changed = r.compact(ctx, messages, &totals, emit)
+				var changed, failed bool
+				messages, changed, failed = r.compact(ctx, messages, &totals, emit)
 				if changed {
 					lastCompactionTokens = used
 					compactedNext = true
+				}
+				if failed {
+					// Do not retry an uncertain summary every loop, and never truncate
+					// evidence to fit: once the window is nearly full, stop visibly.
+					lastCompactionTokens = used
+					if used >= window*95/100 {
+						return "", errors.New("context window is nearly full and compaction failed; stopping without discarding tool evidence")
+					}
 				}
 			}
 		}

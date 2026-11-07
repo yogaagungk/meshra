@@ -35,6 +35,7 @@ import type { Agent, Conversation } from "./types";
 import { Approvals } from "./Approvals";
 import { SkillsPanel } from "./AutomationSkills";
 import { JourneyPanel } from "./Journey";
+import { EffectsPanel } from "./AutomationEffects";
 import { FlowsPanel } from "./AutomationFlows";
 import { RunBadge, RunsPanel, useRecentRuns } from "./AutomationRuns";
 import { goAutomation, relativeTime, skipReasons, useProfiles } from "./automationShared";
@@ -67,6 +68,7 @@ const TABS = [
   ["queue", "Queue"],
   ["routines", "Routines"],
   ["runs", "Runs"],
+  ["effects", "Effects"],
   ["flows", "Flows"],
   ["skills", "Skills"],
   ["journey", "Journey"],
@@ -102,6 +104,8 @@ export function Automation({ tab }: { tab?: string }) {
         <RoutinesPanel />
       ) : current === "runs" ? (
         <RunsPanel />
+      ) : current === "effects" ? (
+        <EffectsPanel />
       ) : current === "flows" ? (
         <FlowsPanel focus={item || undefined} />
       ) : current === "skills" ? (
@@ -421,6 +425,9 @@ function RoutinesPanel() {
                     ? "Starts the agent if it is stopped"
                     : "Skips when the agent is stopped"}
                 </span>
+                {routine.blockedReason && (
+                  <span role="alert">Blocked for review: {routine.blockedReason}</span>
+                )}
                 {routine.trigger?.kind === "webhook" && routine.webhookSecretStatus && (
                   <span>Webhook secret {routine.webhookSecretStatus}</span>
                 )}
@@ -478,6 +485,8 @@ function RoutineDialog({
   const [everySeconds, setEverySeconds] = useState("3600");
   const [expression, setExpression] = useState("");
   const [autoStart, setAutoStart] = useState(false);
+  const [missedRun, setMissedRun] = useState<"skip" | "latest">("skip");
+  const [missedMinutes, setMissedMinutes] = useState("60");
   const [enabled, setEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -513,6 +522,8 @@ function RoutineDialog({
           ...(flowId ? { flowId } : {}),
           enabled,
           autoStart,
+          missedRun,
+          ...(missedRun === "latest" ? { missedMaxAgeSeconds: Math.round(Number(missedMinutes) * 60) } : {}),
           timeoutSeconds: 3600,
         },
       });
@@ -648,6 +659,19 @@ function RoutineDialog({
           />
           Start the agent automatically if it is stopped
         </label>
+        <label>
+          If the daemon was down when a run was due
+          <select value={missedRun} onChange={(e) => setMissedRun(e.target.value as "skip" | "latest")}>
+            <option value="skip">Skip missed runs (recorded, never replayed)</option>
+            <option value="latest">Run only the most recent missed run if recent enough</option>
+          </select>
+        </label>
+        {missedRun === "latest" && (
+          <label>
+            Maximum age of a missed run (minutes)
+            <input type="number" min={1} max={10080} value={missedMinutes} onChange={(e) => setMissedMinutes(e.target.value)} />
+          </label>
+        )}
         <label className="automation-inline">
           <input
             type="checkbox"

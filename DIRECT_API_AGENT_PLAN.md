@@ -1,5 +1,7 @@
 # Direct API agent upgrade (Hermes-inspired)
 
+> **Reconciliation (2026-11-05):** superseded in scope by `docs/MESHRA_PERSONAL_AGENT_ROADMAP.md`. Implemented features below are still present, but historical statements about profile automation being "broker-only" for Claude/OMP are not current: trusted Claude/OMP profiles run native tools with full host access, and restricted Claude/OMP execution is unavailable until proven. Verification claims here are historical and were not re-run.
+
 Status: implemented except optional smart approvals and post-turn review (no configured cheap-model connection); delegation remains asynchronous to avoid repository-lock deadlocks. Real sandbox execution requires the confinement prerequisites documented below.
 
 ## Goal

@@ -62,6 +62,7 @@ type runtime struct {
 	v2      bool
 	draft   bool
 	managed bool
+	restricted bool
 	agentID string
 	catalog []model.ToolDefinition
 	hostIDs map[string]struct{}
@@ -99,6 +100,9 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 	if a.SessionID != "" && !nativeID.MatchString(a.SessionID) {
 		return nil, errors.New("OMP persisted session ID is invalid")
 	}
+	if a.Restricted {
+		return restrictedFactory(ctx, a, emit)
+	}
 	dir, unlock, err := process.RuntimeStateDir("omp", a.ID, a.Ephemeral)
 	if err != nil {
 		return nil, err
@@ -135,7 +139,14 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 		unlock()
 		return nil, err
 	}
-	r := &runtime{p: p, unlock: unlock, draft: a.GenerationDraft, managed: a.ProfileManaged && !a.GenerationDraft, agentID: a.ID, catalog: cloneCatalog(a.ToolDefinitions), hostIDs: make(map[string]struct{}), callIDs: make(map[string]struct{})}
+	return handshake(ctx, a, emit, p, unlock, filepath.Join(dir, "sessions"))
+}
+
+// handshake negotiates the native protocol and verifies identity, session
+// ownership and (for managed runs) the exact tool roster. It is shared by the
+// host launcher and the confined launcher; only the process differs.
+func handshake(ctx context.Context, a model.Agent, emit model.Emit, p *process.Process, unlock func(), sessionsDir string) (_ model.Runtime, err error) {
+	r := &runtime{p: p, unlock: unlock, draft: a.GenerationDraft, managed: a.ProfileManaged && !a.GenerationDraft, restricted: a.Restricted, agentID: a.ID, catalog: cloneCatalog(a.ToolDefinitions), hostIDs: make(map[string]struct{}), callIDs: make(map[string]struct{})}
 	defer func() {
 		if err != nil {
 			_ = r.Close()
@@ -204,7 +215,7 @@ func factory(ctx context.Context, a model.Agent, emit model.Emit) (_ model.Runti
 	if state.SessionFile == "" {
 		return nil, errors.New("OMP session persistence is disabled")
 	}
-	rel, err := filepath.Rel(filepath.Join(dir, "sessions"), state.SessionFile)
+	rel, err := filepath.Rel(sessionsDir, state.SessionFile)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil, errors.New("OMP session escaped its identity-owned directory")
 	}
@@ -468,6 +479,14 @@ func (r *runtime) setHostTools(ctx context.Context, definitions []model.ToolDefi
 		actual = append(actual, model.ToolDefinition{Name: d.Name, Description: d.Description, InputSchema: d.Parameters})
 	}
 	// Full access keeps native builtins; the trusted catalog must be present intact.
+	if r.restricted {
+		// Restricted mode: the model-facing roster is exactly the admitted broker
+		// catalog. Any native builtin that survived suppression fails closed.
+		if !sameCatalog(actual, definitions) {
+			return hostUnavailable("restricted OMP exposes native tools beyond the admitted broker catalog")
+		}
+		return nil
+	}
 	if !containsCatalog(actual, definitions) {
 		return hostUnavailable("native tool catalog is missing trusted host tools")
 	}

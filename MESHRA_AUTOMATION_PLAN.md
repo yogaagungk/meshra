@@ -1,5 +1,7 @@
 # Add OpenBot-inspired capabilities to Meshra
 
+> **Reconciliation (2026-11-05):** superseded in scope by `docs/MESHRA_PERSONAL_AGENT_ROADMAP.md`. Implemented features below are still present, but historical statements about profile automation being "broker-only" for Claude/OMP are not current: trusted Claude/OMP profiles run native tools with full host access, and restricted Claude/OMP execution is unavailable until proven. Verification claims here are historical and were not re-run.
+
 ## Context
 Keep Meshra's current implementation and working behavior, adopt better OpenBot patterns where they fit, and add the selected local-agent and automation capabilities. Preserve the Go relay, SQLite data, React console and existing permission defaults. The end state adds portable profiles, richer context/files/queues, approved confined tools, routines, skills, connections and local voice without replacing current workflows.
 

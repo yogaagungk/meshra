@@ -52,6 +52,7 @@ Commands:
   collaboration OP JSON_OBJECT   Conversation/context operations
   automation OP JSON_OBJECT      Automation service operations
   automation runtime-status      Confined runtime readiness
+  effects [--task ID] [--status S] [--limit N]   External actions and their outcomes (read-only)
   metrics
   doctor
   mcp stdio                 Agent-only MCP proxy; requires MESHRA_TOKEN
@@ -439,6 +440,41 @@ func command(args []string) (method, path string, body any, follow bool, err err
 		method = http.MethodPost
 		path = "/v1/automation/" + args[1]
 		body = payload
+		return
+	case "effects":
+		var f flags
+		f, err = parse(args[1:], map[string]bool{"--task": false, "--status": false, "--limit": false})
+		if err != nil {
+			return
+		}
+		if len(f.positional) != 0 {
+			err = usage("effects takes flags, not positional arguments")
+			return
+		}
+		q := map[string]any{}
+		if v := f.get("--task"); v != "" {
+			q["taskId"] = v
+		}
+		if v := f.get("--status"); v != "" {
+			switch v {
+			case "intended", "dispatched", "completed", "rejected", "cancelled", "uncertain":
+				q["status"] = v
+			default:
+				err = usage("--status must be intended, dispatched, completed, rejected, cancelled or uncertain")
+				return
+			}
+		}
+		if v := f.get("--limit"); v != "" {
+			n, e := strconv.Atoi(v)
+			if e != nil || n < 1 || n > 500 {
+				err = usage("--limit must be 1..500")
+				return
+			}
+			q["limit"] = n
+		}
+		method = http.MethodPost
+		path = "/v1/automation/effects.list"
+		body = q
 		return
 	case "collaboration":
 		if len(args) != 3 {

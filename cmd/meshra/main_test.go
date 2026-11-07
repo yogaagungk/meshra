@@ -366,3 +366,19 @@ func TestMCPProxyAcceptsLargeBoundedTrace(t *testing.T) {
 		t.Fatal("large trace lost result, bounded replay, or terminal event")
 	}
 }
+
+func TestEffectsCommandIsReadOnlyAndValidated(t *testing.T) {
+	method, path, body, _, err := command([]string{"effects", "--task", "t1", "--status=uncertain", "--limit", "20"})
+	if err != nil || method != "POST" || path != "/v1/automation/effects.list" {
+		t.Fatalf("effects command: %s %s %v", method, path, err)
+	}
+	q := body.(map[string]any)
+	if q["taskId"] != "t1" || q["status"] != "uncertain" || q["limit"] != 20 {
+		t.Fatalf("payload: %v", q)
+	}
+	for _, bad := range [][]string{{"effects", "--status", "ok"}, {"effects", "--limit", "0"}, {"effects", "--limit", "501"}, {"effects", "extra"}, {"effects", "--retry"}} {
+		if _, _, _, _, err = command(bad); err == nil {
+			t.Fatalf("accepted %v", bad)
+		}
+	}
+}

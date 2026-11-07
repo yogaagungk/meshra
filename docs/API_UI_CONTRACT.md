@@ -7,6 +7,19 @@ are `/v1/tasks/ID`. Events have stable increasing numeric IDs and 256-item pages
 Text deltas are deliberately buffered/redacted until completion. The UI must show
 running progress, never simulated token streaming or typing.
 
+## Execution mode additions
+
+Profiles carry `executionMode` (`restricted`|`trusted`) and `modeReviewed`. A profile
+stored before modes existed reads as `trusted` with `modeReviewed:false`.
+`profiles.save` on create accepts `executionMode` (default `restricted`) and
+`acknowledgeTrusted` (required for `trusted`); on update it rejects `executionMode`
+with 409. `profiles.setMode {id, expectedRevision, mode, acknowledgeTrusted?}`
+changes mode for a quiescent profile and restarts its native sessions. Restricted
+Claude/OMP return 503 `restricted execution is unavailable` until confinement is
+proven. Admission refuses external/unattended work for non-restricted profiles
+(403 `blocked:`). Connector routes and routines expose `blockedReason` when review
+disabled them. Admitted task snapshots record `executionMode`.
+
 ## Direct API profile additions
 
 `profiles.save` accepts `maxToolCalls` (0 or omitted defaults to 40) and

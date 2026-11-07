@@ -89,8 +89,10 @@ type connectorRoute struct {
 	Allow     connectorAllow `json:"allow"`
 	AutoStart bool           `json:"autoStart"`
 	Enabled   bool           `json:"enabled"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
+	// BlockedReason explains why a route was disabled for review.
+	BlockedReason string    `json:"blockedReason,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // connectorView is the operator facing summary of one connector. Secret values
@@ -117,6 +119,8 @@ type connectorRouteView struct {
 	Allow     connectorAllow `json:"allow"`
 	AutoStart bool           `json:"autoStart"`
 	Enabled   bool           `json:"enabled"`
+	// BlockedReason is set when review disabled the route.
+	BlockedReason string `json:"blockedReason,omitempty"`
 }
 
 // connectorDeliveryView is the operator facing summary of one outbox entry.
@@ -475,7 +479,7 @@ func (r *Relay) connectorViewLocked(ctx context.Context, record connectorRecord)
 	}
 	views := make([]connectorRouteView, 0, len(routes))
 	for _, route := range routes {
-		views = append(views, connectorRouteView{ID: route.ID, Revision: route.Revision, ProfileID: route.ProfileID, Allow: route.Allow, AutoStart: route.AutoStart, Enabled: route.Enabled})
+		views = append(views, connectorRouteView{ID: route.ID, Revision: route.Revision, ProfileID: route.ProfileID, Allow: route.Allow, AutoStart: route.AutoStart, Enabled: route.Enabled, BlockedReason: route.BlockedReason})
 	}
 	return connectorView{ID: record.ID, Revision: record.Revision, Kind: record.Kind, Name: record.Name, Enabled: record.Enabled, Secrets: statuses, Routes: views, Cursor: record.Cursor, LastError: record.LastError, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}, nil
 }
@@ -728,6 +732,9 @@ func (r *Relay) connectorRoutesSave(ctx context.Context, id string, expectedRevi
 		}
 		if profile.Archived {
 			return nil, model.Err(409, "route target profile is archived")
+		}
+		if route.Enabled && !profile.Restricted() {
+			return nil, model.Err(409, blockedModeReason)
 		}
 	}
 	existing, err := r.connectorRoutesLocked(id)

@@ -200,6 +200,9 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 	if profile && (turn.Task.To != r.agent.ID || (turn.Task.DestinationSessionID != "" && turn.Task.DestinationSessionID != session)) {
 		return "", model.Err(503, "Claude broker task does not own this native destination session")
 	}
+	if r.agent.Restricted && (!profile || r.agent.Confined == nil) {
+		return "", model.Err(503, "restricted Claude execution requires the confined worker; refusing to run on the host")
+	}
 	if !profile && turn.Tools != nil {
 		return "", model.Err(503, "Claude broker tools require an exact profile-managed startup catalog")
 	}
@@ -232,6 +235,16 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 	if r.agent.GenerationDraft || profile {
 		mcpURL, token = "", ""
 	}
+	var confined *model.ConfinedProcess
+	cwd := r.agent.Cwd
+	if r.agent.Confined != nil {
+		confined, err = r.agent.Confined.Launch(ctx, toolSocket)
+		if err != nil {
+			return "", err
+		}
+		defer confined.Close()
+		toolSocket, cwd = confined.ToolSocket, confined.Cwd
+	}
 	payload, err := json.Marshal(struct {
 		Prompt          string          `json:"prompt"`
 		Cwd             string          `json:"cwd"`
@@ -244,12 +257,17 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 		ToolSocket      string          `json:"toolSocket,omitempty"`
 		ToolToken       string          `json:"toolToken,omitempty"`
 		ToolBridge      string          `json:"toolBridge,omitempty"`
-	}{turn.Task.Text, r.agent.Cwd, session, r.agent.Config.Model, mcpURL, token, r.agent.GenerationDraft, r.catalog, toolSocket, toolToken, toolBridge})
+	}{turn.Task.Text, cwd, session, r.agent.Config.Model, mcpURL, token, r.agent.GenerationDraft, r.catalog, toolSocket, toolToken, toolBridge})
 	if err != nil {
 		return "", err
 	}
-	cmd := r.command(ctx)
-	cmd.Dir = r.agent.Cwd
+	var cmd *exec.Cmd
+	if confined != nil {
+		cmd = confined.Cmd
+	} else {
+		cmd = r.command(ctx)
+		cmd.Dir = r.agent.Cwd
+	}
 	var control io.WriteCloser
 	if profile {
 		control, err = cmd.StdinPipe()
@@ -261,22 +279,31 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 		cmd.Stdin = bytes.NewReader(append(payload, '\n'))
 	}
 	cmd.Stderr = io.Discard // SDK stderr can include credentials and raw protocol.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return os.ErrProcessDone
+	if confined == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			if cmd.Process == nil {
+				return os.ErrProcessDone
+			}
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		cmd.WaitDelay = 3 * time.Second
 	}
-	cmd.WaitDelay = 3 * time.Second
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
 	}
-	if err = cmd.Start(); err != nil {
+	if confined != nil {
+		err = confined.Start()
+	} else {
+		err = cmd.Start()
+	}
+	if err != nil {
 		return "", fmt.Errorf("start Claude SDK bridge: %w", err)
 	}
-	defer syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	if confined == nil {
+		defer syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 	if control != nil {
 		if _, err = control.Write(append(payload, '\n')); err != nil {
 			cancel()
@@ -366,7 +393,12 @@ func (r *runtimeSession) Run(ctx context.Context, turn model.Turn, emit model.Em
 		runErr = fmt.Errorf("read Claude bridge: %w", err)
 		cancel()
 	}
-	waitErr := cmd.Wait()
+	var waitErr error
+	if confined != nil {
+		waitErr = confined.Wait()
+	} else {
+		waitErr = cmd.Wait()
+	}
 	if ctx.Err() != nil && runErr == nil {
 		return "", ctx.Err()
 	}

@@ -8,6 +8,16 @@ Adapter support is intentionally asymmetric. A registered identity is durable ev
 | OMP | CLI 18.12.1, custom RPC v2 over stdio | Yes | Yes | Saved session ID in per-identity session directory | Native abort, forced process cleanup if needed | No | **Full access**: builtin tools with `--approval-mode=yolo`; discovery/project MCP disabled. Tool-free profile drafts keep `--no-tools` |
 | Claude | Agent SDK 0.3.303, bundled Claude Code 2.1.303 | Yes | Yes | SDK native session ID | AbortController and owned process-group cleanup | Yes | **Full access**: `bypassPermissions`, every tool allowed. Tool-free profile drafts still deny all tools |
 
+### Capability inventory (backend, enforcement boundary, evidence)
+
+| Runtime | Backend | Trusted mode boundary | Restricted mode boundary | Evidence level |
+| --- | --- | --- | --- | --- |
+| Direct API | HTTP to the selected endpoint, in-process agent loop | n/a (no native tools) | Broker catalog only; commands in a private bubblewrap sandbox with per-call approval | Deterministic tests; real-daemon smoke of mode gates; live provider not exercised here |
+| OMP | `omp` RPC v2 subprocess on the host | None: `--approval-mode=yolo`, full host access | **Conditionally available.** Native `omp` runs in the bubblewrap worker with `--no-tools`; the daemon requires the exact admitted broker roster before any prompt. Unavailable until the operator manifest, a reviewed provider credential and the OS probe pass; production-path proof pending | Protocol fixtures and installed-version checks; no confinement proof |
+| Claude | Agent SDK bridge, native Claude Code on the host | None: `bypassPermissions`, full host access | **Conditionally available.** Runs the SDK bridge in the bubblewrap worker (private HOME, no direct network, scoped broker socket, provider-only egress). Available only when the runtime manifest, a daemon-environment credential and the live OS probe all pass; otherwise unavailable with the unmet prerequisite named. No host fallback | Mechanism implemented; containment probe and bridge self-check passed in a manual bubblewrap run; **production-path proof pending a delegated-cgroup host**; no real-credential turn run |
+
+The broker catalog limits what Meshra offers the model; it does not remove native tools in trusted mode. Native-specific conveniences remain native-specific.
+
 “Yes” means implemented capability, not proof that every provider account/configuration has passed a live test. The [v0.2 adapter verification report](V0.2_ADAPTER_VERIFICATION.md) records fresh installed-version, schema, native credential-free protocol evidence, credential prerequisites, and the worktree-write enforcement matrix. Earlier authenticated outcomes remain in [verification.md](verification.md), separate from deterministic protocol contracts. Runtime capability metadata makes these differences discoverable.
 
 ## Direct API compatibility formats

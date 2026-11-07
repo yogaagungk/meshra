@@ -103,6 +103,9 @@ var migrationV26 string
 //go:embed migrations/027.sql
 var migrationV27 string
 
+//go:embed migrations/028.sql
+var migrationV28 string
+
 // schemaMigrations lists every embedded schema step in order. A new feature
 // appends its own step; existing steps are never renumbered.
 var schemaMigrations = []struct {
@@ -111,7 +114,7 @@ var schemaMigrations = []struct {
 }{
 	{10, migrationV10}, {11, migrationV11}, {12, migrationV12}, {13, migrationV13},
 	{14, migrationV14}, {15, migrationV15}, {16, migrationV16}, {17, migrationV17}, {18, migrationV18}, {19, migrationV19}, {20, migrationV20},
-	{21, migrationV21}, {23, migrationV23}, {24, migrationV24}, {25, migrationV25}, {26, migrationV26}, {27, migrationV27},
+	{21, migrationV21}, {23, migrationV23}, {24, migrationV24}, {25, migrationV25}, {26, migrationV26}, {27, migrationV27}, {28, migrationV28},
 }
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
@@ -258,6 +261,10 @@ func OpenWithOptions(dir string, adapters map[string]model.Adapter, options Opti
 		return nil, err
 	}
 	if _, err = r.db.Exec("UPDATE run_usage SET state='interrupted' WHERE state='running'"); err != nil {
+		cancel()
+		return nil, err
+	}
+	if err = r.reviewUnsafeAutomation(); err != nil {
 		cancel()
 		return nil, err
 	}
@@ -726,7 +733,19 @@ func (r *Relay) actionWithLifecycle(p model.Principal, id, action string, profil
 			r.mu.Unlock()
 			return a, profileErr
 		}
+		if profile.Restricted() {
+			if err = r.restrictedNativeBlocked(a.Harness); err != nil {
+				a.State, a.Error = "error", err.Error()
+				_ = r.saveAgent(a)
+				r.mu.Unlock()
+				return a, err
+			}
+		}
 		a.ToolDefinitions = profileToolCatalog(profile)
+		if profile.Restricted() && a.Harness != "openai" {
+			a.Restricted = true
+			a.Confined = r.confinedLauncher(a.Harness, profile, a.ID)
+		}
 		pending, pendingErr := r.profileRotationNeeded(a.ID)
 		if pendingErr != nil {
 			r.mu.Unlock()

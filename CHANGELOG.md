@@ -2,6 +2,82 @@
 
 ## Unreleased
 
+### Schedule readiness and DST (roadmap R12, partial)
+
+- Scheduled runs are checked before admission. A missing or unrestricted target, an unproven restricted runtime or an unusable model connection records a skipped occurrence with `policy_blocked`, `runtime_unavailable` or `needs_auth`, and no model call is made.
+- Cron jobs no longer run twice when a clock change repeats a local hour; a local time that does not exist is skipped for that day.
+
+### Effects view (roadmap R04, partial)
+
+- Console Automation → Effects tab and `meshra effects` list external actions with their recorded outcome, flag unknown outcomes as duplicate risk and never resend. `effects.list` is restricted to the operator.
+
+### Restricted OMP confinement (roadmap R03, partial)
+
+- Restricted OMP profiles run the native `omp` in the bubblewrap worker (`--no-tools`, private HOME, provider-only egress, reviewed provider list) and fail closed when the registered roster differs from the admitted broker catalog. There is no host fallback. Claude and OMP share one launcher.
+- Production-path containment is unproven on hosts without a delegated cgroup v2; the evidence test skips there.
+
+### Direct API compaction (roadmap P3, partial)
+
+- Compaction now summarizes the original tool evidence instead of truncated stubs,
+  replaces it only after a valid summary exists, keeps all evidence when the summary
+  fails, and stops visibly when the context window is nearly full and compaction
+  failed.
+
+### Event input and missed runs (roadmap P5, partial)
+
+- Signed routine webhook events are persisted with the run (id, digest, redacted
+  payload) and reach entry steps as quoted untrusted data. Non-text payloads are
+  rejected.
+- Routines can set `missedRun: "latest"` with a maximum age to run only the most
+  recent missed occurrence after downtime; the default remains skip.
+
+### Memory retrieval and knowledge (roadmap P4)
+
+- Memory injection is now relevance-ranked over the already-authorized set: pinned
+  first, then task-relevant memories, bounded to 8 KiB, with a visible selection
+  summary. Unpinned memories that are not relevant to the task are no longer
+  injected; pin a memory to always include it.
+- New operator-only `reusable` knowledge flag (schema 28). Scheduled and external
+  runs can retrieve it; they cannot read owner-private or other conversations'
+  memories.
+- Memory count, byte and duplicate rules apply uniformly regardless of review mode;
+  duplicates ignore case and whitespace. Over-limit data is retained and can be
+  shrunk.
+
+### Restricted Claude confinement (roadmap P1/R03, partial)
+
+- Restricted Claude profiles now launch the pinned SDK bridge inside the bubblewrap
+  worker (private HOME and state, no network namespace access, read-only workspace
+  snapshot, scoped broker socket, provider-only egress proxy). Availability requires
+  an operator runtime manifest, a daemon-environment credential and a passing OS
+  probe; otherwise it is unavailable with the unmet prerequisite named. There is no
+  host fallback. Restricted OMP remains unavailable.
+- New `confined-probe.mjs` containment self-test and a gated production-path test.
+  Not yet run on a delegated-cgroup host.
+
+### Effect status (roadmap P2, partial)
+
+- New read-only `effects.list` automation operation reports mutating tool calls and
+  connector replies as effects with their own status (including `uncertain` with a
+  duplicate-risk flag), separate from task status. Uncertain effects are never
+  replayed. No provider idempotency is claimed.
+
+### Execution modes (roadmap P0/P1)
+
+- Profiles have a `restricted` (default for new profiles) or `trusted` execution
+  mode, persisted on the profile and admitted into every task snapshot. Trusted
+  requires an explicit acknowledgment; legacy profiles read as unreviewed trusted.
+- Admission rejects connector, routine, webhook and other external work for
+  non-restricted profiles and blocks restricted/external-to-trusted delegation.
+  Startup disables enabled routes/routines that target unrestricted profiles with a
+  visible `blockedReason`, keeping accepted events and runs.
+- New `profiles.setMode` operation, console mode badge/selector and blocked-reason
+  display. Restricted Claude/OMP fail closed as unavailable until native
+  confinement is proven; Direct API restricted profiles are available.
+- Documentation no longer claims Claude/OMP profile execution is broker-confined.
+- A failure to persist a task's terminal state now stops dispatch to that identity
+  instead of returning it to healthy idle; the turn is never re-executed.
+
 ### Direct API prompt caching
 
 - Anthropic-format connections can request ephemeral prompt caching, with an

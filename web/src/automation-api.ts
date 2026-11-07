@@ -30,10 +30,14 @@ export type ProfileFields = {
   memoryWriteApproval?: "off" | "on";
   maxToolCalls?: number;
 };
+export type ExecutionMode = "restricted" | "trusted";
 export type Profile = ProfileFields & {
   id: string;
   revision: number;
   archived: boolean;
+  /** Trust domain. Legacy profiles report trusted with modeReviewed=false. */
+  executionMode: ExecutionMode;
+  modeReviewed?: boolean;
 };
 export type ProfileBinding = ProfileProvider & {
   id: string;
@@ -64,6 +68,7 @@ export type Memory = {
   sourceTaskId?: string;
   sourceAvailable?: boolean;
   pinned: boolean;
+  reusable?: boolean;
   updatedAt: string;
 };
 export type PendingMemory = {
@@ -321,7 +326,7 @@ export type MCPServer = {
   bindings?: MCPBinding[];
 };
 
-export type ConnectorRoute = { id: string; revision: number; profileId: string; allow: { workspaces?: string[]; guilds?: string[]; channels?: string[]; chats?: string[]; users?: string[] }; autoStart: boolean; enabled: boolean };
+export type ConnectorRoute = { id: string; revision: number; profileId: string; allow: { workspaces?: string[]; guilds?: string[]; channels?: string[]; chats?: string[]; users?: string[] }; autoStart: boolean; enabled: boolean; blockedReason?: string };
 export type Connector = { id: string; revision: number; kind: string; name: string; enabled: boolean; secrets: Record<string, string>; routes: ConnectorRoute[]; lastError?: string; cursor?: string; createdAt: string; updatedAt: string };
 export type ConnectorDelivery = { id: string; taskId: string; chunk: number; state: string; remoteId?: string; error?: string; createdAt: string; updatedAt: string };
 export type BrowserSession = { id: string; profileId: string; conversationId: string; state: string; epoch: number; frameSeq: number; leaseOwner?: string; leaseExpiresAt?: string; snapshotText?: string; tabs: number; lastError?: string };
@@ -350,11 +355,14 @@ export type RoutineDefinition = {
   flowRevision?: number;
   enabled?: boolean;
   autoStart?: boolean;
+  missedRun?: "skip" | "latest";
+  missedMaxAgeSeconds?: number;
   timeoutSeconds?: number;
   webhookSecret?: string;
 };
 export type Routine = RoutineDefinition & {
   nextDueAt?: string;
+  blockedReason?: string;
   webhookSecretStatus?: "missing" | "saved" | "unreadable";
 };
 export type RoutineStep = {
@@ -420,6 +428,23 @@ export type UnverifiedList<T> = {
   hasMore?: boolean;
 };
 
+export type EffectStatus = "intended" | "dispatched" | "completed" | "rejected" | "cancelled" | "uncertain";
+export type Effect = {
+  id: string;
+  source: "tool" | "connector";
+  taskId: string;
+  profileId?: string;
+  operation: string;
+  status: EffectStatus;
+  requestDigest?: string;
+  policyRevision?: number;
+  providerRef?: string;
+  idempotency: string;
+  duplicateRisk?: boolean;
+  error?: string;
+  createdAt: string;
+};
+
 type Operation<Request, Response> = { request: Request; response: Response };
 export type AutomationOperations = {
   "profiles.binding": Operation<{ profileId: string; conversationId: string }, ProfileBinding>;
@@ -429,6 +454,7 @@ export type AutomationOperations = {
   "profiles.get": Operation<{ id: string }, Profile>;
   "profiles.save": Operation<ProfileFields & { id?: string; expectedRevision?: number }, Profile>;
   "profiles.archive": Operation<RevisionRequest & { archived: boolean }, Profile>;
+  "profiles.setMode": Operation<RevisionRequest & { mode: ExecutionMode; acknowledgeTrusted?: boolean }, Profile>;
   "profiles.switch": Operation<RevisionRequest & { binding: ProfileProvider; shareHistory: true }, Profile>;
   "profiles.switchPreview": Operation<RevisionRequest & { binding: ProfileProvider }, ProfileSwitchPreview>;
   "profiles.send": Operation<{
@@ -488,6 +514,7 @@ export type AutomationOperations = {
     expectedRevision?: number;
     content: string;
     pinned: boolean;
+    reusable?: boolean;
     scope: "operator" | "conversation";
     conversationId?: string;
     sourceTaskId?: string;
@@ -607,6 +634,7 @@ export type AutomationOperations = {
   "browser.input": Operation<{ id: string; epoch: number; frameSeq: number; action: BrowserAction }, { id: string; epoch: number; frameSeq: number; state: string; snapshot: { text: string }; url?: string; title?: string }>;
   "browser.close": Operation<{ id: string }, BrowserSession>;
   "browser.clearData": Operation<{ profileId: string; conversationId: string; confirm: true }, { cleared: boolean }>;
+  "effects.list": Operation<{ taskId?: string; status?: EffectStatus; limit?: number }, { effects: Effect[] }>;
   "routines.list": Operation<Pagination, UnverifiedList<Routine>>;
   "routines.save": Operation<
     { routine: RoutineDefinition; expectedRevision?: number },

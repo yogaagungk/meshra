@@ -23,6 +23,10 @@ func (r *Relay) profile(id string) (model.Profile, error) {
 		return v, err
 	}
 	err := json.Unmarshal([]byte(body), &v)
+	if err == nil && v.ExecutionMode == "" {
+		// Legacy profile: report the truth (native full access, unreviewed).
+		v.ExecutionMode, v.ModeReviewed = model.ModeTrusted, false
+	}
 	return v, err
 }
 
@@ -86,6 +90,25 @@ func (r *Relay) validateProfile(v model.Profile, creating bool) error {
 		}
 		if other.Archived {
 			return model.Err(409, "allowed profile is archived")
+		}
+	}
+	switch v.ExecutionMode {
+	case model.ModeRestricted, model.ModeTrusted:
+	default:
+		return model.Err(400, "executionMode must be restricted or trusted")
+	}
+	if v.ExecutionMode == model.ModeRestricted {
+		if v.Capabilities.Browser || v.Capabilities.Computer {
+			return model.Err(400, "restricted profiles cannot use browser or computer backends")
+		}
+		for _, id := range v.AllowedProfileIDs {
+			other, err := r.profile(id)
+			if err != nil {
+				return err
+			}
+			if !other.Restricted() {
+				return model.Err(400, "restricted profiles may only delegate to restricted profiles")
+			}
 		}
 	}
 	if creating && profileExecution(v.Capabilities) {
@@ -359,6 +382,8 @@ func (r *Relay) profileStoreOperation(p model.Principal, op string, raw json.Raw
 			AllowedProfileIDs    []string                  `json:"allowedProfileIds"`
 			MaxToolCalls         *int                      `json:"maxToolCalls"`
 			NotificationsEnabled bool                      `json:"notificationsEnabled"`
+			ExecutionMode        string                    `json:"executionMode"`
+			AcknowledgeTrusted   bool                      `json:"acknowledgeTrusted"`
 		}
 		if err := decodeAutomation(raw, &q); err != nil {
 			return nil, err
@@ -366,6 +391,27 @@ func (r *Relay) profileStoreOperation(p model.Principal, op string, raw json.Raw
 		creating := q.ID == ""
 		v := model.Profile{ID: q.ID, Revision: 1, Name: q.Name, Instructions: q.Instructions, AvatarAttachmentID: q.AvatarAttachmentID,
 			WorkspaceID: q.WorkspaceID, Binding: q.Binding, Capabilities: q.Capabilities, AllowedProfileIDs: q.AllowedProfileIDs, NotificationsEnabled: q.NotificationsEnabled}
+		if creating {
+			// New profiles are restricted unless the operator explicitly accepts full access.
+			switch q.ExecutionMode {
+			case "", model.ModeRestricted:
+				v.ExecutionMode, v.ModeReviewed = model.ModeRestricted, true
+			case model.ModeTrusted:
+				if !q.AcknowledgeTrusted {
+					return nil, model.Err(400, "trusted mode requires acknowledgeTrusted: native tools run with the operator's full host access")
+				}
+				v.ExecutionMode, v.ModeReviewed = model.ModeTrusted, true
+			default:
+				return nil, model.Err(400, "executionMode must be restricted or trusted")
+			}
+			if v.ExecutionMode == model.ModeRestricted {
+				if err := r.restrictedNativeBlocked(v.Binding.Harness); err != nil {
+					return nil, err
+				}
+			}
+		} else if q.ExecutionMode != "" {
+			return nil, model.Err(409, "execution mode changes require profiles.setMode")
+		}
 		if q.MaxToolCalls != nil {
 			v.MaxToolCalls = *q.MaxToolCalls
 		} else if !creating {
@@ -429,6 +475,7 @@ func (r *Relay) profileStoreOperation(p model.Principal, op string, raw json.Raw
 				}
 			}
 			expected, v.Revision, v.Archived = old.Revision, old.Revision+1, old.Archived
+			v.ExecutionMode, v.ModeReviewed = old.ExecutionMode, old.ModeReviewed
 		}
 		if err := r.validateProfile(v, creating); err != nil {
 			return nil, err
@@ -456,6 +503,8 @@ func (r *Relay) profileStoreOperation(p model.Principal, op string, raw json.Raw
 			r.invalidateProfileToolPolicy(v.ID)
 		}
 		return v, nil
+	case "profiles.setMode":
+		return r.profileSetModeLocked(raw)
 	case "profiles.archive":
 		var q struct {
 			ID               string `json:"id"`
@@ -483,4 +532,81 @@ func (r *Relay) profileStoreOperation(p model.Principal, op string, raw json.Raw
 		return v, nil
 	}
 	return nil, model.Err(404, "unknown profile store operation")
+}
+
+// profileSetModeLocked changes the trust domain. It requires a quiescent profile,
+// an explicit acknowledgment for full access, and restarts native bindings.
+func (r *Relay) profileSetModeLocked(raw json.RawMessage) (any, error) {
+	var q struct {
+		ID                 string `json:"id"`
+		ExpectedRevision   int    `json:"expectedRevision"`
+		Mode               string `json:"mode"`
+		AcknowledgeTrusted bool   `json:"acknowledgeTrusted"`
+	}
+	if err := decodeAutomation(raw, &q); err != nil {
+		return nil, err
+	}
+	if !profileIdentifier(q.ID) || (q.Mode != model.ModeRestricted && q.Mode != model.ModeTrusted) {
+		return nil, model.Err(400, "profile id and mode (restricted or trusted) required")
+	}
+	old, err := r.profile(q.ID)
+	if err != nil {
+		return nil, err
+	}
+	if q.ExpectedRevision != old.Revision {
+		return nil, model.Err(409, "profile revision changed")
+	}
+	if old.Archived {
+		return nil, model.Err(409, "profile is archived")
+	}
+	if q.Mode == model.ModeTrusted && !q.AcknowledgeTrusted {
+		return nil, model.Err(400, "trusted mode requires acknowledgeTrusted: native tools run with the operator's full host access")
+	}
+	if q.Mode == old.ExecutionMode && old.ModeReviewed {
+		return old, nil
+	}
+	if err = r.profileBusy(old.ID); err != nil {
+		return nil, model.Err(409, "drain or cancel outstanding work before changing execution mode")
+	}
+	v := old
+	v.Revision, v.ExecutionMode, v.ModeReviewed = old.Revision+1, q.Mode, true
+	switch q.Mode {
+	case model.ModeRestricted:
+		if err = r.restrictedNativeBlocked(v.Binding.Harness); err != nil {
+			return nil, err
+		}
+		if err = r.validateProfile(v, false); err != nil {
+			return nil, err
+		}
+	case model.ModeTrusted:
+		rows, e := r.db.Query("SELECT body FROM agent_profiles")
+		if e != nil {
+			return nil, e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var body string
+			var other model.Profile
+			if e = rows.Scan(&body); e != nil || json.Unmarshal([]byte(body), &other) != nil {
+				continue
+			}
+			if other.Restricted() && slices.Contains(other.AllowedProfileIDs, v.ID) {
+				return nil, model.Err(409, "a restricted profile may delegate to this profile; remove it from that allowed list first")
+			}
+		}
+	}
+	bindings, err := r.prepareProfileStoreBindings(v)
+	if err != nil {
+		return nil, err
+	}
+	if err = r.storeProfile(v, old.Revision, "profiles.modeChanged", bindings, true); err != nil {
+		return nil, err
+	}
+	if q.Mode == model.ModeTrusted {
+		if err = r.reviewUnsafeAutomation(); err != nil {
+			return nil, err
+		}
+	}
+	r.invalidateProfileToolPolicy(v.ID)
+	return v, nil
 }

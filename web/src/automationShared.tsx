@@ -28,6 +28,9 @@ export const skipReasons: Record<string, string> = {
   backlog: "Too many occurrences were waiting, so older ones were dropped.",
   downtime: "Meshra was not running when this was due.",
   auto_start_disabled: "The agent was stopped and this routine is not allowed to start it.",
+  policy_blocked: "The target profile is missing or not in restricted mode, so unattended work was blocked.",
+  runtime_unavailable: "The restricted runtime for this agent is not available on this installation, so nothing was started.",
+  needs_auth: "The model connection is missing, disabled or its credential is unreadable. No model call was made.",
   skipped_dependency: "An earlier step in the flow did not succeed.",
   binding_superseded: "The profile was switched to another provider after this was scheduled.",
 };

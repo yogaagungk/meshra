@@ -38,7 +38,10 @@ func fakeAdapters(run func(context.Context, model.Turn, model.Emit) (string, err
 				sid = "native-" + randomID()
 			}
 			return &fakeRuntime{session: sid, run: run}, nil
-		}, Capabilities: map[string]bool{"prompt": true, "resume": true, "cancel": true, "stream": true}}
+		}, Capabilities: map[string]bool{"prompt": true, "resume": true, "cancel": true, "stream": true,
+			// Test double only: the fixture executor is not a native harness. Real
+			// adapters never set this until confinement has been proven.
+			"restrictedConfinement": true}}
 	}
 	return out
 }

@@ -73,7 +73,7 @@ func toolCatalogDigest(definitions []model.ToolDefinition) string {
 }
 
 func (r *Relay) prepareProfileSnapshot(p model.Profile, b model.ProfileBinding) (model.ProfileTaskSnapshot, error) {
-	snapshot := model.ProfileTaskSnapshot{Profile: p, Binding: b, ToolDefinitions: profileToolCatalog(p), External: b.ExternalConversation}
+	snapshot := model.ProfileTaskSnapshot{Profile: p, Binding: b, ToolDefinitions: profileToolCatalog(p), External: b.ExternalConversation, ExecutionMode: p.EffectiveMode()}
 	if err := r.captureProfileConnectionLocked(&snapshot); err != nil {
 		return snapshot, err
 	}

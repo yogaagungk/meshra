@@ -113,12 +113,16 @@ func TestCompactionPreservesLatestExchange(t *testing.T) {
 	messages := []chatMessage{{Role: "system", Content: "rules"}, {Role: "user", Content: "question"}, mk("old"), {Role: "tool", ToolCallID: "old", Content: strings.Repeat("x", 100)}, mk("new"), {Role: "tool", ToolCallID: "new", Content: "latest"}}
 	events := newRecorder()
 	var totals usageTotals
-	compacted, changed := rt.compact(context.Background(), messages, &totals, events.emit)
-	if !changed || len(compacted) != 5 || compacted[0].Role != "system" || compacted[1].Role != "user" || compacted[3].ToolCalls[0].ID != "new" || compacted[4].Content != "latest" || events.count("context_compacted") != 1 {
+	compacted, changed, failed := rt.compact(context.Background(), messages, &totals, events.emit)
+	if !changed || failed || len(compacted) != 5 || compacted[0].Role != "system" || compacted[1].Role != "user" || compacted[3].ToolCalls[0].ID != "new" || compacted[4].Content != "latest" || events.count("context_compacted") != 1 {
 		t.Fatalf("invalid compacted messages: %+v", compacted)
 	}
-	if !strings.Contains(string(f.request(t, 0).Messages[3].Content), "truncated") {
-		t.Fatal("old tool result was not truncated before summary")
+	// The summary is built from the original evidence, never from truncated stubs.
+	if !strings.Contains(string(f.request(t, 0).Messages[3].Content), strings.Repeat("x", 100)) || strings.Contains(string(f.request(t, 0).Messages[3].Content), "truncated") {
+		t.Fatal("summary was not built from the original tool result")
+	}
+	if !strings.Contains(compacted[2].Content.(string), "#old") {
+		t.Fatalf("summary lacks source references: %v", compacted[2].Content)
 	}
 }
 
@@ -186,5 +190,46 @@ func TestHighContextCompactsInsideTurn(t *testing.T) {
 	var stats requestStats
 	if err := json.Unmarshal([]byte(events.event(t, "model_request")), &stats); err != nil || !stats.Compacted {
 		t.Fatalf("compacted request not marked: %+v %v", stats, err)
+	}
+}
+
+func TestFailedOrEmptySummaryRetainsEveryToolResult(t *testing.T) {
+	for name, handler := range map[string]func(w http.ResponseWriter, r *http.Request, call int){
+		"provider error": func(w http.ResponseWriter, r *http.Request, call int) { http.Error(w, "boom", http.StatusInternalServerError) },
+		"empty summary":  func(w http.ResponseWriter, r *http.Request, call int) { fmt.Fprint(w, textReply("")) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, handler)
+			rt := testRuntime(t, Config{BaseURL: f.server.URL}).(*runtime)
+			mk := func(id string) chatMessage { return chatMessage{Role: "assistant", ToolCalls: []toolCall{{ID: id}}} }
+			evidence := "diagnostic: " + strings.Repeat("e", 100)
+			messages := []chatMessage{{Role: "system", Content: "rules"}, {Role: "user", Content: "question"}, mk("old"), {Role: "tool", ToolCallID: "old", Content: evidence}, mk("new"), {Role: "tool", ToolCallID: "new", Content: "latest"}}
+			events := newRecorder()
+			var totals usageTotals
+			out, changed, failed := rt.compact(context.Background(), messages, &totals, events.emit)
+			if changed || !failed || len(out) != 6 || out[3].Content != evidence || events.count("context_compacted") != 0 || events.count("context_compaction_failed") != 1 {
+				t.Fatalf("failed summary damaged the transcript: changed=%v failed=%v %+v", changed, failed, out)
+			}
+		})
+	}
+}
+
+func TestNearlyFullWindowWithFailedCompactionStopsVisibly(t *testing.T) {
+	executor := &fakeExecutor{definition: workspaceTool(), result: model.ToolResult{Content: []model.ToolContent{{Type: "text", Text: strings.Repeat("x", 200)}}}}
+	f := newFixture(t, func(w http.ResponseWriter, r *http.Request, call int) {
+		switch call {
+		case 0:
+			fmt.Fprint(w, toolReply("one", "meshra_workspace_read", `{"path":"one"}`))
+		case 1:
+			reply := toolReply("two", "meshra_workspace_read", `{"path":"two"}`)
+			fmt.Fprint(w, strings.TrimSuffix(reply, "}")+`,"usage":{"prompt_tokens":98}}`)
+		default:
+			http.Error(w, "summary unavailable", http.StatusInternalServerError)
+		}
+	})
+	rt := testRuntime(t, Config{BaseURL: f.server.URL, SupportsTools: true, ContextWindowTokens: 100})
+	_, err := rt.Run(context.Background(), model.Turn{System: "rules", Task: model.Task{Text: "go"}, Tools: executor}, newRecorder().emit)
+	if err == nil || !strings.Contains(err.Error(), "compaction failed") {
+		t.Fatalf("a nearly full window with no summary must stop visibly: %v", err)
 	}
 }

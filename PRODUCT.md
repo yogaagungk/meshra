@@ -14,6 +14,17 @@ Primary: a solo developer on their own machine (Ubuntu/WSL2 or Linux) who runs s
 
 Meshra is a local-first developer console and relay for independently named AI coding agent instances. It lets one person talk to agents, share pinned immutable context, and inspect durable task execution from one workspace. Success: the user can start working with a new agent quickly, always knows which agent did what, and can trust that nothing ran, was shared or left the machine without their say.
 
+## Personal business automation and trust domains
+
+Beyond coding, Meshra is the local control plane for persistent personal agents: the owner configures an agent's identity, instructions, approved knowledge and runtime, then delegates coding or business workflows (email monitoring, ads reporting, social drafting, customer conversations) under explicit authority. Business integrations are planned in `docs/MESHRA_PERSONAL_AGENT_ROADMAP.md`; none is implemented yet.
+
+Two execution modes keep authority honest:
+
+- **Trusted** (operator-selected, acknowledged): the harness's native tools run with the operator's full host access. It is never presented as sandboxed and never serves external-message or unattended work.
+- **Restricted** (default for new profiles): no ambient host authority; only the admitted Meshra broker catalog. Only restricted profiles may receive connector, routine, webhook or delegated-external work. Restricted execution is available today for Direct API profiles. For Claude and OMP it stays unavailable until confinement of the native process is proven (no host fallback).
+
+"Local-first" means local ownership of orchestration and state. Selected content still leaves the machine when a cloud model or external service is used; the console must disclose that.
+
 ## Positioning
 
 Friendly like an agent-team app, but with provable boundaries: exact canonical agent identities (`claude:exampleone` is a durable identity, not an alias for a model), immutable shared context, persisted and auditable task history, explicit recipients with no default broadcast, and localhost-only operation with no cloud or paid account. A hosted or subscription-bundled agent app cannot truthfully claim this.

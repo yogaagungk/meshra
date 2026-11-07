@@ -32,7 +32,30 @@ type Profile struct {
 	AllowedProfileIDs    []string            `json:"allowedProfileIds"`
 	NotificationsEnabled bool                `json:"notificationsEnabled"`
 	Archived             bool                `json:"archived"`
+	// ExecutionMode is the trust domain: "restricted" (broker-only authority)
+	// or "trusted" (operator-selected native full access). Empty is a legacy
+	// profile that predates modes; it is reported as unreviewed trusted.
+	ExecutionMode string `json:"executionMode,omitempty"`
+	// ModeReviewed is true once the operator chose the mode explicitly.
+	ModeReviewed bool `json:"modeReviewed,omitempty"`
 }
+
+const (
+	ModeRestricted = "restricted"
+	ModeTrusted    = "trusted"
+)
+
+// EffectiveMode never reinterprets legacy native behavior as restricted.
+func (p Profile) EffectiveMode() string {
+	if p.ExecutionMode == ModeRestricted {
+		return ModeRestricted
+	}
+	return ModeTrusted
+}
+
+// Restricted reports whether the profile may receive external or unattended work.
+func (p Profile) Restricted() bool { return p.EffectiveMode() == ModeRestricted }
+
 type ProfileBinding struct {
 	ID             string `json:"id"`
 	ProfileID      string `json:"profileId"`
@@ -55,8 +78,10 @@ type ProfileTaskSnapshot struct {
 	ExternalMCP         []ExternalMCPReference `json:"externalMcp,omitempty"`
 	Skills              []SkillReference       `json:"skills,omitempty"`
 	External            bool                   `json:"external,omitempty"`
-	Profile             Profile                `json:"profile"`
-	Binding             ProfileBinding         `json:"binding"`
+	// ExecutionMode is admitted with the task; later profile edits never widen it.
+	ExecutionMode string         `json:"executionMode,omitempty"`
+	Profile       Profile        `json:"profile"`
+	Binding       ProfileBinding `json:"binding"`
 }
 type AutomationPage[T any] struct {
 	Items     []T    `json:"items"`

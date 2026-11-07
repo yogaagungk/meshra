@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -71,6 +72,11 @@ const (
 	routineReasonAutoStart  = "auto_start_disabled"
 	routineReasonDependency = "skipped_dependency"
 	routineReasonSuperseded = "binding_superseded"
+	// Preflight outcomes: the occurrence is recorded and skipped before any
+	// model call, with the reason the operator must fix.
+	routineReasonPolicy    = "policy_blocked"
+	routineReasonRuntime   = "runtime_unavailable"
+	routineReasonNeedsAuth = "needs_auth"
 )
 
 // Sources that may trigger an occurrence.
@@ -103,6 +109,13 @@ type routineDefinition struct {
 	Enabled        bool           `json:"enabled"`
 	AutoStart      bool           `json:"autoStart"`
 	TimeoutSeconds int            `json:"timeoutSeconds"`
+	// MissedRun selects what happens to occurrences missed during downtime:
+	// "skip" (default) records them as skipped; "latest" runs only the most
+	// recent missed occurrence when it is at most MissedMaxAgeSeconds old.
+	MissedRun           string `json:"missedRun,omitempty"`
+	MissedMaxAgeSeconds int    `json:"missedMaxAgeSeconds,omitempty"`
+	// BlockedReason explains why review disabled the routine.
+	BlockedReason string `json:"blockedReason,omitempty"`
 	// WebhookSecretRef points at the encrypted routine webhook key. The
 	// plaintext is never stored in the routine record.
 	WebhookSecretRef string `json:"webhookSecretRef,omitempty"`
@@ -111,33 +124,39 @@ type routineDefinition struct {
 // routineInput is the operator supplied definition. Absent fields keep the
 // stored value; the webhook secret is a write-only plaintext input.
 type routineInput struct {
-	Trigger        *routineTrigger `json:"trigger,omitempty"`
-	Enabled        *bool           `json:"enabled,omitempty"`
-	AutoStart      *bool           `json:"autoStart,omitempty"`
-	FlowID         *string         `json:"flowId,omitempty"`
-	WebhookSecret  string          `json:"webhookSecret,omitempty"`
-	Name           string          `json:"name,omitempty"`
-	ProfileID      string          `json:"profileId,omitempty"`
-	Instruction    string          `json:"instruction,omitempty"`
-	FlowRevision   int             `json:"flowRevision,omitempty"`
-	TimeoutSeconds int             `json:"timeoutSeconds,omitempty"`
-	ID             string          `json:"id,omitempty"`
-	Revision       int             `json:"revision,omitempty"`
+	Trigger             *routineTrigger `json:"trigger,omitempty"`
+	Enabled             *bool           `json:"enabled,omitempty"`
+	AutoStart           *bool           `json:"autoStart,omitempty"`
+	MissedRun           *string         `json:"missedRun,omitempty"`
+	MissedMaxAgeSeconds *int            `json:"missedMaxAgeSeconds,omitempty"`
+	FlowID              *string         `json:"flowId,omitempty"`
+	WebhookSecret       string          `json:"webhookSecret,omitempty"`
+	Name                string          `json:"name,omitempty"`
+	ProfileID           string          `json:"profileId,omitempty"`
+	Instruction         string          `json:"instruction,omitempty"`
+	FlowRevision        int             `json:"flowRevision,omitempty"`
+	TimeoutSeconds      int             `json:"timeoutSeconds,omitempty"`
+	ID                  string          `json:"id,omitempty"`
+	Revision            int             `json:"revision,omitempty"`
 }
 
 type routineView struct {
-	ID             string         `json:"id"`
-	Revision       int            `json:"revision"`
-	Name           string         `json:"name"`
-	ProfileID      string         `json:"profileId"`
-	Instruction    string         `json:"instruction"`
-	Trigger        routineTrigger `json:"trigger"`
-	FlowID         string         `json:"flowId,omitempty"`
-	FlowRevision   int            `json:"flowRevision,omitempty"`
-	Enabled        bool           `json:"enabled"`
-	AutoStart      bool           `json:"autoStart"`
-	TimeoutSeconds int            `json:"timeoutSeconds"`
-	NextDueAt      string         `json:"nextDueAt,omitempty"`
+	ID                  string         `json:"id"`
+	Revision            int            `json:"revision"`
+	Name                string         `json:"name"`
+	ProfileID           string         `json:"profileId"`
+	Instruction         string         `json:"instruction"`
+	Trigger             routineTrigger `json:"trigger"`
+	FlowID              string         `json:"flowId,omitempty"`
+	FlowRevision        int            `json:"flowRevision,omitempty"`
+	Enabled             bool           `json:"enabled"`
+	AutoStart           bool           `json:"autoStart"`
+	TimeoutSeconds      int            `json:"timeoutSeconds"`
+	MissedRun           string         `json:"missedRun,omitempty"`
+	MissedMaxAgeSeconds int            `json:"missedMaxAgeSeconds,omitempty"`
+	NextDueAt           string         `json:"nextDueAt,omitempty"`
+	// BlockedReason is set when execution-mode review disabled the routine.
+	BlockedReason string `json:"blockedReason,omitempty"`
 	// WebhookSecretStatus reports missing, saved or unreadable without
 	// exposing any part of the secret.
 	WebhookSecretStatus string `json:"webhookSecretStatus"`
@@ -154,7 +173,17 @@ type routineStep struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+// routineEvent is the immutable input of an event-triggered run. It is persisted
+// with the receipt's run before any task is admitted and is only ever quoted as
+// untrusted data; it never selects instructions, routing or authority.
+type routineEvent struct {
+	EventID string `json:"eventId"`
+	Digest  string `json:"digest"`
+	Payload string `json:"payload"`
+}
+
 type routineRunRecord struct {
+	Event            *routineEvent      `json:"event,omitempty"`
 	Definition       *routineDefinition `json:"definition,omitempty"`
 	BindingsReleased bool               `json:"bindingsReleased,omitempty"`
 	Graph            *routineFlow       `json:"graph,omitempty"`
@@ -342,9 +371,35 @@ func routineNextOccurrence(d routineDefinition, after time.Time) (time.Time, err
 		if err != nil {
 			return time.Time{}, model.Err(400, "invalid cron expression")
 		}
-		return schedule.Next(after.In(routineLocation(d))).UTC(), nil
+		return routineCronNext(schedule, routineLocation(d), after), nil
 	}
 	return time.Time{}, errRoutineNoOccurrence
+}
+
+// routineRepeatedWallClock reports whether t is the second pass over a local
+// wall-clock time that a backward clock change made happen twice.
+func routineRepeatedWallClock(t time.Time, loc *time.Location) bool {
+	local := t.In(loc)
+	_, offset := local.Zone()
+	wall := local.Format("2006-01-02T15:04:05")
+	for _, back := range []time.Duration{30 * time.Minute, time.Hour, 2 * time.Hour} {
+		earlier := t.Add(-back).In(loc)
+		if _, earlierOffset := earlier.Zone(); earlierOffset != offset && earlier.Format("2006-01-02T15:04:05") == wall {
+			return true
+		}
+	}
+	return false
+}
+
+// routineCronNext is the next cron instant after `after`, firing once per local
+// wall-clock occurrence: when a clock change repeats an hour, the second pass is
+// skipped. A time that never exists (spring forward) has no occurrence that day.
+func routineCronNext(schedule cron.Schedule, loc *time.Location, after time.Time) time.Time {
+	next := schedule.Next(after.In(loc)).UTC()
+	for i := 0; i < 8 && routineRepeatedWallClock(next, loc); i++ {
+		next = schedule.Next(next.In(loc)).UTC()
+	}
+	return next
 }
 
 func (r *Relay) routineDefinition(id string) (routineDefinition, string, error) {
@@ -364,7 +419,7 @@ func (r *Relay) routineDefinition(id string) (routineDefinition, string, error) 
 }
 
 func routineViewOf(d routineDefinition, nextDue string, secretStatus string) routineView {
-	view := routineView{ID: d.ID, Revision: d.Revision, Name: d.Name, ProfileID: d.ProfileID, Instruction: d.Instruction, Trigger: d.Trigger, FlowID: d.FlowID, FlowRevision: d.FlowRevision, Enabled: d.Enabled, AutoStart: d.AutoStart, TimeoutSeconds: d.TimeoutSeconds, NextDueAt: nextDue, WebhookSecretStatus: secretStatus}
+	view := routineView{ID: d.ID, Revision: d.Revision, Name: d.Name, ProfileID: d.ProfileID, Instruction: d.Instruction, Trigger: d.Trigger, FlowID: d.FlowID, FlowRevision: d.FlowRevision, Enabled: d.Enabled, AutoStart: d.AutoStart, MissedRun: d.MissedRun, MissedMaxAgeSeconds: d.MissedMaxAgeSeconds, TimeoutSeconds: d.TimeoutSeconds, NextDueAt: nextDue, BlockedReason: d.BlockedReason, WebhookSecretStatus: secretStatus}
 	return view
 }
 
@@ -564,6 +619,12 @@ func (r *Relay) routineSave(ctx context.Context, p model.Principal, raw json.Raw
 	if input.Enabled != nil {
 		d.Enabled = *input.Enabled
 	}
+	if input.MissedRun != nil {
+		d.MissedRun = *input.MissedRun
+	}
+	if input.MissedMaxAgeSeconds != nil {
+		d.MissedMaxAgeSeconds = *input.MissedMaxAgeSeconds
+	}
 	if input.AutoStart != nil {
 		d.AutoStart = *input.AutoStart
 	}
@@ -668,6 +729,16 @@ func (r *Relay) routineSave(ctx context.Context, p model.Principal, raw json.Raw
 }
 
 func (r *Relay) validateRoutineDefinition(d *routineDefinition, creating bool) error {
+	switch d.MissedRun {
+	case "", "skip":
+		d.MissedRun, d.MissedMaxAgeSeconds = "", 0
+	case "latest":
+		if d.MissedMaxAgeSeconds < 60 || d.MissedMaxAgeSeconds > 7*24*3600 {
+			return model.Err(400, "missedMaxAgeSeconds must be 60..604800 for the latest missed-run policy")
+		}
+	default:
+		return model.Err(400, "missedRun must be skip or latest")
+	}
 	if strings.TrimSpace(d.Name) == "" || len(d.Name) > routineMaxNameBytes || !utf8.ValidString(d.Name) || !safeRegistryText(d.Name) || redact(d.Name) != d.Name {
 		return model.Err(400, "routine name must be 1..128 bytes of safe text")
 	}
@@ -709,6 +780,9 @@ func (r *Relay) validateRoutineDefinition(d *routineDefinition, creating bool) e
 		if _, err = r.loadRoutineFlow(d.FlowID, d.FlowRevision); err != nil {
 			return err
 		}
+	}
+	if d.Enabled {
+		return r.requireRestrictedProfiles(r.routineProfileIDs(*d))
 	}
 	return nil
 }
@@ -763,6 +837,12 @@ func (r *Relay) routineSetEnabled(ctx context.Context, raw json.RawMessage) (any
 	}
 	if q.Enabled && d.Trigger.Kind == "webhook" && d.WebhookSecretRef == "" {
 		return nil, model.Err(409, "review and save the webhook draft to provision its secret before enabling")
+	}
+	if q.Enabled {
+		if err = r.requireRestrictedProfiles(r.routineProfileIDs(d)); err != nil {
+			return nil, err
+		}
+		d.BlockedReason = ""
 	}
 	d.Enabled = q.Enabled
 	d.Revision = d.Revision + 1
@@ -1433,6 +1513,10 @@ func (r *Relay) RoutineWebhook(ctx context.Context, routineID, timestamp, eventI
 		r.mu.Unlock()
 		return nil, model.Err(401, "invalid webhook signature")
 	}
+	if !utf8.Valid(body) || bytes.IndexByte(body, 0) >= 0 {
+		r.mu.Unlock()
+		return nil, model.Err(400, "webhook payload must be UTF-8 text")
+	}
 	requestHash := tokenHash(string(body))
 	var existingRun, existingHash string
 	err = r.db.QueryRow("SELECT run_id,request_hash FROM routine_trigger_receipts WHERE routine_id=? AND source=? AND event_id=?", d.ID, routineSourceWebhook, eventID).Scan(&existingRun, &existingHash)
@@ -1453,6 +1537,7 @@ func (r *Relay) RoutineWebhook(ctx context.Context, routineID, timestamp, eventI
 	}
 	record := routineRunRecord{ID: randomID(), RoutineID: d.ID, Revision: d.Revision, ScheduledAt: routineTime(now()), Source: routineSourceWebhook, State: routineRunClaimed, Steps: []routineStep{}, TaskIDs: []string{}, CreatedAt: routineTime(now()), UpdatedAt: routineTime(now())}
 	record.Definition = &d
+	record.Event = &routineEvent{EventID: eventID, Digest: requestHash, Payload: redact(string(body))}
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		r.mu.Unlock()
@@ -1666,9 +1751,9 @@ func routineOccurrences(d routineDefinition, due time.Time, at time.Time) (time.
 			}
 			last = cursor
 			count++
-			cursor = schedule.Next(cursor.In(location)).UTC()
+			cursor = routineCronNext(schedule, location, cursor)
 		}
-		return first, last, count, schedule.Next(at.In(location)).UTC(), nil
+		return first, last, count, routineCronNext(schedule, location, at), nil
 	}
 	return time.Time{}, time.Time{}, 0, time.Time{}, errRoutineNoOccurrence
 }
@@ -1742,8 +1827,17 @@ func (r *Relay) routineRecoverDowntime() {
 		if err != nil {
 			continue
 		}
-		first, _, count, next, err := routineOccurrences(d, due, now())
+		first, last, count, next, err := routineOccurrences(d, due, now())
 		if err != nil || count == 0 {
+			continue
+		}
+		if d.MissedRun == "latest" && now().Sub(last) <= time.Duration(d.MissedMaxAgeSeconds)*time.Second {
+			// Bounded catch-up: older occurrences become backlog; the latest stays
+			// due and is claimed by the normal path, which applies the unique
+			// occurrence key plus overlap and autoStart gates.
+			if err = r.skipRoutineOccurrences(d, first, count-1, routineReasonBacklog, last); err != nil {
+				return
+			}
 			continue
 		}
 		if err = r.skipRoutineOccurrences(d, first, count, routineReasonDowntime, next); err != nil {
@@ -1798,6 +1892,11 @@ func (r *Relay) claimRoutineOccurrence(routineID string, source string, replay b
 	} else if source != routineSourceManual && !d.AutoStart {
 		state = routineRunSkipped
 		reason = routineReasonAutoStart
+	}
+	if state == routineRunClaimed {
+		if blocked := r.routinePreflightLocked(d, source); blocked != "" {
+			state, reason = routineRunSkipped, blocked
+		}
 	}
 	record := routineRunRecord{ID: randomID(), RoutineID: d.ID, Revision: d.Revision, ScheduledAt: routineTime(last), Source: source, State: state, Reason: reason, Steps: []routineStep{}, TaskIDs: []string{}, CreatedAt: routineTime(now()), UpdatedAt: routineTime(now())}
 	record.Definition = &d
@@ -1880,4 +1979,40 @@ func (r *Relay) failRoutineRun(runID string, reason string) (routineRunRecord, e
 		return record, err
 	}
 	return record, nil
+}
+
+// routinePreflightLocked checks, before any tokens are spent, that every
+// profile a routine would run is allowed and able to run now. It returns a
+// skip reason, or "" when the run may be admitted. Caller holds relay ownership.
+//
+//	policy_blocked      the profile is gone, or unattended work targets an unrestricted profile
+//	runtime_unavailable the restricted harness has no proven confinement on this installation
+//	needs_auth          the Direct API connection is missing, disabled or its credential is unreadable
+func (r *Relay) routinePreflightLocked(d routineDefinition, source string) string {
+	for _, id := range r.routineProfileIDs(d) {
+		profile, err := r.profile(id)
+		if err != nil {
+			return routineReasonPolicy
+		}
+		if source != routineSourceManual && !profile.Restricted() {
+			return routineReasonPolicy
+		}
+		if profile.Restricted() {
+			if r.restrictedNativeBlocked(profile.Binding.Harness) != nil {
+				return routineReasonRuntime
+			}
+		}
+		if profile.Binding.Harness == "openai" {
+			_, refs, err := r.profileConnectionLocked(profile.Binding, true)
+			if err != nil {
+				return routineReasonNeedsAuth
+			}
+			for _, ref := range refs {
+				if _, err = r.secretRecordVersionLocked(context.Background(), ref); err != nil {
+					return routineReasonNeedsAuth
+				}
+			}
+		}
+	}
+	return ""
 }

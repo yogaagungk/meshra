@@ -33,7 +33,8 @@ runs without a shell, with optional locks, external diffs, text conversions and
 filesystem-monitor commands disabled. Git output is capped at 256 KiB, with a
 five-second timeout. No file writes, terminal, commit or push endpoint is added.
 
-Workspace browsing containment is not an OS sandbox for native AI tooling.
+Profiles are either restricted (broker-only) or trusted (native full access); see
+`security.md`. Workspace browsing containment is not an OS sandbox for native AI tooling.
 The existing read-oriented harness policies still apply. A project containing
 native hooks/MCP/plugin configuration may be rejected by the isolated adapter.
 Individual user permissions and stronger native execution isolation are separate

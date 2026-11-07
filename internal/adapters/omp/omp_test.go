@@ -61,7 +61,11 @@ func TestOMPTransportHelper(t *testing.T) {
 			}
 		}
 	}
-	session := "native-" + filepath.Base(filepath.Dir(dir))[:12]
+	owner := filepath.Base(filepath.Dir(dir))
+	if len(owner) > 12 {
+		owner = owner[:12]
+	}
+	session := "native-" + owner
 	if resumed != "" {
 		session = resumed
 	}

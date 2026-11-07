@@ -82,6 +82,15 @@ const EXECUTION_CAPABILITIES: Record<string, true> = {
   externalMcp: true,
 };
 
+function modeDescription(p: { executionMode: string; modeReviewed?: boolean }) {
+  if (p.executionMode === "restricted") {
+    return "Restricted: only Meshra's brokered tools. Eligible for external and unattended work.";
+  }
+  return p.modeReviewed
+    ? "Trusted: native tools run with your full host access. Never used for external or unattended work."
+    : "Created before execution modes existed. Native tools run with your full host access. Review and choose a mode; external routes and routines are blocked until this profile is restricted.";
+}
+
 const EMPTY_CAPABILITIES: ProfileCapabilities = {
   workspaceRead: false,
   workspaceWrite: false,
@@ -205,6 +214,16 @@ export function Profiles() {
                   ?.name || profile.workspaceId || "No workspace"}
               </p>
               <div className="agent-card-details">
+                <span
+                  className={`mode-badge mode-${profile.executionMode}`}
+                  title={modeDescription(profile)}
+                >
+                  {profile.executionMode === "restricted"
+                    ? "Restricted"
+                    : profile.modeReviewed
+                      ? "Trusted · full access"
+                      : "Trusted · needs review"}
+                </span>
                 <span>{profile.binding.harness}</span>
                 {profile.binding.config.model && (
                   <span>{profile.binding.config.model}</span>
@@ -296,6 +315,8 @@ function ProfileDialog({
   const [capabilities, setCapabilities] = useState<ProfileCapabilities>(
     { ...EMPTY_CAPABILITIES },
   );
+  const [executionMode, setExecutionMode] = useState<"restricted" | "trusted">("restricted");
+  const [acknowledgeTrusted, setAcknowledgeTrusted] = useState(false);
   const [allowed, setAllowed] = useState<string[]>([]);
   const [memoryWriteApproval, setMemoryWriteApproval] = useState<"off" | "on">("off");
   const [maxToolCalls, setMaxToolCalls] = useState("");
@@ -466,12 +487,14 @@ function ProfileDialog({
   async function save(e: FormEvent) {
     e.preventDefault();
     if (busy || bindingChanged || !formValid || !policyReviewed) return;
+    if (!savedProfile && executionMode === "trusted" && !acknowledgeTrusted) return;
     setBusy(true);
     setError(null);
     const session = lifecycle.current;
     try {
       await automation("profiles.save", {
         ...(savedProfile ? { id: savedProfile.id, expectedRevision: savedProfile.revision } : {}),
+        ...(savedProfile ? {} : { executionMode, acknowledgeTrusted: executionMode === "trusted" && acknowledgeTrusted }),
         name: name.trim(),
         instructions,
         workspaceId,
@@ -693,6 +716,16 @@ function ProfileDialog({
             <input id="profile-max-tool-calls" type="number" min={0} max={1000} step={1} value={maxToolCalls} onChange={(e) => setMaxToolCalls(e.target.value)} placeholder="40 (default)" />
             <small className="muted">Leave empty or enter 0 to use the default of 40. Maximum: 1000.</small>
           </>}
+          <ExecutionModeSection
+            profile={savedProfile ?? undefined}
+            mode={executionMode}
+            onMode={setExecutionMode}
+            acknowledged={acknowledgeTrusted}
+            onAcknowledged={setAcknowledgeTrusted}
+            busy={busy}
+            onChanged={async () => { await client.invalidateQueries({ queryKey: ["profiles"] }); onClose(); }}
+            onError={setError}
+          />
           <section className="automation-card" aria-label="Provider and policy disclosure">
             <strong>Provider and policy disclosure</strong>
             <p>
@@ -704,7 +737,8 @@ function ProfileDialog({
             <p className="muted">
               Profile instructions, submitted messages, selected attachments and granted context can reach this provider.
               Conversation history is bounded; a provider switch requires a separate disclosure below.
-              Capabilities authorize Meshra's brokered tools, not unrestricted native tools or access to your desktop.
+              In restricted mode capabilities are the only authority. In trusted mode Claude and OMP also run their own native
+              file, shell and network tools with your full host access, outside these capabilities.
               Saving does not start a binding, grant network access, bind MCP tools, or approve an action.
               Approvals, authentication and human takeover stay in this console.
             </p>
@@ -1159,5 +1193,95 @@ function ProfileGeneration({
       )}
       {error && <Notice>{error}</Notice>}
     </details>
+  );
+}
+
+
+function ExecutionModeSection({ profile, mode, onMode, acknowledged, onAcknowledged, busy, onChanged, onError }: {
+  profile?: Profile;
+  mode: "restricted" | "trusted";
+  onMode: (m: "restricted" | "trusted") => void;
+  acknowledged: boolean;
+  onAcknowledged: (v: boolean) => void;
+  busy: boolean;
+  onChanged: () => Promise<void>;
+  onError: (e: Error) => void;
+}) {
+  const [target, setTarget] = useState<"restricted" | "trusted">(
+    profile?.executionMode === "restricted" ? "trusted" : "restricted",
+  );
+  const [ack, setAck] = useState(false);
+  const [working, setWorking] = useState(false);
+  async function change() {
+    if (!profile || working) return;
+    setWorking(true);
+    try {
+      await automation("profiles.setMode", {
+        id: profile.id,
+        expectedRevision: profile.revision,
+        mode: target,
+        acknowledgeTrusted: target === "trusted" && ack,
+      });
+      await onChanged();
+    } catch (e) {
+      onError(e as Error);
+    } finally {
+      setWorking(false);
+    }
+  }
+  if (profile) {
+    return (
+      <section className="automation-card" aria-label="Execution mode">
+        <strong>Execution mode: {profile.executionMode}{!profile.modeReviewed && " (not yet reviewed)"}</strong>
+        <p>{modeDescription(profile)}</p>
+        <p className="muted">
+          Source of authority: operator decision{profile.modeReviewed ? "" : " pending (legacy profile)"}. Changing mode needs
+          no outstanding work and restarts this profile's native sessions; history is kept.
+        </p>
+        <label>
+          Change to{" "}
+          <select value={target} onChange={(e) => setTarget(e.target.value as "restricted" | "trusted")}>
+            <option value="restricted">Restricted (broker-only)</option>
+            <option value="trusted">Trusted (full native access)</option>
+          </select>
+        </label>
+        {target === "trusted" && (
+          <label className="automation-check">
+            <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+            I understand native tools run with my full host access and this profile will not serve external or unattended work.
+          </label>
+        )}
+        <button
+          type="button"
+          disabled={working || busy || (target === "trusted" && !ack) || (target === profile.executionMode && !!profile.modeReviewed)}
+          onClick={change}
+        >
+          {working ? "Changing…" : "Apply mode"}
+        </button>
+      </section>
+    );
+  }
+  return (
+    <section className="automation-card" aria-label="Execution mode">
+      <strong>Execution mode</strong>
+      <label>
+        <input type="radio" name="mode" checked={mode === "restricted"} onChange={() => onMode("restricted")} /> Restricted
+        (default): only Meshra's brokered tools; may serve external and unattended work.
+      </label>
+      <label>
+        <input type="radio" name="mode" checked={mode === "trusted"} onChange={() => onMode("trusted")} /> Trusted: native
+        tools run with your full host access.
+      </label>
+      {mode === "trusted" && (
+        <label className="automation-check">
+          <input type="checkbox" checked={acknowledged} onChange={(e) => onAcknowledged(e.target.checked)} />
+          I understand this is not sandboxed and this profile will never serve external or unattended work.
+        </label>
+      )}
+      <p className="muted">
+        Claude and OMP restricted mode is unavailable until native-process confinement is proven on this machine; Direct API
+        profiles are always eligible.
+      </p>
+    </section>
   );
 }

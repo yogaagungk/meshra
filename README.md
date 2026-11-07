@@ -165,7 +165,7 @@ Outbound policies are deny-by-default. Agents need permitted operations and exac
 - One active turn per identity and at most 32 globally. Busy destinations queue; offline destinations use bounded jittered delivery checks until explicitly started, exhausted, or expired.
 - All Meshra turns sharing a Git repository root serialize. Use distinct repositories/worktrees for independent work; external programs are not covered by this advisory lock.
 - Idempotency keys deduplicate admission. **No exactly-once execution claim.**
-- Shutdown/restart preserves queued work. Interrupted executions become explicit uncertain failures, never automatic replays. Start agents again, inspect external effects, and deliberately retry when safe.
+- Shutdown/restart preserves queued work. Interrupted executions become explicit uncertain failures, never automatic replays. Start agents again, inspect external effects (console Automation → Effects, or `meshra effects --status uncertain`), and deliberately retry when safe.
 - Task deadlines include queue time. `meshra task cancel TASK_ID` requests termination, not rollback.
 - Harness failure or interruption puts that agent in `error`, preserving other queued tasks. Inspect the error, `agent restart`, then explicitly retry the failed/interrupted task if appropriate. This also avoids reusing stdio runtimes closed during cancellation.
 - Replies remain persisted if their origin stops. They are never silently injected into another active session.
@@ -244,10 +244,17 @@ admissions are never automatically retried by the console client.
   actions. Flow tasks retain their routine source and actual parent dependencies;
   deferred binding reservations hold policy/provider changes until settlement.
 
-Profile execution requires a verified broker-only transport; an unverified
-native transport leaves queued work visible with an actionable binding error
-rather than exposing its legacy native tools. Existing named-agent and
-disposable direct-chat workflows keep their current policy.
+Profiles have an execution mode. **Restricted** (default) allows only Meshra's
+brokered tools and is the only mode that may serve connector, routine or webhook
+work; it is available for Direct API profiles. For Claude and OMP it is
+unavailable until native-process confinement is proven on this installation and
+fails closed. **Trusted** keeps today's native full-access behavior (Claude
+`bypassPermissions`, OMP `--approval-mode=yolo`), needs an explicit
+acknowledgment, and is not sandboxed. Profiles created before modes existed are
+shown as trusted and unreviewed; their enabled external routes and routines are
+disabled for review at startup, keeping accepted work. See `docs/security.md`.
+Existing named-agent and disposable direct-chat workflows keep their current
+policy.
 
 OMP profile automation is pinned to `omp/18.12.1` protocol v2 and checks the exact
 host-tool roster before a prompt. Claude checks SDK `0.3.303`, native Claude Code
@@ -293,7 +300,7 @@ Optional model/provider overrides are documented in [adapters.md](docs/adapters.
 - **Already owned:** another daemon holds that state directory; use it or stop it cleanly. A dead process releases the OS lock; do not delete SQLite/WAL files to force recovery.
 - **Harness not found / model unavailable:** install the documented version, authenticate through native tooling, and launch the daemon from that environment.
 - **Queued:** inspect agent state, `nextAttemptAt`, `deliveryAttempts`, and deadline. Start/restart the exact destination before delivery exhaustion. A running conflicting repository turn keeps the shared lock; nested requests must not wait indefinitely while holding it.
-- **Approval required:** legacy native execution stays denied. Profile write/command actions require explicit capability enablement, a ready confined runtime and a one-call console approval; applying host changes is a separate reviewed manifest decision. Missing confinement remains an error, never a reason to enable bypass approvals.
+- **Approval required:** legacy native execution stays denied in broker flows. Profile write/command actions require explicit capability enablement, a ready confined runtime and a one-call console approval; applying host changes is a separate reviewed manifest decision. Missing confinement remains an error, never a reason to enable bypass approvals.
 - **After WSL shutdown:** restart the daemon and agents; queued tasks remain. Inspect uncertain failed turns before retrying.
 - Keep state on the WSL Linux filesystem, not a shared Windows mount with different locking/permission semantics. Idle relay and spawned harness footprints are separate; see measured resource evidence.
 

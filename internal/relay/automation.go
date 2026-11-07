@@ -45,7 +45,7 @@ func (r *Relay) Automation(ctx context.Context, p model.Principal, operation str
 		return nil, model.Err(403, "routine credentials may only run their granted routines")
 	}
 	switch operation {
-	case "profiles.list", "profiles.get", "profiles.save", "profiles.archive":
+	case "profiles.list", "profiles.get", "profiles.save", "profiles.archive", "profiles.setMode":
 		return r.profileStoreOperation(p, operation, payload)
 	case "profiles.createConversation", "profiles.conversations", "profiles.bindingAction", "profiles.switch", "profiles.switchPreview", "profiles.generate", "profiles.generationDraft":
 		return r.profileContinuityOperation(ctx, p, operation, payload)
@@ -93,6 +93,11 @@ func (r *Relay) Automation(ctx context.Context, p model.Principal, operation str
 		return r.connectorOperation(ctx, p, operation, payload)
 	case "browser.open", "browser.state", "browser.sessions", "browser.takeover", "browser.release", "browser.input", "browser.close", "browser.clearData":
 		return r.browserOperation(ctx, p, operation, payload)
+	case "effects.list":
+		if err := requireAdmin(p); err != nil {
+			return nil, err
+		}
+		return r.effectsList(ctx, payload)
 	case "approvals.list", "approvals.decide", "questions.answer":
 		return r.approvalOperation(ctx, p, operation, payload)
 	}

@@ -97,6 +97,13 @@ func Start(ctx context.Context, binary string, args []string, cwd string, env []
 	})
 }
 
+// StartPrepared runs an already sealed command (for example a confined worker).
+// The caller owns containment: this neither sets a process group nor rewrites
+// the command, and termination is the caller's kill function.
+func StartPrepared(ctx context.Context, cmd *exec.Cmd, launch, wait, terminate func() error) (*Process, error) {
+	return start(ctx, cmd, launch, wait, terminate)
+}
+
 func start(ctx context.Context, cmd *exec.Cmd, launch, wait, terminate func() error) (*Process, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

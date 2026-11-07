@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"os/exec"
 	"time"
 )
 
@@ -36,6 +37,11 @@ type CreateAgent struct {
 }
 type Agent struct {
 	ToolDefinitions []ToolDefinition `json:"-"`
+	// Restricted marks a profile-managed runtime that may only run inside an OS
+	// confined worker. An adapter must refuse to run it without Confined; there
+	// is no host fallback.
+	Restricted bool             `json:"-"`
+	Confined   ConfinedLauncher `json:"-"`
 	GenerationDraft bool             `json:"generationDraft,omitempty"`
 	ProfileManaged  bool             `json:"profileManaged,omitempty"`
 	ManagedChat     bool             `json:"managedChat,omitempty"`
@@ -223,3 +229,28 @@ type Error struct {
 
 func (e *Error) Error() string             { return e.Message }
 func Err(status int, message string) error { return &Error{status, message} }
+
+// ConfinedLauncher prepares the native harness bridge inside an OS-confined
+// worker. toolSocket is the host path of the scoped broker endpoint; the
+// launcher mounts it read-only at ConfinedProcess.ToolSocket.
+// NativeLauncher confines a native harness binary whose command line the
+// adapter owns (restricted OMP). provider names the model provider so the
+// launcher can bind exactly one reviewed credential and egress origin.
+type NativeLauncher interface {
+	LaunchNative(ctx context.Context, provider string, args []string) (*ConfinedProcess, error)
+}
+
+type ConfinedLauncher interface {
+	Launch(ctx context.Context, toolSocket string) (*ConfinedProcess, error)
+}
+
+// ConfinedProcess is a prepared, not yet started confined command. The adapter
+// must not alter its process attributes, environment or directory.
+type ConfinedProcess struct {
+	Cmd        *exec.Cmd
+	Start      func() error
+	Wait       func() error
+	Close      func() error
+	Cwd        string
+	ToolSocket string
+}

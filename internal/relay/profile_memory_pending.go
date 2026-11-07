@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"strings"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -24,19 +25,46 @@ type pendingProfileMemory struct {
 	CreatedAt        string `json:"createdAt"`
 }
 
+// normalizeMemory makes duplicate detection insensitive to case and whitespace.
+func normalizeMemory(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}
+
+// checkProfileMemoryBounds applies identical duplicate and size rules whether
+// review is on or off and whether the writer is an operator or a model. Existing
+// over-limit data is never discarded: an edit that does not grow the memory is
+// always allowed so it can be corrected.
 func (r *Relay) checkProfileMemoryBounds(m profileMemory, reviewing string) error {
-	var duplicate bool
-	if err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM profile_memories WHERE profile_id=? AND scope=? AND coalesce(conversation_id,'')=? AND content=? AND id<>?) OR EXISTS(SELECT 1 FROM profile_memory_pending WHERE profile_id=? AND conversation_id=? AND content=? AND id<>?)`, m.ProfileID, m.Scope, m.ConversationID, m.Content, m.ID, m.ProfileID, m.ConversationID, m.Content, reviewing).Scan(&duplicate); err != nil {
+	want := normalizeMemory(m.Content)
+	rows, err := r.db.Query(`SELECT content FROM profile_memories WHERE profile_id=? AND scope=? AND coalesce(conversation_id,'')=? AND id<>?
+ UNION ALL SELECT content FROM profile_memory_pending WHERE profile_id=? AND conversation_id=? AND id<>?`, m.ProfileID, m.Scope, m.ConversationID, m.ID, m.ProfileID, m.ConversationID, reviewing)
+	if err != nil {
 		return err
 	}
-	if duplicate {
-		return model.Err(409, "duplicate memory; consolidate existing memories instead")
+	for rows.Next() {
+		var existing string
+		if err = rows.Scan(&existing); err != nil {
+			rows.Close()
+			return err
+		}
+		if normalizeMemory(existing) == want {
+			rows.Close()
+			return model.Err(409, "duplicate memory; consolidate existing memories instead")
+		}
 	}
-	var total int
-	if err := r.db.QueryRow(`SELECT coalesce(sum(length(CAST(content AS BLOB))),0) FROM profile_memories WHERE profile_id=? AND id<>?`, m.ProfileID, m.ID).Scan(&total); err != nil {
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
 		return err
 	}
-	if total+len(m.Content) > profileMemoryBudget {
+	var total, previous int
+	if err = r.db.QueryRow(`SELECT coalesce(sum(length(CAST(content AS BLOB))),0) FROM profile_memories WHERE profile_id=? AND id<>?`, m.ProfileID, m.ID).Scan(&total); err != nil {
+		return err
+	}
+	if m.ID != "" {
+		_ = r.db.QueryRow(`SELECT length(CAST(content AS BLOB)) FROM profile_memories WHERE profile_id=? AND id=?`, m.ProfileID, m.ID).Scan(&previous)
+	}
+	if total+len(m.Content) > profileMemoryBudget && !(previous > 0 && len(m.Content) <= previous) {
 		return model.Err(429, "profile memory byte budget reached; consolidate existing memories")
 	}
 	return nil
